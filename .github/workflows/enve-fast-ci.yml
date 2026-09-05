@@ -22,18 +22,16 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Install Hermetic enve Binary
+      - name: Install Hermetic enve Binary from R2 Bucket
         shell: bash
         env:
-          GH_TOKEN: ${{ secrets.ENVE_TOKEN }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
         run: |
-          if command -v gh >/dev/null 2>&1; then
-            gh release download v0.5.0 --repo tonky/enve -p "*x86_64*linux-gnu.tar.gz" --output /tmp/enve.tar.gz
-          else
-            ASSET_URL=$(curl -sL -H "Authorization: token $GH_TOKEN" https://api.github.com/repos/tonky/enve/releases/tags/v0.5.0 | jq -r '.assets[] | select(.name | test("x86_64.*linux-gnu.tar.gz")) | .url')
-            curl -sL -H "Authorization: token $GH_TOKEN" -H "Accept: application/octet-stream" "$ASSET_URL" -o /tmp/enve.tar.gz
-          fi
-          sudo tar -xzf /tmp/enve.tar.gz -C /usr/local/bin
+          python3 scripts/fetch_enve.py /tmp/enve
+          sudo mv /tmp/enve /usr/local/bin/enve
           sudo chmod +x /usr/local/bin/enve
           enve --version
 
@@ -338,18 +336,16 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Install Hermetic enve Binary
+      - name: Install Hermetic enve Binary from R2 Bucket
         shell: bash
         env:
-          GH_TOKEN: ${{ secrets.ENVE_TOKEN }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
         run: |
-          if command -v gh >/dev/null 2>&1; then
-            gh release download v0.5.0 --repo tonky/enve -p "*x86_64*linux-gnu.tar.gz" --output /tmp/enve.tar.gz
-          else
-            ASSET_URL=$(curl -sL -H "Authorization: token $GH_TOKEN" https://api.github.com/repos/tonky/enve/releases/tags/v0.5.0 | jq -r '.assets[] | select(.name | test("x86_64.*linux-gnu.tar.gz")) | .url')
-            curl -sL -H "Authorization: token $GH_TOKEN" -H "Accept: application/octet-stream" "$ASSET_URL" -o /tmp/enve.tar.gz
-          fi
-          sudo tar -xzf /tmp/enve.tar.gz -C /usr/local/bin
+          python3 scripts/fetch_enve.py /tmp/enve
+          sudo mv /tmp/enve /usr/local/bin/enve
           sudo chmod +x /usr/local/bin/enve
           enve --version
 
@@ -571,19 +567,18 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Install Hermetic enve Binary
+      - name: Install Hermetic enve Binary from R2 Bucket
         shell: bash
         env:
-          GH_TOKEN: ${{ secrets.ENVE_TOKEN }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
         run: |
-          if command -v gh >/dev/null 2>&1; then
-            gh release download v0.5.0 --repo tonky/enve -p "*x86_64*linux-gnu.tar.gz" --output /tmp/enve.tar.gz
-          else
-            ASSET_URL=$(curl -sL -H "Authorization: token $GH_TOKEN" https://api.github.com/repos/tonky/enve/releases/tags/v0.5.0 | jq -r '.assets[] | select(.name | test("x86_64.*linux-gnu.tar.gz")) | .url')
-            curl -sL -H "Authorization: token $GH_TOKEN" -H "Accept: application/octet-stream" "$ASSET_URL" -o /tmp/enve.tar.gz
-          fi
-          sudo tar -xzf /tmp/enve.tar.gz -C /usr/local/bin
+          python3 scripts/fetch_enve.py /tmp/enve
+          sudo mv /tmp/enve /usr/local/bin/enve
           sudo chmod +x /usr/local/bin/enve
+          enve --version
 
       - name: Install sqlx-cli
         shell: bash
