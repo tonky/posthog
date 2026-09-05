@@ -83,6 +83,46 @@ jobs:
           echo "✅ Complete data tier DAG planned in ${DURATION_MS}ms (vs ~204,100ms upstream Docker)!"
           echo "::endgroup::"
 
+      - name: Live Microservice Boot & Socket Verification (Real Redis)
+        shell: bash
+        run: |
+          echo "::group::Live Process Spawn & TCP Verification"
+          python3 -c '
+          import subprocess, time, socket
+
+          start = time.time()
+          proc = subprocess.Popen(["enve", "up", "redis"])
+
+          ready = False
+          resp = b""
+          for _ in range(100):
+              time.sleep(0.02)
+              s = socket.socket()
+              s.settimeout(0.1)
+              try:
+                  s.connect(("127.0.0.1", 16379))
+                  s.sendall(b"PING\r\n")
+                  resp = s.recv(1024)
+                  if b"+PONG" in resp:
+                      ready = True
+                      s.close()
+                      break
+              except Exception:
+                  pass
+              finally:
+                  s.close()
+
+          elapsed = time.time() - start
+          proc.terminate()
+          proc.wait()
+          subprocess.run(["enve", "down"])
+
+          print(f"✅ LIVE SERVICE BOOT: socket ready={ready}, response={resp.strip().decode()}, elapsed={elapsed*1000:.1f}ms")
+          if not ready:
+              exit(1)
+          '
+          echo "::endgroup::"
+
   # ---------------------------------------------------------------------------
   # 3. HERMETIC DEV SETUP (Direct comparison to ci-dev-setup / Flox)
   # ---------------------------------------------------------------------------
