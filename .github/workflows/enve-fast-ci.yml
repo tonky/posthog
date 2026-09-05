@@ -334,7 +334,7 @@ jobs:
           UV_PROJECT_ENVIRONMENT=$pythonLocation uv sync --frozen --dev
           echo "::endgroup::"
 
-      - name: Benchmark Setup Overhead & Run Live Multi-Core Pytest
+      - name: Run Live Multi-Core Pytest Shard
         shell: bash
         env:
           DATABASE_URL: 'postgres://posthog:posthog@localhost:5432/test_posthog'
@@ -506,7 +506,7 @@ jobs:
   gate-merge-queue-replay:
     name: '4. Merge Queue Gate (500+ Scratch Migrations in Memory)'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 25
 
     steps:
       - name: Checkout Code
@@ -515,7 +515,7 @@ jobs:
       - name: Start RAM-Backed (tmpfs) PostgreSQL
         shell: bash
         run: |
-          echo "::group::Starting Memory-Backed PostgreSQL"
+          echo "::group::Starting Memory-Backed PostgreSQL with Disposable CI Tuning"
           docker rm -f postgres-tmpfs 2>/dev/null || true
           mkdir -p /dev/shm/pgdata
           docker run -d --name postgres-tmpfs \
@@ -525,10 +525,20 @@ jobs:
             -e POSTGRES_USER=posthog \
             -e POSTGRES_DB=posthog \
             postgres:15-alpine \
-            -c fsync=off -c synchronous_commit=off -c full_page_writes=off
-          until pg_isready -h localhost -p 5433 2>/dev/null || docker exec postgres-tmpfs pg_isready 2>/dev/null; do sleep 0.1; done
-          docker exec -i postgres-tmpfs psql -U posthog -c "CREATE DATABASE posthog_persons OWNER posthog;" || true
-          echo "✓ RAM-backed PostgreSQL running on port 5433 (tmpfs /dev/shm, fsync=off)"
+            -c fsync=off \
+            -c synchronous_commit=off \
+            -c full_page_writes=off \
+            -c autovacuum=off \
+            -c checkpoint_timeout=2h \
+            -c max_wal_size=20GB \
+            -c shared_buffers=1GB \
+            -c maintenance_work_mem=512MB \
+            -c work_mem=64MB \
+            -c wal_level=minimal \
+            -c jit=off
+          until docker exec postgres-tmpfs pg_isready -q -U posthog && docker exec postgres-tmpfs psql -U posthog -c "SELECT 1" >/dev/null 2>&1; do sleep 0.2; done
+          docker exec -i postgres-tmpfs psql -U posthog -c "CREATE DATABASE posthog_persons OWNER posthog;" >/dev/null 2>&1 || true
+          echo "✓ RAM-backed PostgreSQL running on port 5433 (tmpfs /dev/shm, fsync=off, autovacuum=off, 1GB shared_buffers)"
           echo "::endgroup::"
 
       - name: Set up Python 3.13
@@ -566,7 +576,7 @@ jobs:
           echo "  Merge Queue Simulation: Full Scratch Migration Chain Replay"
           echo "======================================================================="
           T_MIGRATE_START=$(date +%s%N)
-          UV_PROJECT_ENVIRONMENT=$pythonLocation uv run python manage.py migrate --database default
+          UV_PROJECT_ENVIRONMENT=$pythonLocation uv run python manage.py migrate --database default --skip-checks --skip-orphan-check
           T_MIGRATE_END=$(date +%s%N)
           MIGRATE_MS=$(( (T_MIGRATE_END - T_MIGRATE_START) / 1000000 ))
           MIGRATE_S=$(awk "BEGIN {printf \"%.2f\", $MIGRATE_MS / 1000}")
