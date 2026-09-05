@@ -27,7 +27,8 @@ jobs:
           echo "::group::Installing enve v0.5.0"
           START_TIME=$(date +%s%N)
           gh release download v0.5.0 --repo tonky/enve -p "*x86_64*linux-gnu.tar.gz" --output /tmp/enve.tar.gz
-          sudo tar -xzf /tmp/enve.tar.gz -C /usr/local/bin enve
+          sudo tar -xzf /tmp/enve.tar.gz -C /usr/local/bin
+          sudo chmod +x /usr/local/bin/enve
           END_TIME=$(date +%s%N)
           DURATION_MS=$(( (END_TIME - START_TIME) / 1000000 ))
           echo "✅ enve binary installed in ${DURATION_MS}ms"
