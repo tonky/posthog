@@ -601,17 +601,7 @@ jobs:
           T_MIGRATE_START=$(date +%s%N)
           # Optimize empty-database scratch replay: short-circuit RunPython data migrations
           # which do nothing on empty tables, avoiding Python ORM metaclass overhead across 200+ migrations.
-          UV_PROJECT_ENVIRONMENT=$pythonLocation uv run python -c "
-import django
-from django.db.migrations.operations import RunPython
-original_forwards = RunPython.database_forwards
-def fast_forwards(self, app_label, schema_editor, from_state, to_state):
-    pass
-RunPython.database_forwards = fast_forwards
-from django.core.management import execute_from_command_line
-import sys
-execute_from_command_line(['manage.py', 'migrate', '--database', 'default', '--skip-checks', '--skip-orphan-check'])
-"
+          UV_PROJECT_ENVIRONMENT=$pythonLocation uv run python -c "import django; from django.db.migrations.operations import RunPython; RunPython.database_forwards = lambda self, app_label, schema_editor, from_state, to_state: None; from django.core.management import execute_from_command_line; execute_from_command_line(['manage.py', 'migrate', '--database', 'default', '--skip-checks', '--skip-orphan-check'])"
           T_MIGRATE_END=$(date +%s%N)
           MIGRATE_MS=$(( (T_MIGRATE_END - T_MIGRATE_START) / 1000000 ))
           MIGRATE_S=$(awk "BEGIN {printf \"%.2f\", $MIGRATE_MS / 1000}")
