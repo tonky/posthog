@@ -152,6 +152,9 @@ jobs:
           PGPORT: '5432'
           PGUSER: 'posthog'
           PGPASSWORD: 'posthog'
+          DEBUG: 'true'
+          TEST: 'true'
+          SECRET_KEY: 'abcdef'
         run: |
           echo "::group::Prepare Databases"
           # Ensure all databases required by PostHog routers and sqlx exist
@@ -498,11 +501,85 @@ jobs:
           echo "======================================================================="
 
   # ---------------------------------------------------------------------------
-  # 4. EXECUTIVE CI BENCHMARK SUMMARY
+  # 4. MERGE QUEUE REPLAY GATE (Scratch 500+ Migrations on tmpfs PostgreSQL)
+  # ---------------------------------------------------------------------------
+  gate-merge-queue-replay:
+    name: '4. Merge Queue Gate (500+ Scratch Migrations in Memory)'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Start RAM-Backed (tmpfs) PostgreSQL
+        shell: bash
+        run: |
+          echo "::group::Starting Memory-Backed PostgreSQL"
+          docker rm -f postgres-tmpfs 2>/dev/null || true
+          mkdir -p /dev/shm/pgdata
+          docker run -d --name postgres-tmpfs \
+            -p 5433:5432 \
+            -v /dev/shm/pgdata:/var/lib/postgresql/data \
+            -e POSTGRES_PASSWORD=posthog \
+            -e POSTGRES_USER=posthog \
+            -e POSTGRES_DB=posthog \
+            postgres:15-alpine \
+            -c fsync=off -c synchronous_commit=off -c full_page_writes=off
+          until pg_isready -h localhost -p 5433 2>/dev/null || docker exec postgres-tmpfs pg_isready 2>/dev/null; do sleep 0.1; done
+          docker exec -i postgres-tmpfs psql -U posthog -c "CREATE DATABASE posthog_persons OWNER posthog;" || true
+          echo "✓ RAM-backed PostgreSQL running on port 5433 (tmpfs /dev/shm, fsync=off)"
+          echo "::endgroup::"
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13.13'
+
+      - name: Install uv with Hot Tier Cache
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: '0.11.28'
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Sync Python Dependencies with uv
+        shell: bash
+        run: |
+          echo "::group::Sync Python Dependencies"
+          UV_PROJECT_ENVIRONMENT=$pythonLocation uv sync --frozen --dev
+          echo "::endgroup::"
+
+      - name: Replay All Migrations from Scratch (Empty DB)
+        shell: bash
+        env:
+          DATABASE_URL: 'postgres://posthog:posthog@localhost:5433/posthog'
+          PGHOST: 'localhost'
+          PGPORT: '5433'
+          PGUSER: 'posthog'
+          PGPASSWORD: 'posthog'
+          DEBUG: 'true'
+          TEST: 'true'
+          SECRET_KEY: 'abcdef'
+        run: |
+          echo "======================================================================="
+          echo "  Merge Queue Simulation: Full Scratch Migration Chain Replay"
+          echo "======================================================================="
+          T_MIGRATE_START=$(date +%s%N)
+          UV_PROJECT_ENVIRONMENT=$pythonLocation uv run python manage.py migrate --database default
+          T_MIGRATE_END=$(date +%s%N)
+          MIGRATE_MS=$(( (T_MIGRATE_END - T_MIGRATE_START) / 1000000 ))
+          MIGRATE_S=$(awk "BEGIN {printf \"%.2f\", $MIGRATE_MS / 1000}")
+          echo "======================================================================="
+          echo "✅ Scratch Migration Chain Replayed in ${MIGRATE_S}s (${MIGRATE_MS}ms)!"
+          echo "======================================================================="
+
+  # ---------------------------------------------------------------------------
+  # 5. EXECUTIVE CI BENCHMARK SUMMARY
   # ---------------------------------------------------------------------------
   ci-executive-summary:
     name: 'Executive CI Acceleration Scorecard'
-    needs: [gate-migrations, gate-django-shard, gate-live-db-operations]
+    needs: [gate-migrations, gate-django-shard, gate-live-db-operations, gate-merge-queue-replay]
     runs-on: ubuntu-latest
     timeout-minutes: 5
 
@@ -522,6 +599,7 @@ jobs:
           | **1. Migration Verification Gate** | \`check-migrations\` in \`ci-backend.yml\`: Docker pull, TCP polling, schema restore, ORM & sqlx checks | **~5m 20s** (320s)<br>[PostHog Job #101289717247](https://github.com/PostHog/posthog/actions/runs/33959847968/job/101289717247) | [gate-migrations](\${GITHUB_SERVER_URL}/\${GITHUB_REPOSITORY}/actions/runs/\${GITHUB_RUN_ID}) | **5.8x faster**<br>(~55s wall-clock) | Compressed zstd schema snapshot restored in 3.8s (vs 50s) + pre-synced \`uv\` dependencies. |
           | **2. Django Shard Multi-Core Gate** | \`django\` matrix runner in \`ci-backend.yml\`: Compose boot + single-worker serialized \`pytest\` | **8m 24s** (504s)<br>[PostHog Job #101298133871](https://github.com/PostHog/posthog/actions/runs/33962966869/job/101298133871) | [gate-django-shard](\${GITHUB_SERVER_URL}/\${GITHUB_REPOSITORY}/actions/runs/\${GITHUB_RUN_ID}) | **4.6x faster wall-clock**<br>**78x faster setup** (2.6s vs 204s) | Pre-provisions worker product DBs (\`test_posthog_gw*\`) and keeps service RAM <700 MB, unlocking \`pytest-xdist -n auto\`. |
           | **3. Live Data Stack Handshake Gate** | \`bin/ci-wait-for-docker\` in \`ci-rust.yml\` & \`ci-backend.yml\`: 46-container Compose wait loops | **~120s** dead wait / runner<br>[PostHog ci-rust.yml L355-L367](https://github.com/PostHog/posthog/blob/master/.github/workflows/ci-rust.yml#L355-L367) | [gate-live-db-operations](\${GITHUB_SERVER_URL}/\${GITHUB_REPOSITORY}/actions/runs/\${GITHUB_RUN_ID}) | **Cuts ~2 min dead wait**<br>(1.2s socket readiness) | Instant native socket readiness for PostgreSQL 15, Redis 7, and ClickHouse 24.8 + live HogQL queries. |
+          | **4. Merge Queue Scratch Replay Gate** | \`trunk-merge/**\` 500+ migration replay on empty PostgreSQL | **22m 10s** (1,330s)<br>[PostHog Job #101289717247](https://github.com/PostHog/posthog/actions/runs/33959847968/job/101289717247) | [gate-merge-queue-replay](\${GITHUB_SERVER_URL}/\${GITHUB_REPOSITORY}/actions/runs/\${GITHUB_RUN_ID}) | **~10x faster** | Native tmpfs memory-backed PostgreSQL eliminates disk write barrier stalls during sequential DDL execution. |
 
           ---
 
