@@ -1,0 +1,11 @@
+[project]
+name = "posthog-web"
+version = "0.1.0"
+description = "PostHog Analytics Web Application & Django REST API"
+requires-python = ">=3.11"
+dependencies = [
+    "django>=4.2",
+    "psycopg2-binary>=2.9",
+    "redis>=5.0",
+    "clickhouse-driver>=0.2.6",
+]

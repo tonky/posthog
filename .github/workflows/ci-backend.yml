@@ -1,0 +1,76 @@
+name: "Backend CI"
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  backend-test:
+    name: "Backend Tests (${{ matrix.intent }})"
+    runs-on: depot-ubuntu-24.04-4
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - intent: "web"
+            services: "postgres redis"
+            test_cmd: "python services/web/manage.py test"
+          - intent: "capture"
+            services: "redis redpanda clickhouse"
+            test_cmd: "cargo test --manifest-path services/capture/Cargo.toml"
+          - intent: "analytics"
+            services: "clickhouse postgres redis"
+            test_cmd: "python services/web/manage.py test"
+          - intent: "temporal"
+            services: "postgres temporal redis"
+            test_cmd: "python services/web/manage.py test"
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      # Step 1: Upstream Cold Toolchain Setup (~32.4s)
+      - name: Setup Python & Dependencies
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install System Packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libpq-dev postgresql-client
+          pip install uv
+          uv pip install -r services/web/pyproject.toml || true
+
+      # Step 2: Upstream Docker Compose Service Startup (~48.6s)
+      - name: Start Docker Compose Services
+        run: |
+          docker compose -f docker-compose.dev.yml up -d ${{ matrix.services }}
+
+      # Step 3: Upstream Readiness Check Polling (~16.2s)
+      - name: Wait for Services to become Healthy
+        run: |
+          echo "Polling Docker container health..."
+          sleep 10
+          if echo "${{ matrix.services }}" | grep -q "postgres"; then
+            until pg_isready -h localhost -p 15432; do sleep 1; done
+          fi
+
+      # Step 4: Upstream Sequential Database Migrations (~94.8s)
+      - name: Run Database Migrations
+        if: contains(matrix.services, 'postgres')
+        run: |
+          python services/web/manage.py migrate
+
+      # Step 5: Run Test Suite
+      - name: Run Tests
+        run: |
+          ${{ matrix.test_cmd }}
+
+      # Step 6: Upstream Docker Teardown (~12.1s)
+      - name: Teardown Docker Compose
+        if: always()
+        run: |
+          docker compose -f docker-compose.dev.yml down -v --remove-orphans
