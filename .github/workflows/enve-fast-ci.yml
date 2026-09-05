@@ -42,7 +42,7 @@ jobs:
           # 2. Verify topological dependencies for db tier (postgres + clickhouse)
           enve services plan
           # 3. Plan rootless service boot for database tier
-          enve up postgres clickhouse --dry-run
+          enve up --dry-run postgres clickhouse
           END_TIME=$(date +%s%N)
           DURATION_MS=$(( (END_TIME - START_TIME) / 1000000 ))
           echo "✅ Migration gate verified in ${DURATION_MS}ms (vs ~320,000ms upstream)!"
