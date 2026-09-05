@@ -138,12 +138,12 @@ compare-jobs:
     @echo "                                  | OOM risk on standard runners      | Instant DAG (<2.5s)  |"
     @echo "================================================================================================"
 
-# Print the complete executive pitch table (N vs X)
+# Print the executive pitch table: Upstream CI vs enve acceleration
 compare-pitch:
     @echo "================================================================================================"
-    @echo "  🎯 The Empirical PostHog Pitch: Exact Upstream Workflows (N) vs enve + R2 (X)"
+    @echo "  🎯 Empirical PostHog Benchmark: Upstream CI vs enve + Cloudflare R2 Acceleration"
     @echo "================================================================================================"
-    @echo "Workload Gate / Step              | Upstream Baseline (N)       | Local (X_local)  | Cloud CI (X_ci)  | Speedup"
+    @echo "Workload Gate / Step              | PostHog Upstream CI         | enve Local Dev   | enve Cloud CI    | Speedup"
     @echo "----------------------------------+-----------------------------+------------------+------------------+--------"
     @echo "1. Boot DB & Infra (Postgres+CH)  | ~120s (Docker Compose pull) | 1.00s (bwrap)    | 1.10s (native)   | 109x"
     @echo "2. Schema Priming & Snapshot Rest | ~50s (psql gunzip load)     | 0.032s (zstd)    | 0.045s (R2 cache)| 1,100x"

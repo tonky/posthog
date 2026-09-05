@@ -37,12 +37,12 @@ Comparing PostHog's upstream workflow with this PR's accelerated workflow:
 
 ---
 
-## 🎯 The Empirical Pitch: Exact Upstream Workflows ($N$) vs. `enve` + Cloudflare R2 ($X$)
+## 🎯 Head-to-Head Benchmark: PostHog Upstream CI vs. enve Acceleration
 
 This benchmark executes the **exact same code and check paths** run in PostHog upstream CI—no mocks, zero dry-runs:
 - **Empirical CI Verification Run**: [GitHub Actions Run #33962853581](https://github.com/tonky/posthog/actions/runs/33962853581) (All 5 jobs passed cleanly)
 
-| Workload Gate / Step | Exact Upstream Check / Pipeline | Upstream Baseline ($N$) [Live Link] | Local Workstation ($X_{local}$) | Cloud CI ($X_{ci}$) [Live Link] | Measured Speedup | Real Technical Difference |
+| Workload Gate / Step | Exact Upstream Check / Pipeline | PostHog Upstream CI [Live Link] | enve Local Dev | enve Cloud CI [Live Link] | Measured Speedup | Real Technical Difference |
 | :--- | :--- | :---: | :---: | :---: | :---: | :--- |
 | **1. Boot DB & Infra (Postgres + CH)** | `bin/ci-wait-for-docker` in `check-migrations`: Docker pull, container boot, TCP polling loops | **~120s** (2.0 min)<br>[PostHog Job #101289717247](https://github.com/PostHog/posthog/actions/runs/33959847968/job/101289717247#step:5:1) | **1.00s** | **1.10s**<br>[Fork Job #101297658517](https://github.com/tonky/posthog/actions/runs/33962853581/job/101297658517#step:7:1) | **109x – 120x** | Native unprivileged Bubblewrap process DAG boots in 1s; zero Docker daemon or bridge network latency. |
 | **2. Schema Priming & Snapshot Restore** | `schema.sql.gz` dump restore or sequential Django `migrate` DDL | **~50s** (0.8 min)<br>[PostHog Job #101298133871](https://github.com/PostHog/posthog/actions/runs/33962966869/job/101298133871#step:25:1) | **0.032s**<br>(32 ms) | **0.045s** (45 ms)<br>[Fork Job #101297658517](https://github.com/tonky/posthog/actions/runs/33962853581/job/101297658517#step:4:1) | **1,100x – 1,500x** | Pre-computed zstd database snapshot restored from Cloudflare R2 / local cache vs 500+ sequential SQL DDL executions. |
