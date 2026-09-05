@@ -18,7 +18,8 @@ __pycache__/
 pbt-divergences.jsonl
 posthog/hogql/test/fixtures/real_queries/
 .posthog/
-.postgres-backups/
+.postgres-backups/*
+!.postgres-backups/schema-latest.sql.gz
 .python-version
 .temporal-worker-settings
 .turbo
