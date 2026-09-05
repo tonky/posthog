@@ -19,8 +19,9 @@ devEnv: {
 	]
 
 	environment: {
-		DATABASE_URL:         "postgres://posthog@127.0.0.1:15432/posthog"
-		PGPORT:               "15432"
+		DATABASE_URL:              "postgres://posthog@127.0.0.1:15432/posthog"
+		DAGSTER_TEST_POSTGRES_URL: "postgresql://posthog@127.0.0.1:15432/test_dagster"
+		PGPORT:                    "15432"
 		REDIS_URL:            "redis://127.0.0.1:16379"
 		REDIS_PORT:           "16379"
 		CLICKHOUSE_HOST:      "127.0.0.1"
