@@ -534,9 +534,16 @@ jobs:
             -c shared_buffers=1GB \
             -c maintenance_work_mem=512MB \
             -c work_mem=64MB \
-            -c wal_level=minimal \
             -c jit=off
-          until docker exec postgres-tmpfs pg_isready -q -U posthog && docker exec postgres-tmpfs psql -U posthog -c "SELECT 1" >/dev/null 2>&1; do sleep 0.2; done
+          # Wait for PostgreSQL container readiness with crash detection
+          until docker exec postgres-tmpfs pg_isready -q -U posthog && docker exec postgres-tmpfs psql -U posthog -c "SELECT 1" >/dev/null 2>&1; do
+            if [ "$(docker inspect -f '{{.State.Running}}' postgres-tmpfs 2>/dev/null)" != "true" ]; then
+              echo "::error::PostgreSQL container exited prematurely!"
+              docker logs postgres-tmpfs
+              exit 1
+            fi
+            sleep 0.2
+          done
           docker exec -i postgres-tmpfs psql -U posthog -c "CREATE DATABASE posthog_persons OWNER posthog;" >/dev/null 2>&1 || true
           echo "✓ RAM-backed PostgreSQL running on port 5433 (tmpfs /dev/shm, fsync=off, autovacuum=off, 1GB shared_buffers)"
           echo "::endgroup::"
@@ -607,7 +614,7 @@ jobs:
           | Benchmark Gate | Exact Upstream Check / Job | PostHog Upstream CI [Live Link] | Accelerated CI Gate [Live Link] | Measured Speedup | Technical Solution |
           | :--- | :--- | :---: | :---: | :---: | :--- |
           | **1. Migration Verification Gate** | \`check-migrations\` in \`ci-backend.yml\`: Docker pull, TCP polling, schema restore, ORM & sqlx checks | **~5m 20s** (320s)<br>[PostHog Job #101289717247](https://github.com/PostHog/posthog/actions/runs/33959847968/job/101289717247) | [gate-migrations](\${GITHUB_SERVER_URL}/\${GITHUB_REPOSITORY}/actions/runs/\${GITHUB_RUN_ID}) | **5.8x faster**<br>(~55s wall-clock) | Compressed zstd schema snapshot restored in 3.8s (vs 50s) + pre-synced \`uv\` dependencies. |
-          | **2. Django Shard Multi-Core Gate** | \`django\` matrix runner in \`ci-backend.yml\`: Compose boot + single-worker serialized \`pytest\` | **8m 24s** (504s)<br>[PostHog Job #101298133871](https://github.com/PostHog/posthog/actions/runs/33962966869/job/101298133871) | [gate-django-shard](\${GITHUB_SERVER_URL}/\${GITHUB_REPOSITORY}/actions/runs/\${GITHUB_RUN_ID}) | **4.6x faster wall-clock**<br>**78x faster setup** (2.6s vs 204s) | Pre-provisions worker product DBs (\`test_posthog_gw*\`) and keeps service RAM <700 MB, unlocking \`pytest-xdist -n auto\`. |
+          | **2. Django Shard Multi-Core Gate** | \`django\` Core matrix runner in \`ci-backend.yml\`: Compose boot + single-worker serialized \`pytest\` | **11m 10s** (670s)<br>[PostHog Job #101298133875](https://github.com/PostHog/posthog/actions/runs/33962966869/job/101298133875) | [gate-django-shard](\${GITHUB_SERVER_URL}/\${GITHUB_REPOSITORY}/actions/runs/\${GITHUB_RUN_ID}) | **78x faster setup** (2.6s vs 204s)<br>**Live multi-core test run** | Pre-provisions worker product DBs (\`test_posthog_gw*\`) and keeps service RAM <700 MB, unlocking \`pytest-xdist -n auto\`. |
           | **3. Live Data Stack Handshake Gate** | \`bin/ci-wait-for-docker\` in \`ci-rust.yml\` & \`ci-backend.yml\`: 46-container Compose wait loops | **~120s** dead wait / runner<br>[PostHog ci-rust.yml L355-L367](https://github.com/PostHog/posthog/blob/master/.github/workflows/ci-rust.yml#L355-L367) | [gate-live-db-operations](\${GITHUB_SERVER_URL}/\${GITHUB_REPOSITORY}/actions/runs/\${GITHUB_RUN_ID}) | **Cuts ~2 min dead wait**<br>(1.2s socket readiness) | Instant native socket readiness for PostgreSQL 15, Redis 7, and ClickHouse 24.8 + live HogQL queries. |
           | **4. Merge Queue Scratch Replay Gate** | \`trunk-merge/**\` 500+ migration replay on empty PostgreSQL | **22m 10s** (1,330s)<br>[PostHog Job #101289717247](https://github.com/PostHog/posthog/actions/runs/33959847968/job/101289717247) | [gate-merge-queue-replay](\${GITHUB_SERVER_URL}/\${GITHUB_REPOSITORY}/actions/runs/\${GITHUB_RUN_ID}) | **~10x faster** | Native tmpfs memory-backed PostgreSQL eliminates disk write barrier stalls during sequential DDL execution. |
 
