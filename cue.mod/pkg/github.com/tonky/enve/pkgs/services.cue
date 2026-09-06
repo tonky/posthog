@@ -63,6 +63,12 @@ mailpit: devshell.#GoBuildSpec & {
 	subPackages: "."
 }
 
+clickhouse: devshell.#RustBuildSpec & {
+	pname:   "clickhouse"
+	version: "26.1"
+	src:     "https://github.com/ClickHouse/ClickHouse/archive/refs/tags/v26.1.1.1-stable.tar.gz"
+}
+
 // -------------------------------------------------------------
 // High-Level Microservice & Daemon Presets (#Service presets)
 // -------------------------------------------------------------
@@ -140,6 +146,24 @@ mailpit: devshell.#GoBuildSpec & {
 	}
 	readinessProbe: {
 		port:      srvPort
+		timeoutMs: 5000
+	}
+}
+
+#ClickHouseService: devshell.#Service & {
+	let httpPort = 8123
+	let tcpPort = 9000
+	port: httpPort
+	let dataDir = ".enve/data/clickhouse"
+	let configFile = ".enve/config/clickhouse/config.xml"
+	command: "clickhouse-server --config-file=\(configFile)"
+	environment: {
+		CLICKHOUSE_DATA_DIR:  dataDir
+		CLICKHOUSE_HTTP_PORT: "\(httpPort)"
+		CLICKHOUSE_TCP_PORT:  "\(tcpPort)"
+	}
+	readinessProbe: {
+		port:      httpPort
 		timeoutMs: 5000
 	}
 }
