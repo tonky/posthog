@@ -49,10 +49,35 @@ jobs:
               with:
                   fetch-depth: 2
 
-            - name: Set up enve
-              uses: tonky/enve/actions/setup-enve@master
+            # -----------------------------------------------------------------
+            # High-Performance GHA Cache for enve binary and Nix store closures
+            # -----------------------------------------------------------------
+            - name: Restore enve binary and store closures from GHA Cache
+              id: cache-enve
+              uses: actions/cache@v4
               with:
-                  enve-version: "latest"
+                  path: |
+                      /usr/local/bin/enve
+                      ~/.enve/store
+                      /nix/store
+                  key: ${{ runner.os }}-enve-bin-${{ hashFiles('enve.lock', 'enve.cue') }}
+                  restore-keys: |
+                      ${{ runner.os }}-enve-bin-
+
+            - name: Install Hermetic enve Binary (on GHA cache miss)
+              if: steps.cache-enve.outputs.cache-hit != 'true'
+              shell: bash
+              env:
+                  R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+                  R2_BUCKET: ${{ secrets.R2_BUCKET }}
+                  R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+                  R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              run: |
+                  python3 scripts/fetch_enve.py /tmp/enve
+                  sudo mv /tmp/enve /usr/local/bin/enve
+                  sudo chmod +x /usr/local/bin/enve
+                  enve --version
 
             - name: Docker meta and registry login
               id: docker-meta
