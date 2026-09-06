@@ -213,8 +213,8 @@ jobs:
         runs-on: ubuntu-24.04
         timeout-minutes: 20
         outputs:
-            duration_s: ${{ steps.build.outputs.duration_s }}
-            image-digest: ${{ steps.build.outputs.digest }}
+            duration_s: ${{ steps.timing-end.outputs.duration_s }}
+            image-digest: ${{ steps.build.outputs.digest || steps.timing-end.outputs.digest }}
         permissions:
             id-token: write
             contents: read
@@ -354,26 +354,40 @@ jobs:
                   [ ! -d "dist/unit-provider/opt/unit" ] && scripts/prepare_build_contexts.sh unit-provider
                   echo "✓ All 4 BuildKit named contexts verified and ready for Docker Buildx"
 
+            - name: Record Build Start Timestamp
+              id: timing-start
+              shell: bash
+              run: echo "start_ts=$(date +%s%N)" >> "$GITHUB_OUTPUT"
+
             - name: Build Native Image with Docker Buildx & Dockerfile.enve
               id: build
+              uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
+              with:
+                  context: .
+                  file: Dockerfile.enve
+                  platforms: linux/amd64
+                  build-contexts: |
+                      frontend-build=dist/prebuilt-frontend
+                      node-scripts-build=dist/prebuilt-node-scripts
+                      fetch-geoip-db=dist/geoip
+                      unit-binary-provider=dist/unit-provider
+                  tags: ghcr.io/posthog/posthog:${{ github.sha }}-docker
+                  build-args: |
+                      COMMIT_HASH=${{ github.sha }}
+                  cache-from: |
+                      type=gha,scope=docker-enve
+                      type=gha
+                  cache-to: type=gha,mode=max,scope=docker-enve
+                  push: false
+                  load: false
+
+            - name: Record Build End Timestamp & Outputs
+              id: timing-end
+              shell: bash
               run: |
                   set -euo pipefail
-                  START_TS=$(date +%s%N)
-                  docker buildx build \
-                      --file Dockerfile.enve \
-                      --platform linux/amd64 \
-                      --build-context frontend-build=dist/prebuilt-frontend \
-                      --build-context node-scripts-build=dist/prebuilt-node-scripts \
-                      --build-context fetch-geoip-db=dist/geoip \
-                      --build-context unit-binary-provider=dist/unit-provider \
-                      --tag "ghcr.io/posthog/posthog:${{ github.sha }}-docker" \
-                      --build-arg COMMIT_HASH=${{ github.sha }} \
-                      --cache-from type=gha,scope=docker-enve \
-                      --cache-from type=gha \
-                      --cache-to type=gha,mode=max,scope=docker-enve \
-                      .
-
                   END_TS=$(date +%s%N)
+                  START_TS=${{ steps.timing-start.outputs.start_ts }}
                   DURATION_S=$(awk "BEGIN {printf \"%.2f\", ($END_TS - $START_TS) / 1000000000}")
                   echo "duration_s=$DURATION_S" >> "$GITHUB_OUTPUT"
                   echo "digest=sha256:${{ github.sha }}" >> "$GITHUB_OUTPUT"
