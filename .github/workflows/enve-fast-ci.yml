@@ -344,6 +344,7 @@ jobs:
           echo "::endgroup::"
 
           echo "::group::Starting Live Redis via native daemon"
+          echo "127.0.0.1 db redis7 kafka clickhouse clickhouse-coordinator" | sudo tee -a /etc/hosts
           if ! command -v redis-server >/dev/null 2>&1; then
             sudo apt-get update -qq && sudo apt-get install -y -qq redis-server
           fi
@@ -589,6 +590,7 @@ jobs:
           echo "::endgroup::"
 
           echo "::group::Starting Live Redis Service via native daemon"
+          echo "127.0.0.1 db redis7 kafka clickhouse clickhouse-coordinator" | sudo tee -a /etc/hosts
           if ! command -v redis-server >/dev/null 2>&1; then
             sudo apt-get update -qq && sudo apt-get install -y -qq redis-server
           fi
@@ -642,12 +644,16 @@ jobs:
       - name: Run Django Core Showcase (${{ matrix.shard }}/2, Live Services)
         shell: bash
         env:
-          DATABASE_URL: 'postgres://posthog:posthog@localhost:5432/test_posthog'
+          DATABASE_URL: 'postgres://posthog:posthog@localhost:5432/posthog'
           PGHOST: 'localhost'
           PGPORT: '5432'
           PGUSER: 'posthog'
           PGPASSWORD: 'posthog'
           REDIS_URL: 'redis://localhost:6379'
+          CLICKHOUSE_HOST: '127.0.0.1'
+          CLICKHOUSE_PORT: '8123'
+          SKIP_CLICKHOUSE_SETUP: 'true'
+          SKIP_CLICKHOUSE_RESET: 'true'
           DEBUG: 'true'
           TEST: 'true'
           SECRET_KEY: 'abcdef'

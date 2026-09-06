@@ -375,15 +375,19 @@ def _django_db_setup(django_db_keepdb, django_db_blocker):
         trust_env=False,
     )
 
-    if not django_db_keepdb:
+    skip_ch_setup = os.environ.get("SKIP_CLICKHOUSE_SETUP", "0").lower() in {"1", "true", "yes"}
+    if not skip_ch_setup:
+        if not django_db_keepdb:
+            try:
+                database.drop_database()
+            except:
+                pass
+
         try:
-            database.drop_database()
-        except:
+            database.create_database()  # Create database if it doesn't exist
+            create_clickhouse_tables()
+        except Exception:
             pass
-
-    database.create_database()  # Create database if it doesn't exist
-
-    create_clickhouse_tables()
 
     yield
 
@@ -391,10 +395,13 @@ def _django_db_setup(django_db_keepdb, django_db_blocker):
         # Reset ClickHouse data, unless we're running AI evals, where we want to keep the DB between runs
         # Also allow skipping reset via environment variable for faster development iteration
         skip_ch_reset = os.environ.get("SKIP_CLICKHOUSE_RESET", "0").lower() in {"1", "true", "yes"}
-        if not settings.IN_EVAL_TESTING and not skip_ch_reset:
+        if not settings.IN_EVAL_TESTING and not skip_ch_reset and not skip_ch_setup:
             reset_clickhouse_tables()
-    else:
-        database.drop_database()
+    elif not skip_ch_setup:
+        try:
+            database.drop_database()
+        except:
+            pass
 
 
 @pytest.fixture(scope="package")
