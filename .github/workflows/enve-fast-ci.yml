@@ -39,10 +39,14 @@ jobs:
           R2_BUCKET: ${{ secrets.R2_BUCKET }}
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          ENVE_TOKEN: ${{ secrets.ENVE_TOKEN }}
+          GH_TOKEN: ${{ secrets.ENVE_TOKEN || secrets.GITHUB_TOKEN }}
         run: |
-          python3 scripts/fetch_enve.py /tmp/enve
-          sudo mv /tmp/enve /usr/local/bin/enve
-          sudo chmod +x /usr/local/bin/enve
+          if ! command -v enve >/dev/null 2>&1 || ! enve --version 2>&1 | grep -q "0.7.0"; then
+            python3 scripts/fetch_enve.py /tmp/enve
+            sudo mv /tmp/enve /usr/local/bin/enve
+            sudo chmod +x /usr/local/bin/enve
+          fi
           enve --version
 
       - name: Verify Cloudflare R2 Remote Binary Cache
@@ -330,10 +334,14 @@ jobs:
           R2_BUCKET: ${{ secrets.R2_BUCKET }}
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          ENVE_TOKEN: ${{ secrets.ENVE_TOKEN }}
+          GH_TOKEN: ${{ secrets.ENVE_TOKEN || secrets.GITHUB_TOKEN }}
         run: |
-          python3 scripts/fetch_enve.py /tmp/enve
-          sudo mv /tmp/enve /usr/local/bin/enve
-          sudo chmod +x /usr/local/bin/enve
+          if ! command -v enve >/dev/null 2>&1 || ! enve --version 2>&1 | grep -q "0.7.0"; then
+            python3 scripts/fetch_enve.py /tmp/enve
+            sudo mv /tmp/enve /usr/local/bin/enve
+            sudo chmod +x /usr/local/bin/enve
+          fi
           enve --version
 
       - name: Restore sqlx-cli binary from GHA Cache
@@ -498,10 +506,14 @@ jobs:
           R2_BUCKET: ${{ secrets.R2_BUCKET }}
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          ENVE_TOKEN: ${{ secrets.ENVE_TOKEN }}
+          GH_TOKEN: ${{ secrets.ENVE_TOKEN || secrets.GITHUB_TOKEN }}
         run: |
-          python3 scripts/fetch_enve.py /tmp/enve
-          sudo mv /tmp/enve /usr/local/bin/enve
-          sudo chmod +x /usr/local/bin/enve
+          if ! command -v enve >/dev/null 2>&1 || ! enve --version 2>&1 | grep -q "0.7.0"; then
+            python3 scripts/fetch_enve.py /tmp/enve
+            sudo mv /tmp/enve /usr/local/bin/enve
+            sudo chmod +x /usr/local/bin/enve
+          fi
           enve --version
 
       - name: Restore Temporal CLI Closure from GHA Cache
@@ -625,10 +637,14 @@ jobs:
           R2_BUCKET: ${{ secrets.R2_BUCKET }}
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          ENVE_TOKEN: ${{ secrets.ENVE_TOKEN }}
+          GH_TOKEN: ${{ secrets.ENVE_TOKEN || secrets.GITHUB_TOKEN }}
         run: |
-          python3 scripts/fetch_enve.py /tmp/enve
-          sudo mv /tmp/enve /usr/local/bin/enve
-          sudo chmod +x /usr/local/bin/enve
+          if ! command -v enve >/dev/null 2>&1 || ! enve --version 2>&1 | grep -q "0.7.0"; then
+            python3 scripts/fetch_enve.py /tmp/enve
+            sudo mv /tmp/enve /usr/local/bin/enve
+            sudo chmod +x /usr/local/bin/enve
+          fi
           enve --version
 
       - name: Restore sqlx-cli binary from GHA Cache

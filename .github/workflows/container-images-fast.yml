@@ -49,31 +49,6 @@ jobs:
               with:
                   fetch-depth: 2
 
-            # -----------------------------------------------------------------
-            # High-Performance GHA Cache for enve binary and Nix store closures
-            # -----------------------------------------------------------------
-            - name: Restore enve binary and store closures from GHA Cache
-              id: cache-enve
-              uses: actions/cache/restore@v4
-              with:
-                  path: |
-                      /usr/local/bin/enve
-                      ~/.enve/store
-                      /nix/store
-                  key: ${{ runner.os }}-enve-bin-v0.7.0-${{ hashFiles('enve.lock', 'enve.cue') }}
-                  restore-keys: |
-                      ${{ runner.os }}-enve-bin-v0.7.0-
-
-            - name: Save enve binary and closures to GHA Cache
-              if: github.ref == 'refs/heads/master' && steps.cache-enve.outputs.cache-hit != 'true'
-              uses: actions/cache/save@v4
-              with:
-                  path: |
-                      /usr/local/bin/enve
-                      ~/.enve/store
-                      /nix/store
-                  key: ${{ runner.os }}-enve-bin-v0.7.0-${{ hashFiles('enve.lock', 'enve.cue') }}
-
             - name: Ensure Hermetic enve Binary Present
               shell: bash
               env:
@@ -84,7 +59,7 @@ jobs:
                   ENVE_TOKEN: ${{ secrets.ENVE_TOKEN }}
                   GH_TOKEN: ${{ secrets.ENVE_TOKEN || secrets.GITHUB_TOKEN }}
               run: |
-                  if ! command -v enve >/dev/null 2>&1 || ! enve image build --help 2>&1 | grep -q "app-dir"; then
+                  if ! command -v enve >/dev/null 2>&1 || ! enve --version 2>&1 | grep -q "0.7.0"; then
                       python3 scripts/fetch_enve.py /tmp/enve
                       if [ "$EUID" -eq 0 ] || sudo -n true 2>/dev/null; then
                           sudo mv /tmp/enve /usr/local/bin/enve
@@ -144,6 +119,45 @@ jobs:
               with:
                   path: dist/prebuilt-frontend
                   key: frontend-assets-${{ runner.os }}-v1-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'turbo.json', 'package.json', 'frontend/**', 'products/**/*.ts', 'products/**/*.tsx', 'products/**/*.json', 'packages/**', 'common/esbuilder/**', 'common/hogvm/**', 'patches/**') }}
+
+            - name: Set up Node & pnpm dependencies (on frontend cache miss)
+              if: steps.cache-frontend.outputs.cache-hit != 'true' && env.ACT != 'true'
+              uses: ./.github/actions/pnpm-install
+              env:
+                  NPM_CONFIG_AUDIT: 'false'
+                  NPM_CONFIG_FUND: 'false'
+              with:
+                  install-command: pnpm --filter=@posthog/frontend... install --frozen-lockfile
+
+            - name: Build Frontend on Host (on frontend cache miss)
+              if: steps.cache-frontend.outputs.cache-hit != 'true' && env.ACT != 'true'
+              shell: bash
+              run: |
+                  set -euo pipefail
+                  echo "🔨 Compiling frontend on host ext4 filesystem..."
+                  bin/turbo --filter=@posthog/frontend build
+                  mkdir -p dist/prebuilt-frontend/code/frontend/src
+                  cp -r frontend/dist dist/prebuilt-frontend/code/frontend/
+                  cp frontend/src/products.json dist/prebuilt-frontend/code/frontend/src/products.json
+                  echo "✅ Frontend compilation and staging complete."
+
+            - name: Save Pre-Built Frontend Assets to GHA Cache
+              if: github.ref == 'refs/heads/master' && steps.cache-frontend.outputs.cache-hit != 'true' && env.ACT != 'true'
+              uses: actions/cache/save@v4
+              with:
+                  path: dist/prebuilt-frontend
+                  key: ${{ steps.cache-frontend.outputs.primary-key || format('frontend-assets-{0}-v1-{1}', runner.os, hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'turbo.json', 'package.json', 'frontend/**', 'products/**/*.ts', 'products/**/*.tsx', 'products/**/*.json', 'packages/**', 'common/esbuilder/**', 'common/hogvm/**', 'patches/**')) }}
+
+            - name: Verify Staged Frontend Assets
+              if: env.ACT != 'true'
+              run: |
+                  set -euo pipefail
+                  if [ ! -d "dist/prebuilt-frontend/code/frontend/dist" ] || [ ! -f "dist/prebuilt-frontend/code/frontend/src/products.json" ]; then
+                      echo "❌ Staged frontend assets missing!" >&2
+                      ls -la dist/prebuilt-frontend/code/frontend || true
+                      exit 1
+                  fi
+                  echo "✓ Frontend assets verified in dist/prebuilt-frontend"
 
             # Stage application assets, frontend bundles, and entrypoints (< 2s)
             - name: Stage PostHog container assets
@@ -226,7 +240,7 @@ jobs:
                   key: frontend-assets-${{ runner.os }}-v1-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'turbo.json', 'package.json', 'frontend/**', 'products/**/*.ts', 'products/**/*.tsx', 'products/**/*.json', 'packages/**', 'common/esbuilder/**', 'common/hogvm/**', 'patches/**') }}
 
             - name: Set up Node & pnpm dependencies (on frontend cache miss)
-              if: steps.cache-frontend.outputs.cache-hit != 'true'
+              if: steps.cache-frontend.outputs.cache-hit != 'true' && env.ACT != 'true'
               uses: ./.github/actions/pnpm-install
               env:
                   NPM_CONFIG_AUDIT: 'false'
@@ -235,7 +249,7 @@ jobs:
                   install-command: pnpm --filter=@posthog/frontend... install --frozen-lockfile
 
             - name: Build Frontend on Host (on frontend cache miss)
-              if: steps.cache-frontend.outputs.cache-hit != 'true'
+              if: steps.cache-frontend.outputs.cache-hit != 'true' && env.ACT != 'true'
               shell: bash
               run: |
                   set -euo pipefail
@@ -247,13 +261,14 @@ jobs:
                   echo "✅ Frontend compilation and staging complete."
 
             - name: Save Pre-Built Frontend Assets to GHA Cache
-              if: github.ref == 'refs/heads/master' && steps.cache-frontend.outputs.cache-hit != 'true'
+              if: github.ref == 'refs/heads/master' && steps.cache-frontend.outputs.cache-hit != 'true' && env.ACT != 'true'
               uses: actions/cache/save@v4
               with:
                   path: dist/prebuilt-frontend
                   key: ${{ steps.cache-frontend.outputs.primary-key || format('frontend-assets-{0}-v1-{1}', runner.os, hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'turbo.json', 'package.json', 'frontend/**', 'products/**/*.ts', 'products/**/*.tsx', 'products/**/*.json', 'packages/**', 'common/esbuilder/**', 'common/hogvm/**', 'patches/**')) }}
 
             - name: Verify Staged Frontend Assets
+              if: env.ACT != 'true'
               run: |
                   set -euo pipefail
                   if [ ! -d "dist/prebuilt-frontend/code/frontend/dist" ] || [ ! -f "dist/prebuilt-frontend/code/frontend/src/products.json" ]; then

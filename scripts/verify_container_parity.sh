@@ -44,11 +44,39 @@ mkdir -p "$TAR_CONTENT_DIR"
 tar -xf "$ENVE_TAR" -C "$TAR_CONTENT_DIR"
 
 # Extract all layer tarballs in the OCI archive into DIR_ENVE
-for layer in "$TAR_CONTENT_DIR"/*.tar "$TAR_CONTENT_DIR"/blobs/sha256/*; do
-    if [ -f "$layer" ] && tar -tf "$layer" >/dev/null 2>&1; then
-        tar -xf "$layer" -C "$DIR_ENVE" 2>/dev/null || true
-    fi
-done
+python3 -c "
+import tarfile, os, json
+
+raw_dir = '$TAR_CONTENT_DIR'
+target_dir = '$DIR_ENVE'
+layers = set()
+
+manifest_file = os.path.join(raw_dir, 'manifest.json')
+if os.path.isfile(manifest_file):
+    try:
+        with open(manifest_file) as f:
+            for item in json.load(f):
+                for l in item.get('Layers', []):
+                    p = os.path.join(raw_dir, l)
+                    if os.path.isfile(p):
+                        layers.add(p)
+    except Exception:
+        pass
+
+for root, dirs, files in os.walk(raw_dir):
+    for f in files:
+        if f.endswith(('.tar', '.tar.gz', '.tgz')) or 'blobs/sha256' in root:
+            p = os.path.join(root, f)
+            if os.path.isfile(p):
+                layers.add(p)
+
+for layer in sorted(layers):
+    try:
+        with tarfile.open(layer, 'r:*') as tar:
+            tar.extractall(target_dir)
+    except Exception:
+        pass
+"
 
 echo "   ✓ Extracted $(find "$DIR_ENVE/code" -type f 2>/dev/null | wc -l) files from Pure Enve OCI container."
 

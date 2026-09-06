@@ -109,7 +109,7 @@ for root, dirs, files in os.walk(tmp_dir):
             if os.path.isfile(p):
                 layers.add(p)
 
-found_members = set()
+found_members = {}
 valid_layers_count = 0
 
 for layer in sorted(layers):
@@ -118,11 +118,12 @@ for layer in sorted(layers):
             count = 0
             for member in tar.getmembers():
                 name = member.name.lstrip('./').lstrip('/')
-                found_members.add(name)
+                found_members[name] = max(found_members.get(name, 0), member.size)
                 # Also index normalized subpaths if code/ is nested (e.g. dist/container-root/code/...)
                 if 'code/' in name:
                     idx = name.find('code/')
-                    found_members.add(name[idx:])
+                    sub = name[idx:]
+                    found_members[sub] = max(found_members.get(sub, 0), member.size)
                 count += 1
             if count > 0:
                 valid_layers_count += 1
@@ -152,9 +153,24 @@ missing = [r for r in required_artifacts if not any(m == r or m.startswith(r + '
 if missing:
     print(f'   ❌ Missing critical artifacts: {missing}')
     print(f'   ℹ️ Inspected {len(layers)} layer candidates ({valid_layers_count} valid tar layers, {len(found_members)} total members indexed).')
-    sample = sorted(list(found_members))[:25]
+    sample = sorted(list(found_members.keys()))[:25]
     print(f'   ℹ️ Sample indexed paths: {sample}')
     assert not missing, f'Missing critical production artifacts in OCI layers: {missing}'
+
+# Core backend code artifacts must always be non-empty (>0 bytes)
+core_code_artifacts = ['code/manage.py', 'code/posthog/asgi.py', 'code/bin/docker-server-unit']
+empty_core = [a for a in core_code_artifacts if a in found_members and found_members[a] == 0]
+assert not empty_core, f'Critical core code artifacts are empty (0 bytes): {empty_core}'
+
+# Verify frontend index.html
+html_size = found_members.get('code/frontend/dist/index.html', 0)
+if html_size == 0:
+    if os.environ.get('STRICT_ASSETS'):
+        assert False, 'code/frontend/dist/index.html is empty (0 bytes)! Prebuilt frontend was not compiled.'
+    else:
+        print('   ⚠️ Notice: code/frontend/dist/index.html is 0 bytes (structural stub used for fast check).')
+else:
+    print(f'   ✓ Verified compiled frontend bundle (index.html: {html_size} bytes).')
 
 print(f'   ✓ All {len(required_artifacts)} essential production assets verified across {valid_layers_count} OCI layers ({len(found_members)} members indexed).')
 "
