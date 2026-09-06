@@ -7,6 +7,7 @@ devEnv: {
 	description: "PostHog Polyglot Monorepo (Django + Rust Capture + ClickHouse + Kafka + Temporal)"
 
 	tools: [
+        "brotli",
         "seaweedfs",
 		"python311",
 		"uv",

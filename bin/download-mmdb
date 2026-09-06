@@ -26,6 +26,8 @@ if [ ! -f "$DIR/../share/GeoLite2-City.mmdb" ] || [ ! -f "$DIR/../share/GeoLite2
         echo "Download successful, decompressing..."
         if command -v brotli >/dev/null 2>&1; then
             brotli --decompress --output="$DIR/../share/GeoLite2-City.mmdb" "$TMPFILE"
+        elif command -v enve >/dev/null 2>&1; then
+            enve run -- brotli --decompress --output="$DIR/../share/GeoLite2-City.mmdb" "$TMPFILE"
         else
             python3 -c "import brotli; open('$DIR/../share/GeoLite2-City.mmdb', 'wb').write(brotli.decompress(open('$TMPFILE', 'rb').read()))"
         fi

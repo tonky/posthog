@@ -82,9 +82,15 @@ prepare_geoip() {
         cp share/GeoLite2-City.mmdb dist/geoip/code/share/GeoLite2-City.mmdb
     else
         # Pre-fetch if missing, or create empty stub
-        if command -v curl >/dev/null 2>&1 && command -v brotli >/dev/null 2>&1; then
+        if command -v curl >/dev/null 2>&1; then
             echo "• Fetching GeoLite2-City.mmdb..."
-            ( curl -s -L "https://mmdbcdn.posthog.net/" --http1.1 | brotli --decompress --output=dist/geoip/code/share/GeoLite2-City.mmdb ) || touch dist/geoip/code/share/GeoLite2-City.mmdb
+            if command -v brotli >/dev/null 2>&1; then
+                ( curl -s -L "https://mmdbcdn.posthog.net/" --http1.1 | brotli --decompress --output=dist/geoip/code/share/GeoLite2-City.mmdb ) || touch dist/geoip/code/share/GeoLite2-City.mmdb
+            elif command -v enve >/dev/null 2>&1; then
+                ( curl -s -L "https://mmdbcdn.posthog.net/" --http1.1 | enve run -- brotli --decompress --output=dist/geoip/code/share/GeoLite2-City.mmdb ) || touch dist/geoip/code/share/GeoLite2-City.mmdb
+            else
+                touch dist/geoip/code/share/GeoLite2-City.mmdb
+            fi
         else
             touch dist/geoip/code/share/GeoLite2-City.mmdb
         fi
