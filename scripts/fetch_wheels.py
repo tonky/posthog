@@ -7,6 +7,7 @@ wheels (and sdists) into dist/wheel-cache using concurrent HTTP connections.
 """
 
 import os
+import re
 import sys
 import time
 import tomllib
@@ -19,22 +20,45 @@ def score_wheel(filename: str) -> int:
         return -1
 
     # Check platform compatibility (reject macOS, Windows, musl, ARM)
+    if any(arch in filename for arch in ("musl", "arm", "aarch64", "i686", "win", "macos", "osx")):
+        return -1
+
     if "none-any" in filename or "-any." in filename:
         plat_score = 10
-    elif ("manylinux" in filename or "linux" in filename) and "x86_64" in filename and "musl" not in filename:
-        plat_score = 20
+    elif "x86_64" in filename:
+        # Debian 12 Bookworm uses glibc 2.36.
+        # Prefer higher compatible glibc minor versions (e.g. manylinux_2_34 > 2_28 > 2_17):
+        matches = re.findall(r"manylinux_2_(\d+)", filename)
+        if matches:
+            valid_minors = [int(m) for m in matches if int(m) <= 36]
+            if valid_minors:
+                plat_score = 20 + max(valid_minors)
+            else:
+                return -1  # Incompatible with glibc 2.36
+        elif "manylinux2014" in filename:
+            plat_score = 20 + 17
+        elif "manylinux2010" in filename:
+            plat_score = 20 + 12
+        elif "manylinux1" in filename:
+            plat_score = 20 + 5
+        elif "manylinux" in filename or "linux" in filename:
+            plat_score = 21
+        else:
+            return -1
     else:
         return -1
 
-    # Check python interpreter compatibility (Python 3.13)
-    if "py3-none-" in filename or "py2.py3-none-" in filename:
-        py_score = 50
+    # Check Python interpreter compatibility (Python 3.13 standard, reject free-threaded cp313t)
+    if "cp313t" in filename:
+        return -1
     elif "cp313-cp313" in filename:
         py_score = 100
     elif "abi3" in filename:
         py_score = 80
     elif "cp313" in filename:
         py_score = 70
+    elif "py3-none-" in filename or "py2.py3-none-" in filename:
+        py_score = 50
     else:
         return -1
 

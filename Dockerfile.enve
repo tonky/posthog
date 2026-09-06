@@ -174,27 +174,32 @@ ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
     UV_PROJECT_ENVIRONMENT=/python-runtime
 
-RUN apt-get update && \
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && \
     apt-get install -y --no-install-recommends \
-    "build-essential" \
     "git" \
-    "libpq-dev" \
+    "gcc" \
+    "libpq5" \
     "libxmlsec1=1.2.37-2" \
-    "libxmlsec1-dev=1.2.37-2" \
-    "libffi-dev" \
-    "zlib1g-dev" \
-    "pkg-config" \
-    && \
-    rm -rf /var/lib/apt/lists/*
+    "libxmlsec1-openssl=1.2.37-2" \
+    "libxml2" \
+    "libjemalloc2"
 
-# Accelerated uv sync: leverages pre-compiled wheels/binary cache to eliminate slow Cython builds
+# Accelerated uv sync: leverages pre-compiled wheels/binary cache to eliminate slow Cython builds and network downloads
 RUN --mount=type=cache,id=uv-libxmlsec1.2.37-2,target=/root/.cache/uv \
     --mount=type=bind,from=wheel-cache,source=.,target=/wheel-cache \
     --mount=type=bind,source=uv.lock,target=uv.lock \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
     --mount=type=bind,source=tools/hogli,target=tools/hogli \
     --mount=type=bind,source=tools/owners,target=tools/owners \
-    uv sync --locked --no-dev --no-editable --no-install-project --find-links /wheel-cache
+    if [ $(ls -1 /wheel-cache/*.whl 2>/dev/null | wc -l) -gt 0 ]; then \
+        echo "✓ Found populated wheel-cache ($(ls -1 /wheel-cache/*.whl | wc -l) wheels) — running offline sync"; \
+        uv sync --frozen --no-dev --no-editable --no-install-workspace --no-index --find-links /wheel-cache; \
+    else \
+        echo "⚠️ Empty wheel-cache fallback — running online sync"; \
+        uv sync --locked --no-dev --no-editable --no-install-project --find-links /wheel-cache; \
+    fi
 
 ENV PATH=/python-runtime/bin:$PATH \
     PYTHONPATH=/python-runtime
@@ -261,7 +266,9 @@ RUN if [ -f /opt/unit/sbin/unitd ]; then \
     rm -rf /opt/unit
 
 # Install OS runtime dependencies (zero -dev headers or compilers)
-RUN apt-get update && \
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && \
     apt-get install -y --no-install-recommends --allow-downgrades \
     "gettext-base" \
     "git" \
