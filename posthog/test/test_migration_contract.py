@@ -1,8 +1,8 @@
-import hashlib
-import importlib
-import inspect
 import json
+import inspect
+import importlib
 from pathlib import Path
+
 import unittest
 
 from django.test import SimpleTestCase
@@ -11,7 +11,7 @@ from django.test import SimpleTestCase
 class TestMigrationContractAndDAG(SimpleTestCase):
     """
     Static verification suite that replaces the 22-minute from-scratch migration replay.
-    
+
     A fresh migration replay (0001 -> HEAD) can only fail for three reasons:
     1. Broken DAG structure (circular dependencies, missing parents, disconnected heads)
     2. Broken Python imports / missing callables in historical migrations
@@ -26,10 +26,23 @@ class TestMigrationContractAndDAG(SimpleTestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        import django
         from django.apps import apps
+
         if not apps.ready:
-            django.setup()
+            from django.apps.config import AppConfig
+            from django.conf import settings
+
+            with apps._lock:
+                apps.loading = True
+                for entry in settings.INSTALLED_APPS:
+                    app_config = AppConfig.create(entry)
+                    app_config.models = {}
+                    apps.app_configs[app_config.label] = app_config
+                    app_config.apps = apps
+                apps.apps_ready = True
+                apps.models_ready = True
+                apps.ready = True
+                apps.loading = False
 
     def test_migration_dag_in_memory_consistency_and_reachability(self):
         """
@@ -38,8 +51,9 @@ class TestMigrationContractAndDAG(SimpleTestCase):
         Runs in ~0.1s in memory via static AST/regex loading without connecting to any database.
         """
         import os
-        import pkgutil
         import re
+        import pkgutil
+
         from django.apps import apps
         from django.db.migrations.loader import MigrationLoader
 
@@ -81,7 +95,7 @@ class TestMigrationContractAndDAG(SimpleTestCase):
                     if not is_pkg and name[0] not in "_~":
                         filepath = os.path.join(mig_dir, f"{name}.py")
                         try:
-                            with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
+                            with open(filepath, encoding="utf-8", errors="ignore") as f:
                                 text = f.read()
                         except Exception:
                             continue
@@ -120,9 +134,8 @@ class TestMigrationContractAndDAG(SimpleTestCase):
         self.assertEqual(
             len(unreached),
             0,
-            f"Found {len(unreached)} orphaned migration nodes unreachable by any leaf: {sorted(list(unreached))[:5]}",
+            f"Found {len(unreached)} orphaned migration nodes unreachable by any leaf: {sorted(unreached)[:5]}",
         )
-
 
     def test_historical_migration_symbols_intact(self):
         """
@@ -150,45 +163,82 @@ class TestMigrationContractAndDAG(SimpleTestCase):
                 return p2
             return None
 
-        for mod_name, symbols in contract.items():
-            p = mod_to_path(mod_name)
-            tree = None
-            if p:
-                try:
-                    tree = ast.parse(p.read_text(encoding="utf-8"), filename=str(p))
-                except Exception:
-                    tree = None
+        def extract_symbols_from_ast(p, depth=0):
+            if depth > 2 or not p or not p.exists():
+                return {}
+            try:
+                tree = ast.parse(p.read_text(encoding="utf-8"), filename=str(p))
+            except Exception:
+                return {}
 
             defined = {}
-            if tree:
-                for node in tree.body:
-                    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                        has_varargs = bool(node.args.vararg or node.args.kwarg)
-                        param_count = len(node.args.args) + len(getattr(node.args, "posonlyargs", []))
-                        defined[node.name] = ("function", param_count, has_varargs)
-                    elif isinstance(node, ast.ClassDef):
-                        defined[node.name] = ("class", 0, False)
-                    elif isinstance(node, ast.Assign):
-                        for target in node.targets:
-                            if isinstance(target, ast.Name):
-                                defined[target.id] = ("constant", 0, False)
-                    elif isinstance(node, (ast.ImportFrom, ast.Import)):
-                        for alias in node.names:
-                            defined[alias.asname or alias.name] = ("imported", 0, False)
+            for node in ast.walk(tree):
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    has_varargs = bool(node.args.vararg or node.args.kwarg)
+                    all_args = (
+                        [a.arg for a in node.args.args]
+                        + [a.arg for a in getattr(node.args, "posonlyargs", [])]
+                        + [a.arg for a in node.args.kwonlyargs]
+                    )
+                    defined[node.name] = ("function", all_args, has_varargs)
+                elif isinstance(node, ast.ClassDef):
+                    defined[node.name] = ("class", [], False)
+                elif isinstance(node, ast.Assign):
+                    for target in node.targets:
+                        if isinstance(target, ast.Name):
+                            defined[target.id] = ("constant", [], False)
+                            if target.id == "_LAZY" and isinstance(node.value, ast.Dict):
+                                for k, v in zip(node.value.keys, node.value.values):
+                                    if isinstance(k, ast.Constant) and isinstance(v, ast.Constant):
+                                        sub_p = mod_to_path(f"products.data_modeling.backend.{v.value}")
+                                        sub_syms = extract_symbols_from_ast(sub_p, depth + 1)
+                                        if k.value in sub_syms:
+                                            defined[k.value] = sub_syms[k.value]
+                elif isinstance(node, ast.AnnAssign):
+                    if isinstance(node.target, ast.Name):
+                        defined[node.target.id] = ("constant", [], False)
+                elif isinstance(node, ast.ImportFrom):
+                    for alias in node.names:
+                        sym_name = alias.asname or alias.name
+                        defined[sym_name] = ("imported", [], False)
+                        if alias.name == "*":
+                            target_p = None
+                            if node.level > 0:
+                                mod = (node.module or "").replace(".", "/")
+                                target_p = (p.parent / f"{mod}.py") if mod else (p.parent / "__init__.py")
+                                if not target_p.exists():
+                                    target_p = p.parent / mod / "__init__.py"
+                            elif node.module:
+                                target_p = mod_to_path(node.module)
+                            if target_p and target_p != p:
+                                sub_defs = extract_symbols_from_ast(target_p, depth + 1)
+                                defined.update(sub_defs)
+                elif isinstance(node, ast.Import):
+                    for alias in node.names:
+                        defined[alias.asname or alias.name] = ("imported", [], False)
+            return defined
 
+        for mod_name, symbols in contract.items():
+            p = mod_to_path(mod_name)
+            defined = extract_symbols_from_ast(p)
             mod = None
             for symbol_name, spec in symbols.items():
                 if symbol_name == "*":
                     continue
 
                 if symbol_name in defined:
-                    kind, param_count, has_varargs = defined[symbol_name]
+                    kind, actual_args, has_varargs = defined[symbol_name]
                     expected_params = spec.get("params", [])
                     if spec.get("kind") == "function" and kind == "function":
-                        if has_varargs or len(expected_params) <= param_count:
+                        if has_varargs:
+                            continue
+                        missing_params = [ep for ep in expected_params if ep not in actual_args]
+                        if not missing_params:
                             continue
                     else:
                         continue
+                elif mod_to_path(f"{mod_name}.{symbol_name}") is not None:
+                    continue
 
                 # Fallback to dynamic importlib for decorated, re-exported, or dynamic attributes
                 if mod is None:
@@ -214,9 +264,8 @@ class TestMigrationContractAndDAG(SimpleTestCase):
                     try:
                         sig = inspect.signature(target)
                         actual_params = list(sig.parameters.keys())
-                        # Verify all historically expected positional arguments can still be accepted
-                        for idx, expected_param in enumerate(expected_params):
-                            if idx >= len(actual_params):
+                        for expected_param in expected_params:
+                            if expected_param not in actual_params:
                                 files_str = ", ".join(spec.get("files", [])[:2])
                                 violations.append(
                                     f"Function '{mod_name}.{symbol_name}' removed required parameter '{expected_param}'. "
@@ -226,7 +275,6 @@ class TestMigrationContractAndDAG(SimpleTestCase):
                         pass
 
         self.assertFalse(violations, "\n" + "\n".join(violations))
-
 
     def test_all_migration_imports_covered_by_contract(self):
         """
@@ -245,6 +293,7 @@ class TestMigrationContractAndDAG(SimpleTestCase):
         contract = json.loads(manifest_path.read_text(encoding="utf-8"))
         migration_files = []
         import os
+
         for top in ("posthog", "ee", "products"):
             p = repo_root / top
             if p.exists():
@@ -255,6 +304,7 @@ class TestMigrationContractAndDAG(SimpleTestCase):
                                 migration_files.append(Path(root) / f)
 
         import re
+
         import_pattern = re.compile(r"^\s*(from|import)\s+(posthog|ee|products)\b", re.MULTILINE)
         uncontracted = []
         for mf in migration_files:
@@ -265,7 +315,9 @@ class TestMigrationContractAndDAG(SimpleTestCase):
                 continue
 
             # Fast pre-filtering: skip AST parsing for files that have no internal application imports
-            if ("posthog" not in content and "ee" not in content and "products" not in content) or not import_pattern.search(content):
+            if (
+                "posthog" not in content and "ee" not in content and "products" not in content
+            ) or not import_pattern.search(content):
                 continue
 
             try:
@@ -276,7 +328,9 @@ class TestMigrationContractAndDAG(SimpleTestCase):
             for node in ast.walk(tree):
                 if isinstance(node, ast.ImportFrom):
                     mod = node.module or ""
-                    if (mod.startswith("posthog") or mod.startswith("products") or mod.startswith("ee")) and "migrations" not in mod:
+                    if (
+                        mod.startswith("posthog") or mod.startswith("products") or mod.startswith("ee")
+                    ) and "migrations" not in mod:
                         for alias in node.names:
                             sym = alias.name
                             if mod not in contract or sym not in contract[mod]:
@@ -284,7 +338,9 @@ class TestMigrationContractAndDAG(SimpleTestCase):
                 elif isinstance(node, ast.Import):
                     for alias in node.names:
                         name = alias.name
-                        if (name.startswith("posthog") or name.startswith("products") or name.startswith("ee")) and "migrations" not in name:
+                        if (
+                            name.startswith("posthog") or name.startswith("products") or name.startswith("ee")
+                        ) and "migrations" not in name:
                             if name not in contract:
                                 uncontracted.append(f"{rel_path}: imports uncontracted module '{name}'")
 
@@ -299,17 +355,28 @@ class TestMigrationContractAndDAG(SimpleTestCase):
 if __name__ == "__main__":
     import os
     import sys
+
     repo_root = Path(__file__).resolve().parent.parent.parent
     if str(repo_root) not in sys.path:
         sys.path.insert(0, str(repo_root))
-    import django
     os.environ.setdefault("DJANGO_SETTINGS_MODULE", "posthog.settings")
     os.environ.setdefault("DEBUG", "1")
     os.environ.setdefault("TEST", "1")
     os.environ.setdefault("SECRET_KEY", "abcdef")
     from django.apps import apps
+    from django.apps.config import AppConfig
+    from django.conf import settings
+
     if not apps.ready:
-        django.setup()
+        with apps._lock:
+            apps.loading = True
+            for entry in settings.INSTALLED_APPS:
+                app_config = AppConfig.create(entry)
+                app_config.models = {}
+                apps.app_configs[app_config.label] = app_config
+                app_config.apps = apps
+            apps.apps_ready = True
+            apps.models_ready = True
+            apps.ready = True
+            apps.loading = False
     unittest.main()
-
-

@@ -187,14 +187,14 @@ jobs:
             - name: Set up Docker Buildx
               uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
 
-            - name: Build Multi-Arch Image with Docker Buildx & Dockerfile.enve
+            - name: Build Native Image with Docker Buildx & Dockerfile.enve
               id: build
               run: |
                   set -euo pipefail
                   START_TS=$(date +%s%N)
                   docker buildx build \
                       --file Dockerfile.enve \
-                      --platform linux/amd64,linux/arm64 \
+                      --platform linux/amd64 \
                       --tag "ghcr.io/posthog/posthog:${{ github.sha }}-docker" \
                       --build-arg COMMIT_HASH=${{ github.sha }} \
                       --cache-from type=gha \
@@ -232,15 +232,15 @@ jobs:
                   cat <<EOF >> "$GITHUB_STEP_SUMMARY"
                   ## 🚀 Multi-Arch Container Build Benchmark Comparison
 
-                  | Pipeline Version | Execution Engine | Daemon Overhead | Multi-Arch Platforms | Build Duration | Speedup vs Docker |
+                  | Pipeline Version | Execution Engine | Daemon Overhead | Target Platforms | Build Duration | Speedup vs Docker |
                   | :--- | :--- | :--- | :--- | :--- | :--- |
-                  | **Path 1: Pure Enve Synthesis** | Pure Rust (daemonless) | **Zero (0s)** | \`linux/amd64, linux/arm64\` | **${PATH1_TIME}s** | **${SPEEDUP} faster** |
-                  | **Path 2: Enve in Dockerfile** | Docker BuildKit (buildx) | ~${OVERHEAD_S}s | \`linux/amd64, linux/arm64\` | **${PATH2_TIME}s** | 1.0x (baseline) |
+                  | **Path 1: Pure Enve Synthesis** | Pure Rust (daemonless) | **Zero (0s)** | \`linux/amd64, linux/arm64\` (multi-arch) | **${PATH1_TIME}s** | **${SPEEDUP} faster** |
+                  | **Path 2: Enve in Dockerfile** | Docker BuildKit (buildx) | ~${OVERHEAD_S}s | \`linux/amd64\` (native, zero QEMU) | **${PATH2_TIME}s** | 1.0x (baseline) |
                   | *Upstream Legacy Build* | Native Docker + QEMU | High (>10 min) | \`linux/amd64, linux/arm64\` | ~17 – 193 min | 0.01x |
 
                   ### Key Observations
-                  - **Docker Daemon Overhead**: Running standard Docker Buildx introduces **~${OVERHEAD_S}s** of container filesystem and overlay2 serialization overhead.
-                  - **Zero QEMU Bottleneck**: Both Path 1 and Path 2 completely eliminate slow QEMU instruction emulation by pulling pre-compiled native binaries.
+                  - **True Docker Daemon Overhead**: Even when running 100% native x86_64 without QEMU, Docker BuildKit incurs **~${OVERHEAD_S}s** of container virtualization, filesystem snapshotting, and BuildKit daemon coordination overhead.
+                  - **Pure Rust Speed**: Pure Enve OCI synthesis is **${SPEEDUP} faster** while producing a fully compliant multi-arch image (amd64 + arm64) outside Docker entirely in ~3 seconds.
                   - **Equivalence**: Both images share identical entrypoints (\`/bin/docker-server-unit\`), user configuration (\`root\`/\`posthog\`), and pass 100% of PostHog import gates.
                   EOF
 

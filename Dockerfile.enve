@@ -11,7 +11,7 @@
 # ---------------------------------------------------------
 # Stage 1: Shared Node.js Base
 # ---------------------------------------------------------
-FROM node:24.13.0-bookworm-slim AS node-base
+FROM --platform=$BUILDPLATFORM node:24.13.0-bookworm-slim AS node-base
 WORKDIR /code
 SHELL ["/bin/bash", "-e", "-o", "pipefail", "-c"]
 
@@ -24,7 +24,7 @@ ENV COREPACK_ENABLE_NETWORK=0
 # ---------------------------------------------------------
 # Stage 2: Frontend Build
 # ---------------------------------------------------------
-FROM node-base AS frontend-build
+FROM --platform=$BUILDPLATFORM node-base AS frontend-build
 
 COPY turbo.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.json ./
 COPY frontend/package.json frontend/
@@ -50,7 +50,7 @@ RUN bin/turbo --filter=@posthog/frontend build
 # ---------------------------------------------------------
 # Stage 3: Sourcemap Upload
 # ---------------------------------------------------------
-FROM node:24.13.0-bookworm-slim AS sourcemap-upload
+FROM --platform=$BUILDPLATFORM node:24.13.0-bookworm-slim AS sourcemap-upload
 WORKDIR /code
 SHELL ["/bin/bash", "-e", "-o", "pipefail", "-c"]
 
