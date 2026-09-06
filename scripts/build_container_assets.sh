@@ -87,16 +87,24 @@ if [ -d "common/plugin_transpiler/dist" ]; then
     cp -r common/plugin_transpiler/dist "$STAGING_DIR/code/common/plugin_transpiler/"
     [ -d "common/plugin_transpiler/node_modules" ] && cp -r common/plugin_transpiler/node_modules "$STAGING_DIR/code/common/plugin_transpiler/"
     [ -f "common/plugin_transpiler/package.json" ] && cp common/plugin_transpiler/package.json "$STAGING_DIR/code/common/plugin_transpiler/"
+elif [ -d "dist/prebuilt-node-scripts/code/common/plugin_transpiler" ]; then
+    mkdir -p "$STAGING_DIR/code/common/plugin_transpiler"
+    cp -r dist/prebuilt-node-scripts/code/common/plugin_transpiler/* "$STAGING_DIR/code/common/plugin_transpiler/"
 fi
 if [ -d "products/canvas/packages/canvas_builder" ]; then
     mkdir -p "$STAGING_DIR/code/products/canvas/packages"
     cp -r products/canvas/packages/canvas_builder "$STAGING_DIR/code/products/canvas/packages/"
+elif [ -d "dist/prebuilt-node-scripts/code/products/canvas/packages/canvas_builder" ]; then
+    mkdir -p "$STAGING_DIR/code/products/canvas/packages"
+    cp -r dist/prebuilt-node-scripts/code/products/canvas/packages/canvas_builder "$STAGING_DIR/code/products/canvas/packages/"
 fi
 
 # 8. GeoIP Database Setup
 echo "• 8. Staging GeoIP database..."
 if [ -f share/GeoLite2-City.mmdb ]; then
     cp share/GeoLite2-City.mmdb "$STAGING_DIR/code/share/"
+elif [ -f dist/geoip/code/share/GeoLite2-City.mmdb ]; then
+    cp dist/geoip/code/share/GeoLite2-City.mmdb "$STAGING_DIR/code/share/"
 else
     touch "$STAGING_DIR/code/share/GeoLite2-City.mmdb"
 fi

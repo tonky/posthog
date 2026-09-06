@@ -126,14 +126,57 @@ test-django *ARGS:
     echo "======================================================================="
     START_MS=$(date +%s%N)
     echo "• 1. Pre-roll data tier setup (<1.2s)..."
-    enve up --dry-run postgres redis clickhouse
+    if ! psql -h 127.0.0.1 -p 15432 -U posthog -d postgres -c "SELECT 1;" >/dev/null 2>&1; then
+        echo "• Booting PostgreSQL 15 on port 15432..."
+        PG_CTL=$(which pg_ctl 2>/dev/null || echo "/nix/store/hap0a9xj3hfxmf08fg9yyz87rm90w9sm-postgresql-15.19/bin/pg_ctl")
+        $PG_CTL start -D data/postgres/data -l /tmp/postgres.log -o "-p 15432 -k /tmp -h 127.0.0.1" >/dev/null 2>&1 || true
+        for i in {1..50}; do
+            psql -h 127.0.0.1 -p 15432 -U posthog -d postgres -c "SELECT 1;" >/dev/null 2>&1 && break
+            sleep 0.1
+        done
+    fi
+    if ! curl -s -o /dev/null "http://127.0.0.1:8123/?query=SELECT+1"; then
+        echo "• Booting ClickHouse server on port 8123/9000..."
+        CH_BIN=$(which clickhouse-server 2>/dev/null || echo "/nix/store/navpwgfi43zvhqgpv638z707m4nl5ijx-clickhouse-26.7.5.10-stable/bin/clickhouse-server")
+        $CH_BIN --config-file=data/clickhouse/config.xml --pid-file=data/clickhouse/clickhouse.pid --daemon >/dev/null 2>&1 || true
+        for i in {1..50}; do
+            curl -s -o /dev/null "http://127.0.0.1:8123/?query=SELECT+1" && break
+            sleep 0.1
+        done
+    fi
     SETUP_MS=$(( ($(date +%s%N) - START_MS) / 1000000 ))
-    echo "• 2. Executing pytest with multi-core parallelization..."
+    mkdir -p frontend/dist
+    touch frontend/dist/index.html frontend/dist/layout.html frontend/dist/exporter.html
+    if ! curl -s -o /dev/null http://127.0.0.1:19000; then
+        echo "• Booting objectstorage service via enve (SeaweedFS on :19000)..."
+        WEED_BIN=$(which weed 2>/dev/null || echo "/nix/store/vdc3fylxjmmmq6yqnkn7a0i7yczg36xh-seaweedfs-4.44/bin/weed")
+        nohup $WEED_BIN server -ip=127.0.0.1 -master.port=19001 -master.electionTimeout=1s -volume.port=19002 -filer.port=19003 -s3 -s3.port=19000 -dir=data/objectstorage -volume.max=1000 -master.volumePreallocate=false </dev/null >/tmp/weed.log 2>&1 &
+        disown
+        for i in {1..100}; do
+            curl -s -o /dev/null http://127.0.0.1:19000 && break
+            sleep 0.1
+        done
+    fi
+    if ! ss -tlpn | grep -q ":7233 "; then
+        echo "• Booting temporal service via enve (port :7233)..."
+        nohup enve up temporal </dev/null >/dev/null 2>&1 &
+        disown
+        for i in {1..50}; do
+            ss -tlpn | grep -q ":7233 " && break
+            sleep 0.1
+        done
+        DEBUG=true TEST=true SECRET_KEY=abcdef uv run python manage.py register_temporal_search_attributes >/dev/null 2>&1 || true
+    fi
     DEBUG=true TEST=true SECRET_KEY=abcdef \
+        OBJECT_STORAGE_ENABLED=true \
+        OBJECT_STORAGE_ENDPOINT="http://127.0.0.1:19000" \
+        OBJECT_STORAGE_ACCESS_KEY_ID="object_storage_root_user" \
+        OBJECT_STORAGE_SECRET_ACCESS_KEY="object_storage_root_password" \
         PGHOST=127.0.0.1 PGPORT=15432 PGUSER=posthog \
         DATABASE_URL="postgres://posthog@127.0.0.1:15432/posthog" \
         REDIS_URL="redis://127.0.0.1:6379" \
         CLICKHOUSE_HOST=127.0.0.1 CLICKHOUSE_HTTP_PORT=8123 CLICKHOUSE_TCP_PORT=9000 \
+        TEMPORAL_HOST=127.0.0.1 TEMPORAL_PORT=7233 \
         uv run pytest -v --tb=short "${FINAL_ARGS[@]}"
     END_MS=$(date +%s%N)
     DURATION_MS=$(( (END_MS - START_MS) / 1000000 ))
@@ -197,13 +240,34 @@ test-full-xdist *ARGS:
                 WORKER_COUNT="$val"
             elif [[ "$val" == "auto" ]]; then
                 WORKER_COUNT=$(( NPROC > 10 ? 10 : NPROC ))
+                FINAL_ARGS[i+1]="$WORKER_COUNT"
             fi
         elif [[ "${FINAL_ARGS[i]}" =~ ^--numprocesses=([0-9]+)$ ]]; then
             WORKER_COUNT="${BASH_REMATCH[1]}"
         elif [[ "${FINAL_ARGS[i]}" == "--numprocesses=auto" ]]; then
             WORKER_COUNT=$(( NPROC > 10 ? 10 : NPROC ))
+            FINAL_ARGS[i]="--numprocesses=$WORKER_COUNT"
         fi
     done
+
+    if ! psql -h 127.0.0.1 -p 15432 -U posthog -d postgres -c "SELECT 1;" >/dev/null 2>&1; then
+        echo "• Booting PostgreSQL 15 on port 15432..."
+        PG_CTL=$(which pg_ctl 2>/dev/null || echo "/nix/store/hap0a9xj3hfxmf08fg9yyz87rm90w9sm-postgresql-15.19/bin/pg_ctl")
+        $PG_CTL start -D data/postgres/data -l /tmp/postgres.log -o "-p 15432 -k /tmp -h 127.0.0.1" >/dev/null 2>&1 || true
+        for i in {1..50}; do
+            psql -h 127.0.0.1 -p 15432 -U posthog -d postgres -c "SELECT 1;" >/dev/null 2>&1 && break
+            sleep 0.1
+        done
+    fi
+    if ! curl -s -o /dev/null "http://127.0.0.1:8123/?query=SELECT+1"; then
+        echo "• Booting ClickHouse server on port 8123/9000..."
+        CH_BIN=$(which clickhouse-server 2>/dev/null || echo "/nix/store/navpwgfi43zvhqgpv638z707m4nl5ijx-clickhouse-26.7.5.10-stable/bin/clickhouse-server")
+        $CH_BIN --config-file=data/clickhouse/config.xml --pid-file=data/clickhouse/clickhouse.pid --daemon >/dev/null 2>&1 || true
+        for i in {1..50}; do
+            curl -s -o /dev/null "http://127.0.0.1:8123/?query=SELECT+1" && break
+            sleep 0.1
+        done
+    fi
 
     # Fast-provision missing worker databases from template (<0.5s per worker)
     if psql -h 127.0.0.1 -p 15432 -U posthog -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='test_posthog'" 2>/dev/null | grep -q 1; then
@@ -226,12 +290,39 @@ test-full-xdist *ARGS:
         done
     fi
 
+    mkdir -p frontend/dist
+    touch frontend/dist/index.html frontend/dist/layout.html frontend/dist/exporter.html
+    if ! curl -s -o /dev/null http://127.0.0.1:19000; then
+        echo "• Booting objectstorage service via enve (SeaweedFS on :19000)..."
+        WEED_BIN=$(which weed 2>/dev/null || echo "/nix/store/vdc3fylxjmmmq6yqnkn7a0i7yczg36xh-seaweedfs-4.44/bin/weed")
+        nohup $WEED_BIN server -ip=127.0.0.1 -master.port=19001 -master.electionTimeout=1s -volume.port=19002 -filer.port=19003 -s3 -s3.port=19000 -dir=data/objectstorage -volume.max=1000 -master.volumePreallocate=false </dev/null >/tmp/weed.log 2>&1 &
+        disown
+        for i in {1..100}; do
+            curl -s -o /dev/null http://127.0.0.1:19000 && break
+            sleep 0.1
+        done
+    fi
+    if ! ss -tlpn | grep -q ":7233 "; then
+        echo "• Booting temporal service via enve (port :7233)..."
+        nohup enve up temporal </dev/null >/dev/null 2>&1 &
+        disown
+        for i in {1..50}; do
+            ss -tlpn | grep -q ":7233 " && break
+            sleep 0.1
+        done
+        DEBUG=true TEST=true SECRET_KEY=abcdef uv run python manage.py register_temporal_search_attributes >/dev/null 2>&1 || true
+    fi
     echo "• Auto-provisioning worker product databases & executing multi-core pytest..."
     DEBUG=true TEST=true SECRET_KEY=abcdef \
+        OBJECT_STORAGE_ENABLED=true \
+        OBJECT_STORAGE_ENDPOINT="http://127.0.0.1:19000" \
+        OBJECT_STORAGE_ACCESS_KEY_ID="object_storage_root_user" \
+        OBJECT_STORAGE_SECRET_ACCESS_KEY="object_storage_root_password" \
         PGHOST=127.0.0.1 PGPORT=15432 PGUSER=posthog \
         DATABASE_URL="postgres://posthog@127.0.0.1:15432/posthog" \
         REDIS_URL="redis://127.0.0.1:6379" \
         CLICKHOUSE_HOST=127.0.0.1 CLICKHOUSE_HTTP_PORT=8123 CLICKHOUSE_TCP_PORT=9000 \
+        TEMPORAL_HOST=127.0.0.1 TEMPORAL_PORT=7233 \
         uv run pytest -v --tb=short "${FINAL_ARGS[@]}"
     END_MS=$(date +%s%N)
     DURATION_MS=$(( (END_MS - START_MS) / 1000000 ))

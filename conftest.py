@@ -1,5 +1,13 @@
 import gc
+import sys
 import warnings
+
+try:
+    import ctypes
+
+    _libc = ctypes.CDLL("libc.so.6") if sys.platform.startswith("linux") else None
+except Exception:
+    _libc = None
 
 import pytest
 
@@ -254,11 +262,23 @@ _test_count = 0
 def pytest_runtest_teardown(item, nextitem) -> None:
     global _test_count
     _test_count += 1
-    # Periodically collect young-gen cyclic garbage (querysets, mock calls, model instances)
-    # before they accumulate across long multi-test suites. Since the boot heap is frozen,
-    # scanning generations 0 and 1 takes <5ms.
-    if _test_count % 25 == 0:
-        gc.collect(1)
+    try:
+        from django.db import reset_queries  # noqa: PLC0415
+
+        reset_queries()
+    except Exception:
+        pass
+
+    # Periodically collect cyclic garbage (querysets, mock calls, model instances)
+    # and return freed heap memory to the OS. Since the boot heap is frozen,
+    # scanning takes <5ms.
+    if _test_count % 20 == 0:
+        gc.collect()
+        if _libc is not None:
+            try:
+                _libc.malloc_trim(0)
+            except Exception:
+                pass
 
 
 def pytest_unconfigure() -> None:

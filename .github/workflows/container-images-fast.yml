@@ -32,7 +32,7 @@ jobs:
     # Path 1: Pure Enve OCI Image Synthesis (Outside Docker Daemon)
     # -------------------------------------------------------------------------
     path1_pure_enve_synthesis:
-        name: "Path 1: Pure Enve Synthesis (Daemonless)"
+        name: 'Path 1: Pure Enve Synthesis (Daemonless)'
         runs-on: ubuntu-24.04
         timeout-minutes: 10
         outputs:
@@ -209,7 +209,7 @@ jobs:
     # Path 2: Enve Inside Standard Dockerfile (Docker Buildx / BuildKit)
     # -------------------------------------------------------------------------
     path2_dockerfile_enve_build:
-        name: "Path 2: Enve inside Dockerfile (BuildKit)"
+        name: 'Path 2: Enve inside Dockerfile (BuildKit)'
         runs-on: ubuntu-24.04
         timeout-minutes: 20
         outputs:
@@ -227,7 +227,7 @@ jobs:
                   fetch-depth: 2
 
             - name: Set up Docker Buildx
-              uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
+              uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2 # v3.10.0
 
             # -----------------------------------------------------------------
             # Decoupled Frontend Pre-Build & Cache (BuildKit Named Context)
@@ -278,6 +278,53 @@ jobs:
                   fi
                   echo "✓ Frontend assets verified in dist/prebuilt-frontend"
 
+            # -----------------------------------------------------------------
+            # Decoupled Node Scripts Pre-Build & Cache (BuildKit Named Context)
+            # -----------------------------------------------------------------
+            - name: Restore Pre-Built Node Scripts from GHA Cache
+              id: cache-node-scripts
+              uses: actions/cache/restore@v4
+              with:
+                  path: dist/prebuilt-node-scripts
+                  key: node-scripts-assets-${{ runner.os }}-v1-${{ hashFiles('common/plugin_transpiler/**', 'products/canvas/packages/canvas_builder/**', 'pnpm-lock.yaml') }}
+
+            - name: Build and Stage Node Scripts on Host (on cache miss)
+              if: steps.cache-node-scripts.outputs.cache-hit != 'true' && env.ACT != 'true'
+              shell: bash
+              run: |
+                  set -euo pipefail
+                  chmod +x scripts/prepare_build_contexts.sh
+                  scripts/prepare_build_contexts.sh node-scripts
+
+            - name: Save Pre-Built Node Scripts to GHA Cache
+              if: github.ref == 'refs/heads/master' && steps.cache-node-scripts.outputs.cache-hit != 'true' && env.ACT != 'true'
+              uses: actions/cache/save@v4
+              with:
+                  path: dist/prebuilt-node-scripts
+                  key: ${{ steps.cache-node-scripts.outputs.primary-key || format('node-scripts-assets-{0}-v1-{1}', runner.os, hashFiles('common/plugin_transpiler/**', 'products/canvas/packages/canvas_builder/**', 'pnpm-lock.yaml')) }}
+
+            # -----------------------------------------------------------------
+            # Prepare GeoIP & Unit Provider Named Contexts
+            # -----------------------------------------------------------------
+            - name: Prepare GeoIP & Unit Provider Named Contexts
+              shell: bash
+              run: |
+                  set -euo pipefail
+                  chmod +x scripts/prepare_build_contexts.sh
+                  scripts/prepare_build_contexts.sh geoip
+                  scripts/prepare_build_contexts.sh unit-provider
+
+            - name: Verify Staged Build Contexts
+              run: |
+                  set -euo pipefail
+                  chmod +x scripts/prepare_build_contexts.sh
+                  # Ensure all contexts exist (fallback for local act or cache miss)
+                  [ ! -d "dist/prebuilt-frontend/code/frontend/dist" ] && scripts/prepare_build_contexts.sh frontend
+                  [ ! -d "dist/prebuilt-node-scripts/code/common/plugin_transpiler/dist" ] && scripts/prepare_build_contexts.sh node-scripts
+                  [ ! -f "dist/geoip/code/share/GeoLite2-City.mmdb" ] && scripts/prepare_build_contexts.sh geoip
+                  [ ! -d "dist/unit-provider/opt/unit" ] && scripts/prepare_build_contexts.sh unit-provider
+                  echo "✓ All 4 BuildKit named contexts verified and ready for Docker Buildx"
+
             - name: Build Native Image with Docker Buildx & Dockerfile.enve
               id: build
               run: |
@@ -287,6 +334,9 @@ jobs:
                       --file Dockerfile.enve \
                       --platform linux/amd64 \
                       --build-context frontend-build=dist/prebuilt-frontend \
+                      --build-context node-scripts-build=dist/prebuilt-node-scripts \
+                      --build-context fetch-geoip-db=dist/geoip \
+                      --build-context unit-binary-provider=dist/unit-provider \
                       --tag "ghcr.io/posthog/posthog:${{ github.sha }}-docker" \
                       --build-arg COMMIT_HASH=${{ github.sha }} \
                       --cache-from type=gha \
@@ -303,7 +353,7 @@ jobs:
     # Benchmark Comparison: Measures Exact Docker Overhead
     # -------------------------------------------------------------------------
     benchmark_comparison:
-        name: "Benchmark: Measure Docker Daemon Overhead"
+        name: 'Benchmark: Measure Docker Daemon Overhead'
         needs: [path1_pure_enve_synthesis, path2_dockerfile_enve_build]
         runs-on: ubuntu-24.04
         timeout-minutes: 5
@@ -341,7 +391,7 @@ jobs:
     # Production Deployment Trigger
     # -------------------------------------------------------------------------
     deploy_dispatch:
-        name: "Trigger Deployment"
+        name: 'Trigger Deployment'
         needs: [path1_pure_enve_synthesis]
         runs-on: ubuntu-24.04
         timeout-minutes: 5

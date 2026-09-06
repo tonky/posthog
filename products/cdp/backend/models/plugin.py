@@ -518,10 +518,10 @@ def fetch_plugin_log_entries(
         clickhouse_where_parts.append("plugin_config_id = %(plugin_config_id)s")
         clickhouse_kwargs["plugin_config_id"] = plugin_config_id
     if after is not None:
-        clickhouse_where_parts.append("timestamp > toDateTime64(%(after)s, 6)")
+        clickhouse_where_parts.append("timestamp > toDateTime64(%(after)s, 6, 'UTC')")
         clickhouse_kwargs["after"] = after.isoformat().replace("+00:00", "")
     if before is not None:
-        clickhouse_where_parts.append("timestamp < toDateTime64(%(before)s, 6)")
+        clickhouse_where_parts.append("timestamp < toDateTime64(%(before)s, 6, 'UTC')")
         clickhouse_kwargs["before"] = before.isoformat().replace("+00:00", "")
     if search:
         clickhouse_where_parts.append("message ILIKE %(search)s")

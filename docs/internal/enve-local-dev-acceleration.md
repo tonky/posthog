@@ -2,7 +2,7 @@
 
 **Date**: September 2026  
 **Status**: Experimental / Investigation & Benchmark Report  
-**Target Area**: Developer Experience (DevEx), Local Stack, CI/CD Runner Efficiency, Test Suites  
+**Target Area**: Developer Experience (DevEx), Local Stack, CI/CD Runner Efficiency, Test Suites
 
 ---
 
@@ -12,28 +12,32 @@ Running the PostHog monorepo locally has traditionally required heavy orchestrat
 
 By introducing **`enve`** (a daemonless, rootless user-space service orchestrator powered by CUE and native process isolation) paired with an **in-memory mathematical AST migration contract**, we benchmarked dramatic improvements across all four core local development workflows:
 
-| Workflow / Metric | Traditional Baseline (Docker / Upstream) | `enve` Accelerated | Measured Impact |
-|---|---|---|---|
-| **Data Tier Boot Time (Full Stack)** | 45.0s – 90.0s | **< 1.20s** | **~40x – 75x faster** |
-| **Data Tier Boot (Web Slice: PG + Redis)** | 18.0s – 35.0s | **0.25s (250ms)** | **~70x – 100x faster** |
-| **Idle RAM Footprint (Background Services)** | 3,800 MB – 6,200 MB | **694 MB** | **~82% reduction** |
-| **Migration Fresh-Install & DAG Verification** | 1,330s (22 min 10s) | **1.79s (1,788ms)** | **744x faster (zero DB deps)** |
-| **CI Runner Pre-Roll Overhead (per job)** | 204.1s per runner | **< 2.5s per runner** | **~201.6s saved / runner** |
-| **CI Runner Hours (60-shard backend matrix)** | ~204.1 runner-mins | **< 2.5 runner-mins** | **> 3.3 runner-hours saved / PR** |
-| **Test Execution Mode** | Single-worker sequential | **Multi-core (`-n auto`)** | **3.5x – 6.8x test speedup** |
+| Workflow / Metric                              | Traditional Baseline (Docker / Upstream) | `enve` Accelerated         | Measured Impact                   |
+| ---------------------------------------------- | ---------------------------------------- | -------------------------- | --------------------------------- |
+| **Data Tier Boot Time (Full Stack)**           | 45.0s – 90.0s                            | **< 1.20s**                | **~40x – 75x faster**             |
+| **Data Tier Boot (Web Slice: PG + Redis)**     | 18.0s – 35.0s                            | **0.25s (250ms)**          | **~70x – 100x faster**            |
+| **Idle RAM Footprint (Background Services)**   | 3,800 MB – 6,200 MB                      | **694 MB**                 | **~82% reduction**                |
+| **Migration Fresh-Install & DAG Verification** | 1,330s (22 min 10s)                      | **1.79s (1,788ms)**        | **744x faster (zero DB deps)**    |
+| **CI Runner Pre-Roll Overhead (per job)**      | 204.1s per runner                        | **< 2.5s per runner**      | **~201.6s saved / runner**        |
+| **CI Runner Hours (60-shard backend matrix)**  | ~204.1 runner-mins                       | **< 2.5 runner-mins**      | **> 3.3 runner-hours saved / PR** |
+| **Test Execution Mode**                        | Single-worker sequential                 | **Multi-core (`-n auto`)** | **3.5x – 6.8x test speedup**      |
 
 ---
 
 ## 1. Deep Dive: Service Orchestration & RAM Benchmarks
 
 ### 1.1 The Baseline Problem
+
 The standard PostHog development stack relies on `docker compose` spinning up 6+ services with VM/container boundary overhead, virtual bridge networking, and daemon socket polling. On developer laptops (especially macOS with Docker Desktop VM virtualization or Linux under heavy multitasking), this results in:
+
 - High battery drain and fan noise from container hypervisor background threads.
 - 4–6 GB of RAM pinned continuously just for idle backing services.
 - Sluggish restart cycles when switching branches with conflicting database states.
 
 ### 1.2 The `enve` Architecture
+
 `enve` executes backing binaries natively in user space with:
+
 - **Loopback networking** (`127.0.0.1` on dedicated non-colliding developer ports).
 - **Process trees managed by supervision signals** (`SIGTERM`/`SIGKILL` groups).
 - **Topology declared in CUE** (`enve.cue`), providing compile-time port validation, dependency order topological planning, and automatic Docker Compose fallback generation.
@@ -53,25 +57,28 @@ The standard PostHog development stack relies on `docker compose` spinning up 6+
 =======================================================================
 ```
 
-| Profile / Command | Services Started | Startup Time | Idle RSS Memory |
-|---|---|---|---|
-| `just slice-web` | PostgreSQL + Redis | **0.25s (250ms)** | **135 MB** |
-| `just slice-ingestion` | Redis + Redpanda + ClickHouse | **0.60s (600ms)** | **442 MB** |
-| `just slice-full` | All 6 services (PG, CH, Redis, Redpanda, Temporal, Capture) | **1.18s** | **694 MB** |
-| **Docker Compose Baseline** | Equivalent 6 containers | **58.40s** | **4,850 MB** |
+| Profile / Command           | Services Started                                            | Startup Time      | Idle RSS Memory |
+| --------------------------- | ----------------------------------------------------------- | ----------------- | --------------- |
+| `just slice-web`            | PostgreSQL + Redis                                          | **0.25s (250ms)** | **135 MB**      |
+| `just slice-ingestion`      | Redis + Redpanda + ClickHouse                               | **0.60s (600ms)** | **442 MB**      |
+| `just slice-full`           | All 6 services (PG, CH, Redis, Redpanda, Temporal, Capture) | **1.18s**         | **694 MB**      |
+| **Docker Compose Baseline** | Equivalent 6 containers                                     | **58.40s**        | **4,850 MB**    |
 
 ---
 
 ## 2. In-Memory AST Migration Contract vs. 22-Minute DB Replay
 
 ### 2.1 The Baseline Problem
+
 When auditing whether a PR breaks fresh-install migration integrity (or creates branch merge conflicts in the Directed Acyclic Graph), the naive approach has been replaying migrations from `0001` to `HEAD` against a blank database.
 In PostHog:
+
 - **2,691+** migration files exist across **80+** apps.
 - Replaying 2,691 migrations executes thousands of DDL table locks and sequential inserts, taking **1,330 seconds (22 minutes and 10 seconds)**.
 - Engineers cannot run this locally before pushing, deferring feedback to slow CI gates.
 
 ### 2.2 The In-Memory AST Solution
+
 Rather than applying migrations against an active Postgres engine, `test-contract` proves schema and DAG reachability mathematically in memory:
 
 1. **Static AST/Regex Dependency Extraction**:
@@ -105,22 +112,25 @@ OK
 =======================================================================
 ```
 
-| Implementation Stage | Python Test Duration | Total Wall-Clock | Speedup vs Baseline |
-|---|---|---|---|
-| **Upstream scratch replay** | N/A (DB DDL execution) | 1,330.00s (22m 10s) | 1.0x (Baseline) |
-| **Initial AST test (inside Pytest)** | 4.20s | 6.63s | 200.7x faster |
-| **AST DAG + Scoped App Walk** | 2.10s | 4.20s | 316.7x faster |
-| **Phase-1 Bootstrap + Pure AST Symbols** | **1.11s** | **1.79s** | **743.8x faster** |
+| Implementation Stage                     | Python Test Duration   | Total Wall-Clock    | Speedup vs Baseline |
+| ---------------------------------------- | ---------------------- | ------------------- | ------------------- |
+| **Upstream scratch replay**              | N/A (DB DDL execution) | 1,330.00s (22m 10s) | 1.0x (Baseline)     |
+| **Initial AST test (inside Pytest)**     | 4.20s                  | 6.63s               | 200.7x faster       |
+| **AST DAG + Scoped App Walk**            | 2.10s                  | 4.20s               | 316.7x faster       |
+| **Phase-1 Bootstrap + Pure AST Symbols** | **1.11s**              | **1.79s**           | **743.8x faster**   |
 
 ---
 
 ## 3. Multi-Core Test Parallelization (`pytest -n auto`)
 
 ### 3.1 The Baseline Problem
+
 Historically, running backend tests across multiple cores (`pytest-xdist`) locally resulted in database name collisions (`test_posthog`), schema corruption, and port binding conflicts. Developers defaulted to single-threaded test runs, making local test verification slow.
 
 ### 3.2 The `enve` Enablement
+
 `enve` provisions isolated database environments with distinct port bindings and dynamic template schemas:
+
 - Workers each communicate with unique isolated test databases (`test_posthog_gw0`, `test_posthog_gw1`, etc.).
 - Engineers can run `pytest-xdist -n auto` natively across all CPU cores.
 
@@ -153,7 +163,9 @@ just test-full-xdist common/hogvm/python/test -n 4
 In `ci-backend.yml`, PostHog runs an extensive 60-runner matrix for Django test shards.
 
 ### 4.1 Upstream Runner Tax
+
 Every runner must boot the dev stack before executing tests:
+
 1. `bootstrap-dev-stack`
 2. Docker daemon startup
 3. Container image pulls and volume mounts
@@ -162,11 +174,13 @@ Every runner must boot the dev stack before executing tests:
 **Measured Upstream Overhead**: **204.1 seconds per runner**.
 
 ### 4.2 With `enve` Rootless Services
+
 1. No Docker daemon or root container socket required.
 2. Ephemeral loopback services boot directly in user space in **< 2.5 seconds**.
 3. **Overhead Saved**: **~201.6 seconds per runner**.
 
 ### 4.3 Total CI Economy
+
 For a PR running the full 60-job backend matrix:
 $$\text{Time Saved} = 60 \text{ runners} \times 201.6 \text{ seconds} = 12,096 \text{ runner-seconds} \approx \mathbf{201.6 \text{ runner-minutes (3.36 runner-hours)}} \text{ per PR}$$
 
