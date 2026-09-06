@@ -466,19 +466,41 @@ jobs:
           sudo chmod +x /usr/local/bin/enve
           enve --version
 
-      - name: Install Nix (Verified Package Manager)
-        uses: cachix/install-nix-action@v30
+      - name: Restore Temporal CLI Closure from GHA Cache
+        id: gha-temporal-cache
+        uses: actions/cache/restore@v4
         with:
-          extra_nix_config: |
-            trusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY=
-            substituters = https://cache.nixos.org
-            experimental-features = nix-command flakes
+          path: /nix/store
+          key: nix-store-temporal-${{ runner.os }}-${{ hashFiles('.github/closures/temporal.closure') }}
 
-      - name: Install Temporal CLI (Verified Nix Package)
+      - name: Pull Temporal Closure from Cloudflare R2 (Daemonless Fallback)
+        env:
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
         shell: bash
         run: |
-          nix profile install nixpkgs#temporal-cli
+          echo "::group::Materializing Temporal Closure via enve (Daemonless)"
+          sudo mkdir -p /nix/store
+          sudo chown -R "$USER" /nix
+          for p in $(cat .github/closures/temporal.closure); do
+            if [ ! -d "$p" ]; then
+              enve cache pull "$p" --cache "s3://${R2_BUCKET}?endpoint=${R2_ENDPOINT}&region=auto" --quiet
+            fi
+          done
+          echo "/nix/store/cp3l3l4qzr9q87rn8jrrl3kq0b7nrp73-temporal-cli-1.8.2/bin" >> "$GITHUB_PATH"
+          sudo ln -sf /nix/store/cp3l3l4qzr9q87rn8jrrl3kq0b7nrp73-temporal-cli-1.8.2/bin/* /usr/local/bin/
           temporal --version
+          echo "::endgroup::"
+
+      - name: Save Temporal CLI Closure to GHA Cache
+        if: steps.gha-temporal-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: /nix/store
+          key: ${{ steps.gha-temporal-cache.outputs.cache-primary-key }}
 
       - name: Start Live Temporal Service via enve
         shell: bash
@@ -653,21 +675,43 @@ jobs:
             sqlx migrate run --source rust/persons_migrations/ || true
           echo "::endgroup::"
 
-      - name: Install Nix (Shard 1 for ClickHouse)
+      - name: Restore ClickHouse Closure from GHA Cache (Shard 1)
         if: matrix.shard == 1
-        uses: cachix/install-nix-action@v30
+        id: gha-clickhouse-cache
+        uses: actions/cache/restore@v4
         with:
-          extra_nix_config: |
-            trusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY=
-            substituters = https://cache.nixos.org
-            experimental-features = nix-command flakes
+          path: /nix/store
+          key: nix-store-clickhouse-${{ runner.os }}-${{ hashFiles('.github/closures/clickhouse.closure') }}
 
-      - name: Install ClickHouse (Verified Nix Package)
+      - name: Pull ClickHouse Closure from Cloudflare R2 (Shard 1, Daemonless Fallback)
         if: matrix.shard == 1
+        env:
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
         shell: bash
         run: |
-          nix profile install nixpkgs#clickhouse
+          echo "::group::Materializing ClickHouse Closure via enve (Daemonless)"
+          sudo mkdir -p /nix/store
+          sudo chown -R "$USER" /nix
+          for p in $(cat .github/closures/clickhouse.closure); do
+            if [ ! -d "$p" ]; then
+              enve cache pull "$p" --cache "s3://${R2_BUCKET}?endpoint=${R2_ENDPOINT}&region=auto" --quiet
+            fi
+          done
+          echo "/nix/store/navpwgfi43zvhqgpv638z707m4nl5ijx-clickhouse-26.7.5.10-stable/bin" >> "$GITHUB_PATH"
+          sudo ln -sf /nix/store/navpwgfi43zvhqgpv638z707m4nl5ijx-clickhouse-26.7.5.10-stable/bin/* /usr/local/bin/
           clickhouse-server --version
+          echo "::endgroup::"
+
+      - name: Save ClickHouse Closure to GHA Cache (Shard 1)
+        if: matrix.shard == 1 && steps.gha-clickhouse-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: /nix/store
+          key: ${{ steps.gha-clickhouse-cache.outputs.cache-primary-key }}
 
       - name: Start Live ClickHouse Service via enve on tmpfs (Shard 1)
         if: matrix.shard == 1
