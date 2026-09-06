@@ -138,7 +138,8 @@ test-django *ARGS:
     if ! curl -s -o /dev/null "http://127.0.0.1:8123/?query=SELECT+1"; then
         echo "• Booting ClickHouse server on port 8123/9000..."
         CH_BIN=$(which clickhouse-server 2>/dev/null || echo "/nix/store/navpwgfi43zvhqgpv638z707m4nl5ijx-clickhouse-26.7.5.10-stable/bin/clickhouse-server")
-        $CH_BIN --config-file=data/clickhouse/config.xml --pid-file=data/clickhouse/clickhouse.pid --daemon >/dev/null 2>&1 || true
+        nohup $CH_BIN --config-file=data/clickhouse/config.xml </dev/null >/tmp/clickhouse.log 2>&1 &
+        disown
         for i in {1..50}; do
             curl -s -o /dev/null "http://127.0.0.1:8123/?query=SELECT+1" && break
             sleep 0.1
@@ -167,6 +168,16 @@ test-django *ARGS:
         done
         DEBUG=true TEST=true SECRET_KEY=abcdef uv run python manage.py register_temporal_search_attributes >/dev/null 2>&1 || true
     fi
+    if ! ss -tlpn | grep -q ":16379 "; then
+        echo "• Booting redis service via enve (port :16379)..."
+        REDIS_BIN=$(which redis-server 2>/dev/null || echo "/nix/store/1pnhssld9r4s4qxmsm9fbqvab9h2fyx3-redis-8.10.1/bin/redis-server")
+        nohup $REDIS_BIN --port 16379 --save '' --appendonly no </dev/null >/tmp/redis.log 2>&1 &
+        disown
+        for i in {1..50}; do
+            ss -tlpn | grep -q ":16379 " && break
+            sleep 0.1
+        done
+    fi
     DEBUG=true TEST=true SECRET_KEY=abcdef \
         OBJECT_STORAGE_ENABLED=true \
         OBJECT_STORAGE_ENDPOINT="http://127.0.0.1:19000" \
@@ -174,7 +185,7 @@ test-django *ARGS:
         OBJECT_STORAGE_SECRET_ACCESS_KEY="object_storage_root_password" \
         PGHOST=127.0.0.1 PGPORT=15432 PGUSER=posthog \
         DATABASE_URL="postgres://posthog@127.0.0.1:15432/posthog" \
-        REDIS_URL="redis://127.0.0.1:6379" \
+        REDIS_URL="${REDIS_URL:-redis://127.0.0.1:16379}" \
         CLICKHOUSE_HOST=127.0.0.1 CLICKHOUSE_HTTP_PORT=8123 CLICKHOUSE_TCP_PORT=9000 \
         TEMPORAL_HOST=127.0.0.1 TEMPORAL_PORT=7233 \
         uv run pytest -v --tb=short "${FINAL_ARGS[@]}"
@@ -262,7 +273,8 @@ test-full-xdist *ARGS:
     if ! curl -s -o /dev/null "http://127.0.0.1:8123/?query=SELECT+1"; then
         echo "• Booting ClickHouse server on port 8123/9000..."
         CH_BIN=$(which clickhouse-server 2>/dev/null || echo "/nix/store/navpwgfi43zvhqgpv638z707m4nl5ijx-clickhouse-26.7.5.10-stable/bin/clickhouse-server")
-        $CH_BIN --config-file=data/clickhouse/config.xml --pid-file=data/clickhouse/clickhouse.pid --daemon >/dev/null 2>&1 || true
+        nohup $CH_BIN --config-file=data/clickhouse/config.xml </dev/null >/tmp/clickhouse.log 2>&1 &
+        disown
         for i in {1..50}; do
             curl -s -o /dev/null "http://127.0.0.1:8123/?query=SELECT+1" && break
             sleep 0.1
@@ -312,6 +324,16 @@ test-full-xdist *ARGS:
         done
         DEBUG=true TEST=true SECRET_KEY=abcdef uv run python manage.py register_temporal_search_attributes >/dev/null 2>&1 || true
     fi
+    if ! ss -tlpn | grep -q ":16379 "; then
+        echo "• Booting redis service via enve (port :16379)..."
+        REDIS_BIN=$(which redis-server 2>/dev/null || echo "/nix/store/1pnhssld9r4s4qxmsm9fbqvab9h2fyx3-redis-8.10.1/bin/redis-server")
+        nohup $REDIS_BIN --port 16379 --save '' --appendonly no </dev/null >/tmp/redis.log 2>&1 &
+        disown
+        for i in {1..50}; do
+            ss -tlpn | grep -q ":16379 " && break
+            sleep 0.1
+        done
+    fi
     echo "• Auto-provisioning worker product databases & executing multi-core pytest..."
     DEBUG=true TEST=true SECRET_KEY=abcdef \
         OBJECT_STORAGE_ENABLED=true \
@@ -320,7 +342,7 @@ test-full-xdist *ARGS:
         OBJECT_STORAGE_SECRET_ACCESS_KEY="object_storage_root_password" \
         PGHOST=127.0.0.1 PGPORT=15432 PGUSER=posthog \
         DATABASE_URL="postgres://posthog@127.0.0.1:15432/posthog" \
-        REDIS_URL="redis://127.0.0.1:6379" \
+        REDIS_URL="${REDIS_URL:-redis://127.0.0.1:16379}" \
         CLICKHOUSE_HOST=127.0.0.1 CLICKHOUSE_HTTP_PORT=8123 CLICKHOUSE_TCP_PORT=9000 \
         TEMPORAL_HOST=127.0.0.1 TEMPORAL_PORT=7233 \
         uv run pytest -v --tb=short "${FINAL_ARGS[@]}"

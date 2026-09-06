@@ -235,7 +235,19 @@ def _cheapen_freezegun_module_hash() -> None:
     api._get_module_attributes_hash = _fast_module_attributes_hash  # ty: ignore[invalid-assignment]
 
 
+def _prevent_pydantic_freezegun_conflict() -> None:
+    # Pydantic v1 declares `class ConstrainedDate(date, metaclass=ConstrainedNumberMeta)`.
+    # If pydantic.v1.types is imported for the first time while `freezegun.freeze_time` is active,
+    # `date` is a FakeDate with FakeDateMeta, causing a Python metaclass conflict error on Python 3.13+.
+    # Pre-importing pydantic.v1.types at configure-time ensures it is initialized before any test mocks date.
+    try:
+        import pydantic.v1.types  # noqa: F401, PLC0415
+    except ImportError:
+        pass
+
+
 def pytest_configure(config) -> None:
+    _prevent_pydantic_freezegun_conflict()
     _cache_reverse_rel_identity()
     _cache_select_masks()
     _cache_drf_field_info()
