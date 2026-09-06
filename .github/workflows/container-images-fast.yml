@@ -118,7 +118,11 @@ jobs:
               uses: actions/cache/restore@v4
               with:
                   path: dist/prebuilt-frontend
-                  key: frontend-assets-${{ runner.os }}-v1-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'turbo.json', 'package.json', 'frontend/**', 'products/**/*.ts', 'products/**/*.tsx', 'products/**/*.json', 'packages/**', 'common/esbuilder/**', 'common/hogvm/**', 'patches/**') }}
+                  key: frontend-assets-${{ runner.os }}-${{ github.ref_name }}-v1-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'turbo.json', 'package.json', 'frontend/**', 'products/**/*.ts', 'products/**/*.tsx', 'products/**/*.json', 'packages/**', 'common/esbuilder/**', 'common/hogvm/**', 'patches/**') }}
+                  restore-keys: |
+                      frontend-assets-${{ runner.os }}-${{ github.ref_name }}-v1-
+                      frontend-assets-${{ runner.os }}-master-v1-
+                      frontend-assets-${{ runner.os }}-v1-
 
             - name: Set up Node & pnpm dependencies (on frontend cache miss)
               if: steps.cache-frontend.outputs.cache-hit != 'true' && env.ACT != 'true'
@@ -142,11 +146,11 @@ jobs:
                   echo "✅ Frontend compilation and staging complete."
 
             - name: Save Pre-Built Frontend Assets to GHA Cache
-              if: github.ref == 'refs/heads/master' && steps.cache-frontend.outputs.cache-hit != 'true' && env.ACT != 'true'
+              if: (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/feat/enve-acceleration') && steps.cache-frontend.outputs.cache-hit != 'true' && env.ACT != 'true'
               uses: actions/cache/save@v4
               with:
                   path: dist/prebuilt-frontend
-                  key: ${{ steps.cache-frontend.outputs.primary-key || format('frontend-assets-{0}-v1-{1}', runner.os, hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'turbo.json', 'package.json', 'frontend/**', 'products/**/*.ts', 'products/**/*.tsx', 'products/**/*.json', 'packages/**', 'common/esbuilder/**', 'common/hogvm/**', 'patches/**')) }}
+                  key: ${{ steps.cache-frontend.outputs.primary-key || format('frontend-assets-{0}-{1}-v1-{2}', runner.os, github.ref_name, hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'turbo.json', 'package.json', 'frontend/**', 'products/**/*.ts', 'products/**/*.tsx', 'products/**/*.json', 'packages/**', 'common/esbuilder/**', 'common/hogvm/**', 'patches/**')) }}
 
             - name: Verify Staged Frontend Assets
               if: env.ACT != 'true'
@@ -233,12 +237,19 @@ jobs:
             # -----------------------------------------------------------------
             # Decoupled Frontend Pre-Build & Cache (BuildKit Named Context)
             # -----------------------------------------------------------------
+            # -----------------------------------------------------------------
+            # Decoupled Frontend Pre-Build & Cache (BuildKit Named Context)
+            # -----------------------------------------------------------------
             - name: Restore Pre-Built Frontend Assets from GHA Cache
               id: cache-frontend
               uses: actions/cache/restore@v4
               with:
                   path: dist/prebuilt-frontend
-                  key: frontend-assets-${{ runner.os }}-v1-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'turbo.json', 'package.json', 'frontend/**', 'products/**/*.ts', 'products/**/*.tsx', 'products/**/*.json', 'packages/**', 'common/esbuilder/**', 'common/hogvm/**', 'patches/**') }}
+                  key: frontend-assets-${{ runner.os }}-${{ github.ref_name }}-v1-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'turbo.json', 'package.json', 'frontend/**', 'products/**/*.ts', 'products/**/*.tsx', 'products/**/*.json', 'packages/**', 'common/esbuilder/**', 'common/hogvm/**', 'patches/**') }}
+                  restore-keys: |
+                      frontend-assets-${{ runner.os }}-${{ github.ref_name }}-v1-
+                      frontend-assets-${{ runner.os }}-master-v1-
+                      frontend-assets-${{ runner.os }}-v1-
 
             - name: Set up Node & pnpm dependencies (on frontend cache miss)
               if: steps.cache-frontend.outputs.cache-hit != 'true' && env.ACT != 'true'
@@ -262,11 +273,11 @@ jobs:
                   echo "✅ Frontend compilation and staging complete."
 
             - name: Save Pre-Built Frontend Assets to GHA Cache
-              if: github.ref == 'refs/heads/master' && steps.cache-frontend.outputs.cache-hit != 'true' && env.ACT != 'true'
+              if: (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/feat/enve-acceleration') && steps.cache-frontend.outputs.cache-hit != 'true' && env.ACT != 'true'
               uses: actions/cache/save@v4
               with:
                   path: dist/prebuilt-frontend
-                  key: ${{ steps.cache-frontend.outputs.primary-key || format('frontend-assets-{0}-v1-{1}', runner.os, hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'turbo.json', 'package.json', 'frontend/**', 'products/**/*.ts', 'products/**/*.tsx', 'products/**/*.json', 'packages/**', 'common/esbuilder/**', 'common/hogvm/**', 'patches/**')) }}
+                  key: ${{ steps.cache-frontend.outputs.primary-key || format('frontend-assets-{0}-{1}-v1-{2}', runner.os, github.ref_name, hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'turbo.json', 'package.json', 'frontend/**', 'products/**/*.ts', 'products/**/*.tsx', 'products/**/*.json', 'packages/**', 'common/esbuilder/**', 'common/hogvm/**', 'patches/**')) }}
 
             - name: Verify Staged Frontend Assets
               if: env.ACT != 'true'
@@ -287,7 +298,11 @@ jobs:
               uses: actions/cache/restore@v4
               with:
                   path: dist/prebuilt-node-scripts
-                  key: node-scripts-assets-${{ runner.os }}-v1-${{ hashFiles('common/plugin_transpiler/**', 'products/canvas/packages/canvas_builder/**', 'pnpm-lock.yaml') }}
+                  key: node-scripts-assets-${{ runner.os }}-${{ github.ref_name }}-v1-${{ hashFiles('common/plugin_transpiler/**', 'products/canvas/packages/canvas_builder/**', 'pnpm-lock.yaml') }}
+                  restore-keys: |
+                      node-scripts-assets-${{ runner.os }}-${{ github.ref_name }}-v1-
+                      node-scripts-assets-${{ runner.os }}-master-v1-
+                      node-scripts-assets-${{ runner.os }}-v1-
 
             - name: Build and Stage Node Scripts on Host (on cache miss)
               if: steps.cache-node-scripts.outputs.cache-hit != 'true' && env.ACT != 'true'
@@ -298,11 +313,11 @@ jobs:
                   scripts/prepare_build_contexts.sh node-scripts
 
             - name: Save Pre-Built Node Scripts to GHA Cache
-              if: github.ref == 'refs/heads/master' && steps.cache-node-scripts.outputs.cache-hit != 'true' && env.ACT != 'true'
+              if: (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/feat/enve-acceleration') && steps.cache-node-scripts.outputs.cache-hit != 'true' && env.ACT != 'true'
               uses: actions/cache/save@v4
               with:
                   path: dist/prebuilt-node-scripts
-                  key: ${{ steps.cache-node-scripts.outputs.primary-key || format('node-scripts-assets-{0}-v1-{1}', runner.os, hashFiles('common/plugin_transpiler/**', 'products/canvas/packages/canvas_builder/**', 'pnpm-lock.yaml')) }}
+                  key: ${{ steps.cache-node-scripts.outputs.primary-key || format('node-scripts-assets-{0}-{1}-v1-{2}', runner.os, github.ref_name, hashFiles('common/plugin_transpiler/**', 'products/canvas/packages/canvas_builder/**', 'pnpm-lock.yaml')) }}
 
             # -----------------------------------------------------------------
             # Decoupled GeoIP Pre-Fetch & Cache (BuildKit Named Context)
@@ -312,10 +327,11 @@ jobs:
               uses: actions/cache/restore@v4
               with:
                   path: dist/geoip
-                  key: geoip-db-${{ runner.os }}-v1-${{ hashFiles('bin/download-mmdb') }}
+                  key: geoip-db-${{ runner.os }}-${{ github.ref_name }}-v1-${{ hashFiles('bin/download-mmdb') }}
                   restore-keys: |
+                      geoip-db-${{ runner.os }}-${{ github.ref_name }}-v1-
+                      geoip-db-${{ runner.os }}-master-v1-
                       geoip-db-${{ runner.os }}-v1-
-                      geoip-db-${{ runner.os }}-
                       geoip-db-
 
             - name: Stage GeoIP Context on Host (on cache miss)
@@ -327,10 +343,12 @@ jobs:
                   scripts/prepare_build_contexts.sh geoip
 
             - name: Save GeoIP Database to GHA Cache
-              if: github.ref == 'refs/heads/master' && steps.cache-geoip.outputs.cache-hit != 'true' && env.ACT != 'true'
+              if: (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/feat/enve-acceleration') && steps.cache-geoip.outputs.cache-hit != 'true' && env.ACT != 'true'
               uses: actions/cache/save@v4
               with:
                   path: dist/geoip
+                  key: ${{ steps.cache-geoip.outputs.primary-key || format('geoip-db-{0}-{1}-v1-{2}', runner.os, github.ref_name, hashFiles('bin/download-mmdb')) }}
+
             # -----------------------------------------------------------------
             # Decoupled Python Wheels Pre-Fetch & Cache (BuildKit Named Context)
             # -----------------------------------------------------------------
@@ -339,8 +357,10 @@ jobs:
               uses: actions/cache/restore@v4
               with:
                   path: dist/wheel-cache
-                  key: uv-wheels-${{ runner.os }}-v1-${{ hashFiles('uv.lock') }}
+                  key: uv-wheels-${{ runner.os }}-${{ github.ref_name }}-v1-${{ hashFiles('uv.lock') }}
                   restore-keys: |
+                      uv-wheels-${{ runner.os }}-${{ github.ref_name }}-v1-
+                      uv-wheels-${{ runner.os }}-master-v1-
                       uv-wheels-${{ runner.os }}-v1-
                       uv-wheels-${{ runner.os }}-
 
@@ -353,11 +373,11 @@ jobs:
                   scripts/prepare_build_contexts.sh wheels
 
             - name: Save Python Wheels to GHA Cache
-              if: github.ref == 'refs/heads/master' && steps.cache-wheels.outputs.cache-hit != 'true' && env.ACT != 'true'
+              if: (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/feat/enve-acceleration') && steps.cache-wheels.outputs.cache-hit != 'true' && env.ACT != 'true'
               uses: actions/cache/save@v4
               with:
                   path: dist/wheel-cache
-                  key: ${{ steps.cache-wheels.outputs.primary-key || format('uv-wheels-{0}-v1-{1}', runner.os, hashFiles('uv.lock')) }}
+                  key: ${{ steps.cache-wheels.outputs.primary-key || format('uv-wheels-{0}-{1}-v1-{2}', runner.os, github.ref_name, hashFiles('uv.lock')) }}
 
             # -----------------------------------------------------------------
             # Prepare NGINX Unit Provider Named Context
