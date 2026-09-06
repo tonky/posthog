@@ -136,16 +136,30 @@ jobs:
           echo "✓ Live rootless PostgreSQL running via enve on port 5432 (tmpfs RAM disk, zero Docker)"
           echo "::endgroup::"
 
-      - name: Install sqlx-cli
+      - name: Restore sqlx-cli binary from GHA Cache
+        id: cache-sqlx
+        uses: actions/cache@v4
+        with:
+          path: /home/runner/.cargo/bin/sqlx
+          key: ${{ runner.os }}-sqlx-cli-0.8.2
+
+      - name: Install sqlx-cli (on GHA cache miss)
+        if: steps.cache-sqlx.outputs.cache-hit != 'true'
         shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "::group::Installing sqlx-cli"
+          echo "::group::Installing sqlx-cli via binstall"
           curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
           export PATH="$HOME/.cargo/bin:$PATH"
-          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
           cargo-binstall --no-confirm sqlx-cli@0.8.2
-          sqlx --version
           echo "::endgroup::"
+
+      - name: Configure sqlx-cli on PATH
+        shell: bash
+        run: |
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+          $HOME/.cargo/bin/sqlx --version
 
       - name: Prime Database from Schema Snapshot
         shell: bash
@@ -312,16 +326,30 @@ jobs:
           sudo chmod +x /usr/local/bin/enve
           enve --version
 
-      - name: Install sqlx-cli
+      - name: Restore sqlx-cli binary from GHA Cache
+        id: cache-sqlx
+        uses: actions/cache@v4
+        with:
+          path: /home/runner/.cargo/bin/sqlx
+          key: ${{ runner.os }}-sqlx-cli-0.8.2
+
+      - name: Install sqlx-cli (on GHA cache miss)
+        if: steps.cache-sqlx.outputs.cache-hit != 'true'
         shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "::group::Installing sqlx-cli"
+          echo "::group::Installing sqlx-cli via binstall"
           curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
           export PATH="$HOME/.cargo/bin:$PATH"
-          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
           cargo-binstall --no-confirm sqlx-cli@0.8.2
-          sqlx --version
           echo "::endgroup::"
+
+      - name: Configure sqlx-cli on PATH
+        shell: bash
+        run: |
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+          $HOME/.cargo/bin/sqlx --version
 
       - name: Start Live Services (enve PostgreSQL on tmpfs & native Redis)
         shell: bash
@@ -593,16 +621,30 @@ jobs:
           sudo chmod +x /usr/local/bin/enve
           enve --version
 
-      - name: Install sqlx-cli
+      - name: Restore sqlx-cli binary from GHA Cache
+        id: cache-sqlx
+        uses: actions/cache@v4
+        with:
+          path: /home/runner/.cargo/bin/sqlx
+          key: ${{ runner.os }}-sqlx-cli-0.8.2
+
+      - name: Install sqlx-cli (on GHA cache miss)
+        if: steps.cache-sqlx.outputs.cache-hit != 'true'
         shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "::group::Installing sqlx-cli"
+          echo "::group::Installing sqlx-cli via binstall"
           curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
           export PATH="$HOME/.cargo/bin:$PATH"
-          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
           cargo-binstall --no-confirm sqlx-cli@0.8.2
-          sqlx --version
           echo "::endgroup::"
+
+      - name: Configure sqlx-cli on PATH
+        shell: bash
+        run: |
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+          $HOME/.cargo/bin/sqlx --version
 
       - name: Start Live Services (enve PostgreSQL on tmpfs & native Redis)
         shell: bash

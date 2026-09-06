@@ -81,20 +81,23 @@ jobs:
 
             - name: Docker meta and registry login
               id: docker-meta
+              if: ${{ vars.AWS_ECR_POSTHOG_MASTER_PUBLISH_IAM_ROLE != '' }}
               uses: ./.github/actions/docker-meta
               with:
                   image-name: posthog
                   ecr-image-name: ${{ env.ECR_REPOSITORY }}
-                  push-to-dockerhub: ${{ vars.PUBLIC_IMAGE_PUSH_PAUSED != 'true' }}
+                  push-to-dockerhub: ${{ vars.PUBLIC_IMAGE_PUSH_PAUSED != 'true' && secrets.DOCKERHUB_TOKEN != '' }}
                   push-to-ghcr: ${{ vars.PUBLIC_IMAGE_PUSH_PAUSED != 'true' }}
+                  push-to-ecr: true
                   aws-role-to-assume: ${{ vars.AWS_ECR_POSTHOG_MASTER_PUBLISH_IAM_ROLE }}
                   github-token: ${{ secrets.GITHUB_TOKEN }}
                   dockerhub-username: ${{ secrets.DOCKERHUB_USER }}
                   dockerhub-password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-            # Idempotency preflight
+            # Idempotency preflight (only if ECR configured)
             - name: Check for existing image in ECR
               id: preflight
+              if: ${{ vars.AWS_ECR_POSTHOG_MASTER_PUBLISH_IAM_ROLE != '' }}
               env:
                   ECR_REPO: ${{ env.ECR_REPOSITORY }}
                   SHA: ${{ github.sha }}
@@ -115,7 +118,7 @@ jobs:
 
             # Stage application assets and entrypoints (< 2s)
             - name: Stage PostHog container assets
-              if: steps.preflight.outputs.digest == ''
+              if: always() && (steps.preflight.conclusion == 'skipped' || steps.preflight.outputs.digest == '')
               run: |
                   chmod +x scripts/build_container_assets.sh
                   scripts/build_container_assets.sh dist/container-root
@@ -123,7 +126,7 @@ jobs:
             # Synthesize multi-arch OCI archive (pure Rust, sub-20s, zero Docker daemon)
             - name: Synthesize Multi-Arch OCI Image via enve
               id: synthesize
-              if: steps.preflight.outputs.digest == ''
+              if: always() && (steps.preflight.conclusion == 'skipped' || steps.preflight.outputs.digest == '')
               run: |
                   set -euo pipefail
                   START_TS=$(date +%s%N)
@@ -141,7 +144,7 @@ jobs:
 
             # Verify image equivalence and boot readiness before pushing
             - name: Verify Multi-Arch Equivalence & Golden Import Gate
-              if: steps.preflight.outputs.digest == ''
+              if: always() && (steps.preflight.conclusion == 'skipped' || steps.preflight.outputs.digest == '')
               run: |
                   chmod +x scripts/verify_container_equivalence.sh
                   scripts/verify_container_equivalence.sh dist/posthog-enve-multiarch.tar
@@ -149,6 +152,7 @@ jobs:
             # Resolve image digest
             - name: Resolve image digest
               id: image
+              if: always() && (steps.preflight.conclusion == 'skipped' || steps.preflight.outputs.digest == '')
               env:
                   DIGEST: ${{ steps.preflight.outputs.digest }}
               run: |
