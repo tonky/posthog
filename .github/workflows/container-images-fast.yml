@@ -187,6 +187,54 @@ jobs:
             - name: Set up Docker Buildx
               uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
 
+            # -----------------------------------------------------------------
+            # Decoupled Frontend Pre-Build & Cache (BuildKit Named Context)
+            # -----------------------------------------------------------------
+            - name: Restore Pre-Built Frontend Assets from GHA Cache
+              id: cache-frontend
+              uses: actions/cache/restore@v4
+              with:
+                  path: dist/prebuilt-frontend
+                  key: frontend-assets-${{ runner.os }}-v1-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'turbo.json', 'package.json', 'frontend/**', 'products/**/*.ts', 'products/**/*.tsx', 'products/**/*.json', 'packages/**', 'common/esbuilder/**', 'common/hogvm/**', 'patches/**') }}
+
+            - name: Set up Node & pnpm dependencies (on frontend cache miss)
+              if: steps.cache-frontend.outputs.cache-hit != 'true'
+              uses: ./.github/actions/pnpm-install
+              env:
+                  NPM_CONFIG_AUDIT: 'false'
+                  NPM_CONFIG_FUND: 'false'
+              with:
+                  install-command: pnpm --filter=@posthog/frontend... install --frozen-lockfile
+
+            - name: Build Frontend on Host (on frontend cache miss)
+              if: steps.cache-frontend.outputs.cache-hit != 'true'
+              shell: bash
+              run: |
+                  set -euo pipefail
+                  echo "🔨 Compiling frontend on host ext4 filesystem..."
+                  bin/turbo --filter=@posthog/frontend build
+                  mkdir -p dist/prebuilt-frontend/code/frontend/src
+                  cp -r frontend/dist dist/prebuilt-frontend/code/frontend/
+                  cp frontend/src/products.json dist/prebuilt-frontend/code/frontend/src/products.json
+                  echo "✅ Frontend compilation and staging complete."
+
+            - name: Save Pre-Built Frontend Assets to GHA Cache
+              if: steps.cache-frontend.outputs.cache-hit != 'true'
+              uses: actions/cache/save@v4
+              with:
+                  path: dist/prebuilt-frontend
+                  key: ${{ steps.cache-frontend.outputs.primary-key || format('frontend-assets-{0}-v1-{1}', runner.os, hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'turbo.json', 'package.json', 'frontend/**', 'products/**/*.ts', 'products/**/*.tsx', 'products/**/*.json', 'packages/**', 'common/esbuilder/**', 'common/hogvm/**', 'patches/**')) }}
+
+            - name: Verify Staged Frontend Assets
+              run: |
+                  set -euo pipefail
+                  if [ ! -d "dist/prebuilt-frontend/code/frontend/dist" ] || [ ! -f "dist/prebuilt-frontend/code/frontend/src/products.json" ]; then
+                      echo "❌ Staged frontend assets missing!" >&2
+                      ls -la dist/prebuilt-frontend/code/frontend || true
+                      exit 1
+                  fi
+                  echo "✓ Frontend assets verified in dist/prebuilt-frontend"
+
             - name: Build Native Image with Docker Buildx & Dockerfile.enve
               id: build
               run: |
@@ -195,6 +243,7 @@ jobs:
                   docker buildx build \
                       --file Dockerfile.enve \
                       --platform linux/amd64 \
+                      --build-context frontend-build=dist/prebuilt-frontend \
                       --tag "ghcr.io/posthog/posthog:${{ github.sha }}-docker" \
                       --build-arg COMMIT_HASH=${{ github.sha }} \
                       --cache-from type=gha \

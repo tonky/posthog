@@ -87,19 +87,49 @@ test-migrations:
     echo "======================================================================="
 
 # Run authentic Django tests with multi-core parallelization (-n auto)
-test-django TARGET="posthog/test/test_settings_debug_guard.py" +ARGS="":
+test-django *ARGS:
     #!/usr/bin/env bash
     set -euo pipefail
+    DEFAULT_TARGET="posthog/test/test_settings_debug_guard.py"
+    RAW_ARGS=( {{ARGS}} )
+    HAS_N=false
+    HAS_TARGET=false
+    FINAL_ARGS=()
+    SKIP_NEXT=false
+
+    for arg in "${RAW_ARGS[@]+"${RAW_ARGS[@]}"}"; do
+        [ -z "$arg" ] && continue
+        if [[ "$arg" == "-n" || "$arg" =~ ^--numprocesses(=.*)?$ ]]; then
+            HAS_N=true
+        fi
+        if [[ "$arg" != -* && "$SKIP_NEXT" == false ]]; then
+            HAS_TARGET=true
+        fi
+        if [[ "$arg" =~ ^-[kmo]$ || "$arg" == "-n" ]]; then
+            SKIP_NEXT=true
+        else
+            SKIP_NEXT=false
+        fi
+        FINAL_ARGS+=("$arg")
+    done
+
+    if [ "$HAS_TARGET" = false ]; then
+        FINAL_ARGS=("$DEFAULT_TARGET" "${FINAL_ARGS[@]}")
+    fi
+    if [ "$HAS_N" = false ]; then
+        FINAL_ARGS+=("-n" "auto")
+    fi
+
     echo "======================================================================="
-    echo "  🚀 Gate 2: Django Shard Preflight & Multi-Core Pytest (-n auto)"
-    echo "  Target: {{TARGET}}  Args: {{ARGS}}"
+    echo "  🚀 Gate 2: Django Shard Preflight & Multi-Core Pytest"
+    echo "  Executing: pytest -v --tb=short ${FINAL_ARGS[*]}"
     echo "======================================================================="
     START_MS=$(date +%s%N)
     echo "• 1. Pre-roll data tier setup (<1.2s)..."
     enve up --dry-run postgres redis clickhouse
     SETUP_MS=$(( ($(date +%s%N) - START_MS) / 1000000 ))
-    echo "• 2. Executing pytest with multi-core parallelization (-n auto) on: {{TARGET}}"
-    DEBUG=true TEST=true SECRET_KEY=abcdef uv run pytest -v --tb=short {{TARGET}} -n auto {{ARGS}}
+    echo "• 2. Executing pytest with multi-core parallelization..."
+    DEBUG=true TEST=true SECRET_KEY=abcdef uv run pytest -v --tb=short "${FINAL_ARGS[@]}"
     END_MS=$(date +%s%N)
     DURATION_MS=$(( (END_MS - START_MS) / 1000000 ))
     DURATION_S=$(awk "BEGIN {printf \"%.2f\", $DURATION_MS / 1000}")
@@ -113,24 +143,54 @@ test-django TARGET="posthog/test/test_settings_debug_guard.py" +ARGS="":
     echo "======================================================================="
 
 # Run full test suite with multi-core parallelization (-n auto)
-test-full-xdist TARGET="posthog/test" +ARGS="":
+test-full-xdist *ARGS:
     #!/usr/bin/env bash
     set -euo pipefail
+    DEFAULT_TARGET="posthog/test/test_settings_debug_guard.py"
+    RAW_ARGS=( {{ARGS}} )
+    HAS_N=false
+    HAS_TARGET=false
+    FINAL_ARGS=()
+    SKIP_NEXT=false
+
+    for arg in "${RAW_ARGS[@]+"${RAW_ARGS[@]}"}"; do
+        [ -z "$arg" ] && continue
+        if [[ "$arg" == "-n" || "$arg" =~ ^--numprocesses(=.*)?$ ]]; then
+            HAS_N=true
+        fi
+        if [[ "$arg" != -* && "$SKIP_NEXT" == false ]]; then
+            HAS_TARGET=true
+        fi
+        if [[ "$arg" =~ ^-[kmo]$ || "$arg" == "-n" ]]; then
+            SKIP_NEXT=true
+        else
+            SKIP_NEXT=false
+        fi
+        FINAL_ARGS+=("$arg")
+    done
+
+    if [ "$HAS_TARGET" = false ]; then
+        FINAL_ARGS=("$DEFAULT_TARGET" "${FINAL_ARGS[@]}")
+    fi
+    if [ "$HAS_N" = false ]; then
+        FINAL_ARGS+=("-n" "auto")
+    fi
+
     echo "======================================================================="
-    echo "  🚀 Full Test Suite Multi-Core Execution (pytest-xdist -n auto)"
-    echo "  Target: {{TARGET}}  Args: {{ARGS}}"
+    echo "  🚀 Full Test Suite Multi-Core Execution (pytest-xdist)"
+    echo "  Executing: pytest -v --tb=short ${FINAL_ARGS[*]}"
     echo "======================================================================="
     START_MS=$(date +%s%N)
     echo "• Auto-provisioning worker product databases & executing multi-core pytest..."
-    DEBUG=true TEST=true SECRET_KEY=abcdef uv run pytest -v --tb=short {{TARGET}} -n auto {{ARGS}}
+    DEBUG=true TEST=true SECRET_KEY=abcdef uv run pytest -v --tb=short "${FINAL_ARGS[@]}"
     END_MS=$(date +%s%N)
     DURATION_MS=$(( (END_MS - START_MS) / 1000000 ))
     DURATION_S=$(awk "BEGIN {printf \"%.2f\", $DURATION_MS / 1000}")
     echo "======================================================================="
-    echo "✅ Full Test Suite Completed in ${DURATION_S}s (${DURATION_MS}ms) with -n auto!"
+    echo "✅ Full Test Suite Completed in ${DURATION_S}s (${DURATION_MS}ms)!"
     echo "======================================================================="
 
-# Run in-memory AST migration contract & DAG verification (<3s, replaces 22-min scratch replay)
+# Run in-memory AST migration contract & DAG verification (<2s, replaces 22-min scratch replay)
 test-contract:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -139,7 +199,7 @@ test-contract:
     echo "  (Mathematical contract replaces 22-minute scratch DB replay)"
     echo "======================================================================="
     START_MS=$(date +%s%N)
-    DEBUG=true TEST=true SECRET_KEY=abcdef uv run pytest -v posthog/test/test_migration_contract.py
+    DEBUG=true TEST=true SECRET_KEY=abcdef uv run python posthog/test/test_migration_contract.py
     END_MS=$(date +%s%N)
     DURATION_MS=$(( (END_MS - START_MS) / 1000000 ))
     DURATION_S=$(awk "BEGIN {printf \"%.2f\", $DURATION_MS / 1000}")
@@ -152,22 +212,46 @@ test-contract:
     echo "======================================================================="
 
 # Run HogVM bytecode engine tests with multi-core parallelization (-n auto)
-test-hogvm +ARGS="":
+test-hogvm *ARGS:
     #!/usr/bin/env bash
     set -euo pipefail
+    RAW_ARGS=( {{ARGS}} )
+    HAS_N=false
+    for arg in "${RAW_ARGS[@]+"${RAW_ARGS[@]}"}"; do
+        [ -z "$arg" ] && continue
+        if [[ "$arg" == "-n" || "$arg" =~ ^--numprocesses(=.*)?$ ]]; then
+            HAS_N=true
+        fi
+    done
+    FINAL_ARGS=()
+    if [ "$HAS_N" = false ]; then
+        FINAL_ARGS+=("-n" "auto")
+    fi
     echo "======================================================================="
     echo "  🚀 HogVM Bytecode Interpreter Tests (pytest-xdist -n auto)"
     echo "======================================================================="
-    DEBUG=true TEST=true SECRET_KEY=abcdef uv run pytest -v common/hogvm/python/test -n auto {{ARGS}}
+    DEBUG=true TEST=true SECRET_KEY=abcdef uv run pytest -v common/hogvm/python/test "${FINAL_ARGS[@]}" "${RAW_ARGS[@]}"
 
 # Run repository architectural invariants tests with multi-core parallelization (-n auto)
-test-invariants +ARGS="":
+test-invariants *ARGS:
     #!/usr/bin/env bash
     set -euo pipefail
+    RAW_ARGS=( {{ARGS}} )
+    HAS_N=false
+    for arg in "${RAW_ARGS[@]+"${RAW_ARGS[@]}"}"; do
+        [ -z "$arg" ] && continue
+        if [[ "$arg" == "-n" || "$arg" =~ ^--numprocesses(=.*)?$ ]]; then
+            HAS_N=true
+        fi
+    done
+    FINAL_ARGS=()
+    if [ "$HAS_N" = false ]; then
+        FINAL_ARGS+=("-n" "auto")
+    fi
     echo "======================================================================="
     echo "  🚀 Architecture & Scoping Invariants Tests (pytest-xdist -n auto)"
     echo "======================================================================="
-    DEBUG=true TEST=true SECRET_KEY=abcdef uv run pytest -v posthog/test/repo_invariants -n auto {{ARGS}}
+    DEBUG=true TEST=true SECRET_KEY=abcdef uv run pytest -v posthog/test/repo_invariants "${FINAL_ARGS[@]}" "${RAW_ARGS[@]}"
 
 # Run live multi-service database operations and capture event pipeline
 test-live-db:

@@ -24,6 +24,10 @@ ENV COREPACK_ENABLE_NETWORK=0
 # ---------------------------------------------------------
 # Stage 2: Frontend Build
 # ---------------------------------------------------------
+# In CI (and accelerated local builds), this entire stage is substituted
+# instantly (0.1s) via BuildKit named context:
+#   `--build-context frontend-build=dist/prebuilt-frontend`
+# When building without the named context, Docker executes this stage internally as a fallback.
 FROM --platform=$BUILDPLATFORM node-base AS frontend-build
 
 COPY turbo.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.json ./
