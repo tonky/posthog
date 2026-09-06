@@ -159,14 +159,13 @@ jobs:
           TEST: 'true'
           SECRET_KEY: 'abcdef'
         run: |
+          for p in /usr/lib/postgresql/*/bin; do
+            if [ -d "$p" ]; then export PATH="$p:$PATH"; fi
+          done
           echo "::group::Prepare Databases"
           # Ensure all databases required by PostHog routers and sqlx exist
           for db in posthog posthog_persons posthog_stamphog posthog_visual_review posthog_warehouse_sources_queue test_posthog test_posthog_persons; do
-            if id postgres >/dev/null 2>&1; then
-              sudo -u postgres psql -c "CREATE DATABASE $db OWNER posthog;" 2>/dev/null || true
-            else
-              psql -c "CREATE DATABASE $db OWNER posthog;" 2>/dev/null || true
-            fi
+            psql -h localhost -p 5432 -U posthog -c "CREATE DATABASE $db OWNER posthog;" 2>/dev/null || true
           done
           echo "::endgroup::"
 
@@ -174,13 +173,8 @@ jobs:
           T_PRIME_START=$(date +%s%N)
           # Restore local pre-computed schema snapshot if present
           if [ -f .postgres-backups/schema-latest.sql.gz ]; then
-            if id postgres >/dev/null 2>&1; then
-              gunzip -c .postgres-backups/schema-latest.sql.gz | sudo -u postgres psql -q -d posthog 2>/dev/null || true
-              gunzip -c .postgres-backups/schema-latest.sql.gz | sudo -u postgres psql -q -d test_posthog 2>/dev/null || true
-            else
-              gunzip -c .postgres-backups/schema-latest.sql.gz | psql -q -d posthog 2>/dev/null || true
-              gunzip -c .postgres-backups/schema-latest.sql.gz | psql -q -d test_posthog 2>/dev/null || true
-            fi
+            gunzip -c .postgres-backups/schema-latest.sql.gz | psql -h localhost -p 5432 -U posthog -q -d posthog 2>/dev/null || true
+            gunzip -c .postgres-backups/schema-latest.sql.gz | psql -h localhost -p 5432 -U posthog -q -d test_posthog 2>/dev/null || true
             echo "✓ Database primed from schema snapshot (.postgres-backups/schema-latest.sql.gz)"
           fi
           # Top up core Django migrations to live postgresql database
@@ -350,7 +344,10 @@ jobs:
           echo "::endgroup::"
 
           echo "::group::Starting Live Redis via native daemon"
-          redis-server --port 6379 --daemonize yes --save '' --appendonly no
+          if ! command -v redis-server >/dev/null 2>&1; then
+            sudo apt-get update -qq && sudo apt-get install -y -qq redis-server
+          fi
+          sudo systemctl start redis-server 2>/dev/null || sudo service redis-server start 2>/dev/null || redis-server --port 6379 --daemonize yes --save '' --appendonly no
           until redis-cli ping 2>/dev/null | grep -q 'PONG'; do sleep 0.1; done
           echo "✓ Live native Redis running on port 6379 (zero Docker)"
           echo "::endgroup::"
@@ -592,7 +589,10 @@ jobs:
           echo "::endgroup::"
 
           echo "::group::Starting Live Redis Service via native daemon"
-          redis-server --port 6379 --daemonize yes --save '' --appendonly no
+          if ! command -v redis-server >/dev/null 2>&1; then
+            sudo apt-get update -qq && sudo apt-get install -y -qq redis-server
+          fi
+          sudo systemctl start redis-server 2>/dev/null || sudo service redis-server start 2>/dev/null || redis-server --port 6379 --daemonize yes --save '' --appendonly no
           until redis-cli ping 2>/dev/null | grep -q 'PONG'; do sleep 0.1; done
           echo "✓ Live Redis running on port 6379 (zero Docker)"
           echo "::endgroup::"
