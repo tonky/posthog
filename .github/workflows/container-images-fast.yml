@@ -211,7 +211,7 @@ jobs:
     path2_dockerfile_enve_build:
         name: 'Path 2: Enve inside Dockerfile (BuildKit)'
         runs-on: ubuntu-24.04
-        timeout-minutes: 20
+        timeout-minutes: 30
         outputs:
             duration_s: ${{ steps.timing-end.outputs.duration_s }}
             image-digest: ${{ steps.build.outputs.digest || steps.timing-end.outputs.digest }}
