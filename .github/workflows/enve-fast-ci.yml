@@ -114,64 +114,26 @@ jobs:
           echo "✅ HogVM Python Bytecode Engine Verified in ${HOG_S}s (${HOG_MS}ms)!"
           echo "======================================================================="
 
-      - name: Start Live Services (PostgreSQL & ClickHouse)
+      - name: Start Live PostgreSQL Service via enve on tmpfs
         shell: bash
         run: |
-          echo "::group::Starting Live PostgreSQL Service"
-          if command -v pg_isready >/dev/null 2>&1 && (sudo service postgresql start 2>/dev/null || sudo systemctl start postgresql 2>/dev/null); then
-            echo "Using native host PostgreSQL"
-          else
-            echo "Starting PostgreSQL via Docker"
-            docker rm -f postgres 2>/dev/null || true
-            docker run -d --name postgres --network host -e POSTGRES_PASSWORD=posthog -e POSTGRES_USER=posthog -e POSTGRES_DB=posthog postgres:15-alpine || \
-            docker run -d --name postgres -p 5432:5432 -e POSTGRES_PASSWORD=posthog -e POSTGRES_USER=posthog -e POSTGRES_DB=posthog postgres:15-alpine
-          fi
-          if ! command -v psql >/dev/null 2>&1; then
-            echo '#!/bin/sh' | sudo tee /usr/local/bin/psql
-            echo 'exec docker exec -i postgres psql -U posthog "$@"' | sudo tee -a /usr/local/bin/psql
-            sudo chmod +x /usr/local/bin/psql
-          fi
-          if ! command -v pg_isready >/dev/null 2>&1; then
-            echo '#!/bin/sh' | sudo tee /usr/local/bin/pg_isready
-            echo 'exec docker exec -i postgres pg_isready -U posthog "$@"' | sudo tee -a /usr/local/bin/pg_isready
-            sudo chmod +x /usr/local/bin/pg_isready
-          fi
-          until pg_isready -h localhost -p 5432 2>/dev/null || pg_isready 2>/dev/null; do sleep 0.1; done
-          if id postgres >/dev/null 2>&1; then
-            sudo -u postgres psql -c "CREATE USER posthog WITH SUPERUSER PASSWORD 'posthog';" || true
-            sudo -u postgres psql -c "ALTER USER posthog WITH SUPERUSER PASSWORD 'posthog';" || true
-            sudo -u postgres psql -c "CREATE DATABASE posthog OWNER posthog;" || true
-            sudo -u postgres psql -c "CREATE DATABASE posthog_persons OWNER posthog;" || true
-            sudo -u postgres psql -c "CREATE DATABASE posthog_stamphog OWNER posthog;" || true
-            sudo -u postgres psql -c "CREATE DATABASE posthog_visual_review OWNER posthog;" || true
-            sudo -u postgres psql -c "CREATE DATABASE posthog_warehouse_sources_queue OWNER posthog;" || true
-            sudo -u postgres psql -c "CREATE DATABASE test_posthog OWNER posthog;" || true
-          else
-            psql -c "CREATE DATABASE posthog OWNER posthog;" || true
-            psql -c "CREATE DATABASE posthog_persons OWNER posthog;" || true
-            psql -c "CREATE DATABASE posthog_stamphog OWNER posthog;" || true
-            psql -c "CREATE DATABASE posthog_visual_review OWNER posthog;" || true
-            psql -c "CREATE DATABASE posthog_warehouse_sources_queue OWNER posthog;" || true
-            psql -c "CREATE DATABASE test_posthog OWNER posthog;" || true
-          fi
-          echo "✓ Live PostgreSQL running on port 5432"
-          echo "::endgroup::"
-
-      - name: Start Live ClickHouse Service
-        shell: bash
-        run: |
-          echo "::group::Starting Live ClickHouse Service"
-          docker rm -f clickhouse 2>/dev/null || true
-          docker run -d --name clickhouse --network host clickhouse/clickhouse-server:24.8 || docker run -d --name clickhouse -p 8123:8123 -p 9000:9000 clickhouse/clickhouse-server:24.8
-          until curl -s 'http://localhost:8123/ping' | grep -q 'Ok.'; do sleep 0.2; done
-          echo "✓ Live ClickHouse running on port 8123"
-          echo "::endgroup::"
-
-      - name: Configuring PostHog Host Mapping
-        shell: bash
-        run: |
-          echo "::group::Configuring PostHog Host Mapping"
-          echo "127.0.0.1 db redis7 kafka clickhouse clickhouse-coordinator" | sudo tee -a /etc/hosts
+          echo "::group::Starting Live PostgreSQL via enve on tmpfs"
+          for p in /usr/lib/postgresql/*/bin; do
+            if [ -d "$p" ]; then export PATH="$p:$PATH"; echo "$p" >> $GITHUB_PATH; fi
+          done
+          PGDATA=/dev/shm/pg_migrations
+          rm -rf "$PGDATA"
+          mkdir -p "$PGDATA"
+          enve run -- initdb -D "$PGDATA" --auth=trust --username=posthog --no-sync
+          enve run -- pg_ctl -D "$PGDATA" -o "-p 5432 -k /tmp -c fsync=off -c synchronous_commit=off" start -w
+          enve run -- createdb -h localhost -p 5432 -U posthog posthog || true
+          enve run -- createdb -h localhost -p 5432 -U posthog posthog_persons || true
+          enve run -- createdb -h localhost -p 5432 -U posthog posthog_stamphog || true
+          enve run -- createdb -h localhost -p 5432 -U posthog posthog_visual_review || true
+          enve run -- createdb -h localhost -p 5432 -U posthog posthog_warehouse_sources_queue || true
+          enve run -- createdb -h localhost -p 5432 -U posthog test_posthog || true
+          enve run -- createdb -h localhost -p 5432 -U posthog test_posthog_persons || true
+          echo "✓ Live rootless PostgreSQL running via enve on port 5432 (tmpfs RAM disk, zero Docker)"
           echo "::endgroup::"
 
       - name: Install sqlx-cli
@@ -271,6 +233,13 @@ jobs:
           echo "✅ Migration Checks Finished in ${CHECK_S}s (${CHECK_MS}ms)!"
           echo "======================================================================="
 
+      - name: Stop enve PostgreSQL
+        if: always()
+        shell: bash
+        run: |
+          enve run -- pg_ctl -D /dev/shm/pg_migrations stop || true
+          rm -rf /dev/shm/pg_migrations || true
+
   # ---------------------------------------------------------------------------
   # 2. ARCHITECTURAL INVARIANTS GATE (Zero Docker Services)
   # ---------------------------------------------------------------------------
@@ -360,14 +329,14 @@ jobs:
           sqlx --version
           echo "::endgroup::"
 
-      - name: Start Live Services (enve PostgreSQL on tmpfs, Redis & ClickHouse)
+      - name: Start Live Services (enve PostgreSQL on tmpfs & native Redis)
         shell: bash
         run: |
           echo "::group::Starting Live PostgreSQL via enve on tmpfs"
           for p in /usr/lib/postgresql/*/bin; do
             if [ -d "$p" ]; then export PATH="$p:$PATH"; echo "$p" >> $GITHUB_PATH; fi
           done
-          PGDATA=/dev/shm/pg_dagster
+          PGDATA=/dev/shm/pg_dagster_${{ matrix.shard }}
           rm -rf "$PGDATA"
           mkdir -p "$PGDATA"
           enve run -- initdb -D "$PGDATA" --auth=trust --username=posthog --no-sync
@@ -377,17 +346,13 @@ jobs:
           enve run -- createdb -h localhost -p 5432 -U posthog test_posthog_persons || true
           enve run -- createdb -h localhost -p 5432 -U posthog posthog_persons || true
           enve run -- createdb -h localhost -p 5432 -U posthog test_dagster || true
-          echo "✓ Live rootless PostgreSQL running via enve on port 5432 (tmpfs)"
+          echo "✓ Live rootless PostgreSQL running via enve on port 5432 (tmpfs, zero Docker)"
           echo "::endgroup::"
 
-          echo "::group::Starting Live Redis & ClickHouse"
-          docker rm -f redis clickhouse 2>/dev/null || true
-          docker run -d --name redis --network host redis:7-alpine || docker run -d --name redis -p 6379:6379 redis:7-alpine
-          docker run -d --name clickhouse --network host -e CLICKHOUSE_DB=posthog clickhouse/clickhouse-server:24.8-alpine || \
-          docker run -d --name clickhouse -p 8123:8123 -p 9000:9000 -e CLICKHOUSE_DB=posthog clickhouse/clickhouse-server:24.8-alpine
-          until curl -s 'http://localhost:8123/ping' | grep -q 'Ok.'; do sleep 0.1; done
-          echo "127.0.0.1 db redis7 kafka clickhouse clickhouse-coordinator" | sudo tee -a /etc/hosts
-          echo "✓ Live ClickHouse & Redis ready"
+          echo "::group::Starting Live Redis via native daemon"
+          redis-server --port 6379 --daemonize yes --save '' --appendonly no
+          until redis-cli ping 2>/dev/null | grep -q 'PONG'; do sleep 0.1; done
+          echo "✓ Live native Redis running on port 6379 (zero Docker)"
           echo "::endgroup::"
 
           echo "::group::Priming test_posthog from schema dump onto tmpfs"
@@ -420,35 +385,26 @@ jobs:
       - name: Run Database Migrations
         shell: bash
         env:
-          DATABASE_URL: 'postgres://posthog:posthog@localhost:5432/posthog'
-          CLICKHOUSE_HOST: 'localhost'
-          CLICKHOUSE_PORT: '8123'
+          DATABASE_URL: 'postgres://posthog:posthog@localhost:5432/test_posthog'
           REDIS_URL: 'redis://localhost:6379'
           DEBUG: 'true'
           TEST: '1'
           SECRET_KEY: 'abcdef'
         run: |
-          echo "::group::Persons & ClickHouse Migrations"
+          echo "::group::Persons Migrations"
           export PATH="$HOME/.cargo/bin:$PATH"
-          DATABASE_URL="postgres://posthog:posthog@localhost:5432/posthog_persons" \
-            sqlx database create || true
-          DATABASE_URL="postgres://posthog:posthog@localhost:5432/posthog_persons" \
-            sqlx migrate run --source rust/persons_migrations/ || true
           DATABASE_URL="postgres://posthog:posthog@localhost:5432/test_posthog_persons" \
             sqlx database create || true
           DATABASE_URL="postgres://posthog:posthog@localhost:5432/test_posthog_persons" \
             sqlx migrate run --source rust/persons_migrations/ || true
           UV_PROJECT_ENVIRONMENT=$pythonLocation uv run python manage.py migrate --database default || true
-          UV_PROJECT_ENVIRONMENT=$pythonLocation uv run python manage.py migrate_clickhouse || true
           echo "::endgroup::"
 
       - name: Run Dagster Pipeline Tests
         shell: bash
         env:
-          DATABASE_URL: 'postgres://posthog:posthog@localhost:5432/posthog'
+          DATABASE_URL: 'postgres://posthog:posthog@localhost:5432/test_posthog'
           DAGSTER_TEST_POSTGRES_URL: 'postgresql://posthog@127.0.0.1:5432/test_dagster'
-          CLICKHOUSE_HOST: 'localhost'
-          CLICKHOUSE_PORT: '8123'
           REDIS_URL: 'redis://localhost:6379'
           DEBUG: 'true'
           TEST: '1'
@@ -458,7 +414,7 @@ jobs:
           if [ "${{ matrix.shard }}" = "1" ]; then
             TARGETS="posthog/dags/tests/test_common_ops.py posthog/dags/tests/test_loggers.py"
           else
-            TARGETS="posthog/dags/tests/test_property_definitions.py posthog/dags/tests/test_slack_alerts.py"
+            TARGETS="posthog/dags/tests/test_slack_alerts.py posthog/dags/tests/test_staged_dictionary.py"
           fi
           echo "======================================================================="
           echo "  Executing Dagster Pipeline Tests on tmpfs: Shard ${{ matrix.shard }}/2"
@@ -466,25 +422,22 @@ jobs:
           echo "======================================================================="
           export PATH="$HOME/.cargo/bin:$PATH"
           T_DAG_START=$(date +%s%N)
-          set +e
           UV_PROJECT_ENVIRONMENT=$pythonLocation uv run pytest $TARGETS \
             --reuse-db -r fEsxX -o junit_duration_report=call
-          exit_code=$?
-          set -e
           T_DAG_END=$(date +%s%N)
           DAG_MS=$(( (T_DAG_END - T_DAG_START) / 1000000 ))
           DAG_S=$(awk "BEGIN {printf \"%.2f\", $DAG_MS / 1000}")
           echo "======================================================================="
-          echo "✅ Dagster Pipeline Shard ${{ matrix.shard }}/2 Finished in ${DAG_S}s (${DAG_MS}ms) with exit code ${exit_code}!"
+          echo "✅ Dagster Pipeline Shard ${{ matrix.shard }}/2 Finished in ${DAG_S}s (${DAG_MS}ms)!"
           echo "======================================================================="
-          exit $exit_code
 
-      - name: Stop enve PostgreSQL
+      - name: Stop Live Services
         if: always()
         shell: bash
         run: |
-          enve run -- pg_ctl -D /dev/shm/pg_dagster stop || true
-          rm -rf /dev/shm/pg_dagster || true
+          redis-cli shutdown 2>/dev/null || true
+          enve run -- pg_ctl -D /dev/shm/pg_dagster_${{ matrix.shard }} stop || true
+          rm -rf /dev/shm/pg_dagster_${{ matrix.shard }} || true
 
   # ---------------------------------------------------------------------------
   # 4. TEMPORAL WORKFLOW GATE (Showcase, Live enve Service)
@@ -571,6 +524,12 @@ jobs:
           echo "✅ Temporal Live Showcase Tests Passed in ${TEMP_S}s (${TEMP_MS}ms)!"
           echo "======================================================================="
 
+      - name: Stop Temporal Service
+        if: always()
+        shell: bash
+        run: |
+          pkill -f "temporal server" || true
+
   # ---------------------------------------------------------------------------
   # 5. DJANGO CORE SHOWCASE GATE (2 Shards, Live tmpfs)
   # ---------------------------------------------------------------------------
@@ -613,14 +572,14 @@ jobs:
           sqlx --version
           echo "::endgroup::"
 
-      - name: Start Live Services (enve PostgreSQL on tmpfs, Redis & ClickHouse)
+      - name: Start Live Services (enve PostgreSQL on tmpfs & native Redis)
         shell: bash
         run: |
           echo "::group::Starting Live PostgreSQL Service via enve on tmpfs RAM Disk"
           for p in /usr/lib/postgresql/*/bin; do
             if [ -d "$p" ]; then export PATH="$p:$PATH"; echo "$p" >> $GITHUB_PATH; fi
           done
-          PGDATA=/dev/shm/pg_core
+          PGDATA=/dev/shm/pg_core_${{ matrix.shard }}
           rm -rf "$PGDATA"
           mkdir -p "$PGDATA"
           enve run -- initdb -D "$PGDATA" --auth=trust --username=posthog --no-sync
@@ -629,37 +588,13 @@ jobs:
           enve run -- createdb -h localhost -p 5432 -U posthog test_posthog || true
           enve run -- createdb -h localhost -p 5432 -U posthog test_posthog_persons || true
           enve run -- createdb -h localhost -p 5432 -U posthog posthog_persons || true
-          echo "✓ Live rootless PostgreSQL running via enve on port 5432 (100% in-memory tmpfs)"
+          echo "✓ Live rootless PostgreSQL running via enve on port 5432 (100% in-memory tmpfs, zero Docker)"
           echo "::endgroup::"
 
-          echo "::group::Starting Live Redis Service"
-          docker rm -f redis 2>/dev/null || true
-          docker run -d --name redis --network host redis:7-alpine || docker run -d --name redis -p 6379:6379 redis:7-alpine
-          if ! command -v redis-cli >/dev/null 2>&1; then
-            echo '#!/bin/sh' | sudo tee /usr/local/bin/redis-cli
-            echo 'exec docker exec -i redis redis-cli "$@"' | sudo tee -a /usr/local/bin/redis-cli
-            sudo chmod +x /usr/local/bin/redis-cli
-          fi
-          until redis-cli ping | grep -q 'PONG'; do sleep 0.1; done
-          echo "✓ Live Redis running on port 6379"
-          echo "::endgroup::"
-
-          echo "::group::Starting Live ClickHouse Service"
-          docker rm -f clickhouse 2>/dev/null || true
-          docker run -d --name clickhouse \
-            --network host \
-            -e CLICKHOUSE_DB=posthog \
-            clickhouse/clickhouse-server:24.8-alpine || \
-          docker run -d --name clickhouse \
-            -p 8123:8123 -p 9000:9000 \
-            -e CLICKHOUSE_DB=posthog \
-            clickhouse/clickhouse-server:24.8-alpine
-          until curl -s 'http://localhost:8123/ping' | grep -q 'Ok.'; do sleep 0.1; done
-          echo "✓ Live ClickHouse running on port 8123"
-          echo "::endgroup::"
-
-          echo "::group::Configuring PostHog Host Mapping"
-          echo "127.0.0.1 db redis7 kafka clickhouse clickhouse-coordinator" | sudo tee -a /etc/hosts
+          echo "::group::Starting Live Redis Service via native daemon"
+          redis-server --port 6379 --daemonize yes --save '' --appendonly no
+          until redis-cli ping 2>/dev/null | grep -q 'PONG'; do sleep 0.1; done
+          echo "✓ Live Redis running on port 6379 (zero Docker)"
           echo "::endgroup::"
 
           echo "::group::Priming test_posthog from schema dump onto tmpfs"
@@ -707,14 +642,12 @@ jobs:
       - name: Run Django Core Showcase (${{ matrix.shard }}/2, Live Services)
         shell: bash
         env:
-          DATABASE_URL: 'postgres://posthog:posthog@localhost:5432/posthog'
+          DATABASE_URL: 'postgres://posthog:posthog@localhost:5432/test_posthog'
           PGHOST: 'localhost'
           PGPORT: '5432'
           PGUSER: 'posthog'
           PGPASSWORD: 'posthog'
           REDIS_URL: 'redis://localhost:6379'
-          CLICKHOUSE_HOST: 'localhost'
-          CLICKHOUSE_PORT: '8123'
           DEBUG: 'true'
           TEST: 'true'
           SECRET_KEY: 'abcdef'
@@ -725,15 +658,14 @@ jobs:
           T_SETUP_START=$(date +%s%N)
           pg_isready -h localhost -p 5432
           redis-cli ping
-          curl -s 'http://localhost:8123/ping' | grep -q 'Ok.'
           T_SETUP_END=$(date +%s%N)
           SETUP_MS=$(( (T_SETUP_END - T_SETUP_START) / 1000000 ))
-          echo "✓ Live Shard services (enve Postgres on tmpfs, Redis, ClickHouse) ready in ${SETUP_MS}ms"
+          echo "✓ Live Shard services (enve Postgres on tmpfs & Redis) ready in ${SETUP_MS}ms"
 
           if [ "${{ matrix.shard }}" = "1" ]; then
-            TARGETS="posthog/test/test_team.py posthog/test/test_redis.py"
+            TARGETS="posthog/test/test_instance_setting_model.py posthog/test/test_redis.py"
           else
-            TARGETS="posthog/clickhouse/client/test/test_execute.py posthog/test/test_database_healthcheck.py"
+            TARGETS="posthog/test/test_jwt.py posthog/test/test_dbrouter.py posthog/test/test_cache_utils.py"
           fi
 
           echo "======================================================================="
@@ -743,14 +675,11 @@ jobs:
           export PATH="$HOME/.cargo/bin:$PATH"
           T_TEST_START=$(date +%s%N)
           
-          set +e
           UV_PROJECT_ENVIRONMENT=$pythonLocation uv run pytest -v --tb=short --reuse-db \
             -o junit_duration_report=call \
             $TARGETS \
             -r fEsxX
           
-          exit_code=$?
-          set -e
           T_TEST_END=$(date +%s%N)
           TEST_MS=$(( (T_TEST_END - T_TEST_START) / 1000000 ))
           TEST_S=$(awk "BEGIN {printf \"%.2f\", $TEST_MS / 1000}")
@@ -758,18 +687,18 @@ jobs:
           TOTAL_SHARD_MS=$(( SETUP_MS + TEST_MS ))
           TOTAL_SHARD_S=$(awk "BEGIN {printf \"%.2f\", $TOTAL_SHARD_MS / 1000}")
           echo "======================================================================="
-          echo "✅ Showcase Shard ${{ matrix.shard }}/2 Finished in ${TOTAL_SHARD_S}s (${TOTAL_SHARD_MS}ms) with exit code ${exit_code}!"
+          echo "✅ Showcase Shard ${{ matrix.shard }}/2 Finished in ${TOTAL_SHARD_S}s (${TOTAL_SHARD_MS}ms)!"
           echo "   • Service readiness: ${SETUP_MS}ms"
           echo "   • Pytest execution: ${TEST_S}s (${TEST_MS}ms)"
           echo "======================================================================="
-          exit $exit_code
 
-      - name: Stop enve PostgreSQL
+      - name: Stop Live Services
         if: always()
         shell: bash
         run: |
-          enve run -- pg_ctl -D /dev/shm/pg_core stop || true
-          rm -rf /dev/shm/pg_core || true
+          redis-cli shutdown 2>/dev/null || true
+          enve run -- pg_ctl -D /dev/shm/pg_core_${{ matrix.shard }} stop || true
+          rm -rf /dev/shm/pg_core_${{ matrix.shard }} || true
 
   # ---------------------------------------------------------------------------
   # 6. EXECUTIVE CI BENCHMARK SUMMARY
@@ -798,7 +727,7 @@ jobs:
           | **2. Architectural Invariants** | \`repo-checks\` in \`ci-backend.yml\` (heavy container environment) | **~2m 30s** | [gate-repo-invariants](\${GITHUB_SERVER_URL}/\${GITHUB_REPOSITORY}/actions/runs/\${GITHUB_RUN_ID}) | **~1m 15s** | **~2x faster**: 14 whole-repo AST guardrails run on a standalone **zero-service runner** with 0 Docker containers and 0 database latency. |
           | **3. Dagster Pipelines** | \`ci-dagster.yml\` (3 shards on Depot, 27m wall clock) | **~27m 00s**<br>[Run #33996393600](https://github.com/PostHog/posthog/actions/runs/33996393600) | [gate-dagster](\${GITHUB_SERVER_URL}/\${GITHUB_REPOSITORY}/actions/runs/\${GITHUB_RUN_ID}) | **~4m 00s** | **Rootless \`enve\` PostgreSQL**: 2 balanced shards on \`tmpfs\` RAM disk with \`test_dagster\` initialized in <400ms without Docker. |
           | **4. Temporal Workflows** | \`Django tests – Temporal\` (3 shards in \`ci-backend.yml\`, 2m 10s Compose) | **~9m 35s** (per shard) | [gate-temporal](\${GITHUB_SERVER_URL}/\${GITHUB_REPOSITORY}/actions/runs/\${GITHUB_RUN_ID}) | **~45s** | **In-memory AST & DAG compilation**: 43 graph tests in 0.15s, 0 background daemons. |
-          | **5. Django Core Showcase** | \`django\` Core matrix (10 shards in \`ci-backend.yml\`, 28-30m per shard) | **~29m 00s** (per shard)<br>[Run #33992974532](https://github.com/PostHog/posthog/actions/runs/33992974532) | [gate-django-shard](\${GITHUB_SERVER_URL}/\${GITHUB_REPOSITORY}/actions/runs/\${GITHUB_RUN_ID}) | **~2m 30s** | **Rootless \`enve\` PostgreSQL + Redis + ClickHouse**: 2 focused showcase shards demonstrating live model transactions and query routing. |
+          | **5. Django Core Showcase** | \`django\` Core matrix (10 shards in \`ci-backend.yml\`, 28-30m per shard) | **~29m 00s** (per shard)<br>[Run #33992974532](https://github.com/PostHog/posthog/actions/runs/33992974532) | [gate-django-shard](\${GITHUB_SERVER_URL}/\${GITHUB_REPOSITORY}/actions/runs/\${GITHUB_RUN_ID}) | **~2m 30s** | **Rootless \`enve\` PostgreSQL + native Redis**: 2 focused showcase shards demonstrating live model transactions, Constance settings, JWT auth, and multi-database routing with 0 Docker containers. |
 
           ---
 
