@@ -119,15 +119,89 @@ touch "$STAGING_DIR/code/.tiktoken_cache/.warmed"
 COMMIT_HASH="${COMMIT_HASH:-$(git rev-parse HEAD 2>/dev/null || echo unknown)}"
 echo "$COMMIT_HASH" > "$STAGING_DIR/code/commit.txt"
 
-# 10. Prune Host Python Bytecode & Pycache (mirrors .dockerignore, keeps layers lean)
-echo "• 10. Pruning host bytecode caches (__pycache__ / .pyc)..."
-find "$STAGING_DIR/code" -type d -name "__pycache__" -prune -exec rm -rf {} + 2>/dev/null || true
-find "$STAGING_DIR/code" -type f -name "*.pyc" -delete 2>/dev/null || true
+# 10. Stage Complete Production Python Runtime (/python-runtime)
+echo "• 10. Staging complete production Python runtime into /python-runtime..."
+mkdir -p "$STAGING_DIR/python-runtime"
 
-TOTAL_FILES=$(find "$STAGING_DIR/code" -type f | wc -l)
-TOTAL_SIZE=$(du -sh "$STAGING_DIR/code" | awk '{print $1}')
+if [ ! -f "$STAGING_DIR/python-runtime/bin/python3.13" ] || [ ! -d "$STAGING_DIR/python-runtime/lib" ]; then
+    PYTHON_DIST_DIR=""
+    # 1. Try finding via uv python list
+    UV_PY_MATCH="$(uv python list 2>/dev/null | grep 'cpython-3.13' | head -n 1 | awk '{print $NF}' || true)"
+    if [ -n "$UV_PY_MATCH" ] && [ -e "$UV_PY_MATCH" ]; then
+        RESOLVED_BIN="$(readlink -f "$UV_PY_MATCH")"
+        CANDIDATE_DIR="$(dirname "$(dirname "$RESOLVED_BIN")")"
+        if [ -d "$CANDIDATE_DIR/lib" ]; then
+            PYTHON_DIST_DIR="$CANDIDATE_DIR"
+        fi
+    fi
+
+    # 2. Fallback candidates
+    if [ -z "$PYTHON_DIST_DIR" ]; then
+        for cand in \
+            "$HOME/.local/share/uv/python/cpython-3.13.13-linux-x86_64-gnu" \
+            "$HOME/.local/share/uv/python/cpython-3.13-linux-x86_64-gnu" \
+            "/root/.local/share/uv/python/cpython-3.13.13-linux-x86_64-gnu"; do
+            if [ -d "$cand/lib" ]; then
+                PYTHON_DIST_DIR="$cand"
+                break
+            fi
+        done
+    fi
+
+    if [ -n "$PYTHON_DIST_DIR" ] && [ -d "$PYTHON_DIST_DIR/lib" ]; then
+        echo "   -> Copying base standalone Python 3.13 distribution from: $PYTHON_DIST_DIR"
+        cp -a "$PYTHON_DIST_DIR/." "$STAGING_DIR/python-runtime/"
+    else
+        echo "   ⚠️ Standalone Python distribution not found; initializing virtualenv with uv"
+        uv venv "$STAGING_DIR/python-runtime" --python 3.13 --seed
+    fi
+fi
+
+# Run offline uv sync to populate all 433 production packages
+if [ -d "dist/wheel-cache" ] && [ "$(ls -1 dist/wheel-cache/*.whl 2>/dev/null | wc -l)" -gt 0 ]; then
+    echo "   -> Populating production site-packages via offline uv sync ($(ls -1 dist/wheel-cache/*.whl 2>/dev/null | wc -l) wheels)..."
+    UV_PROJECT_ENVIRONMENT="$STAGING_DIR/python-runtime" uv sync \
+        --frozen \
+        --no-dev \
+        --no-editable \
+        --no-install-workspace \
+        --no-index \
+        --find-links dist/wheel-cache
+else
+    echo "   ⚠️ dist/wheel-cache empty or not found; running online uv sync..."
+    UV_PROJECT_ENVIRONMENT="$STAGING_DIR/python-runtime" uv sync \
+        --frozen \
+        --no-dev \
+        --no-editable \
+        --no-install-workspace
+fi
+
+# Stage in-tree workspace packages (tools/owners/posthog_owners) into site-packages
+if [ -d "tools/owners/posthog_owners" ] && [ -d "$STAGING_DIR/python-runtime/lib/python3.13/site-packages" ]; then
+    echo "   -> Staging in-tree workspace package (posthog_owners) into site-packages..."
+    cp -r tools/owners/posthog_owners "$STAGING_DIR/python-runtime/lib/python3.13/site-packages/"
+fi
+
+# Link python, python3, granian, celery into /code/bin using relative symlinks
+mkdir -p "$STAGING_DIR/code/bin"
+ln -sf ../../python-runtime/bin/python "$STAGING_DIR/code/bin/python"
+ln -sf ../../python-runtime/bin/python3 "$STAGING_DIR/code/bin/python3"
+if [ -f "$STAGING_DIR/python-runtime/bin/granian" ]; then
+    ln -sf ../../python-runtime/bin/granian "$STAGING_DIR/code/bin/granian"
+fi
+if [ -f "$STAGING_DIR/python-runtime/bin/celery" ]; then
+    ln -sf ../../python-runtime/bin/celery "$STAGING_DIR/code/bin/celery"
+fi
+
+# 11. Prune Host Python Bytecode & Pycache (mirrors .dockerignore, keeps layers lean)
+echo "• 11. Pruning bytecode caches (__pycache__ / .pyc)..."
+find "$STAGING_DIR" -type d -name "__pycache__" -prune -exec rm -rf {} + 2>/dev/null || true
+find "$STAGING_DIR" -type f -name "*.pyc" -delete 2>/dev/null || true
+
+TOTAL_FILES=$(find "$STAGING_DIR" -type f | wc -l)
+TOTAL_SIZE=$(du -sh "$STAGING_DIR" | awk '{print $1}')
 echo "======================================================================="
-echo "✅ Complete application staging finished!"
+echo "✅ Complete application & runtime staging finished!"
 echo "   Files staged: $TOTAL_FILES"
 echo "   Total size:   $TOTAL_SIZE"
 echo "======================================================================="

@@ -147,6 +147,10 @@ required_artifacts = [
     'code/rust/persons_migrations',
     'code/services/mcp/schema/tool-definitions.json',
     'code/share/GeoLite2-City.mmdb',
+    'python-runtime/bin/python',
+    'python-runtime/lib/python3.13/site-packages/django/__init__.py',
+    'python-runtime/lib/python3.13/site-packages/celery/__init__.py',
+    'python-runtime/lib/python3.13/site-packages/temporalio/__init__.py',
 ]
 
 missing = [r for r in required_artifacts if not any(m == r or m.startswith(r + '/') for m in found_members)]
@@ -177,8 +181,12 @@ print(f'   ✓ All {len(required_artifacts)} essential production assets verifie
 
 echo "4. Executing PostHog Golden Import & Django Check Gate..."
 PYTHON_BIN="python3"
-if [ -f ".venv/bin/python" ]; then
+if [ -x "dist/container-root/python-runtime/bin/python" ]; then
+    PYTHON_BIN="dist/container-root/python-runtime/bin/python"
+    echo "   Using container packaged runtime: $PYTHON_BIN"
+elif [ -f ".venv/bin/python" ]; then
     PYTHON_BIN=".venv/bin/python"
+    echo "   Using host venv: $PYTHON_BIN"
 fi
 
 if $PYTHON_BIN -c "import django" 2>/dev/null; then
