@@ -110,6 +110,14 @@ jobs:
                   [ "$digest" = "None" ] && digest=""
                   echo "digest=$digest" >> "$GITHUB_OUTPUT"
 
+            - name: Compute Clean Build Hashes
+              id: hashes
+              shell: bash
+              run: |
+                  set -euo pipefail
+                  FE_HASH=$(git ls-files -s pnpm-lock.yaml pnpm-workspace.yaml turbo.json package.json frontend products/*/frontend packages common/esbuilder common/hogvm patches | sha256sum | awk '{print $1}')
+                  echo "frontend=$FE_HASH" >> "$GITHUB_OUTPUT"
+
             # -----------------------------------------------------------------
             # Restore Pre-Built Frontend Assets from GHA Cache (< 3s)
             # -----------------------------------------------------------------
@@ -118,7 +126,7 @@ jobs:
               uses: actions/cache/restore@v4
               with:
                   path: dist/prebuilt-frontend
-                  key: frontend-assets-${{ runner.os }}-${{ github.ref_name }}-v1-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'turbo.json', 'package.json', 'frontend/**', 'products/**/*.ts', 'products/**/*.tsx', 'products/**/*.json', 'packages/**', 'common/esbuilder/**', 'common/hogvm/**', 'patches/**') }}
+                  key: frontend-assets-${{ runner.os }}-${{ github.ref_name }}-v1-${{ steps.hashes.outputs.frontend }}
                   restore-keys: |
                       frontend-assets-${{ runner.os }}-${{ github.ref_name }}-v1-
                       frontend-assets-${{ runner.os }}-master-v1-
@@ -150,7 +158,7 @@ jobs:
               uses: actions/cache/save@v4
               with:
                   path: dist/prebuilt-frontend
-                  key: ${{ steps.cache-frontend.outputs.primary-key || format('frontend-assets-{0}-{1}-v1-{2}', runner.os, github.ref_name, hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'turbo.json', 'package.json', 'frontend/**', 'products/**/*.ts', 'products/**/*.tsx', 'products/**/*.json', 'packages/**', 'common/esbuilder/**', 'common/hogvm/**', 'patches/**')) }}
+                  key: frontend-assets-${{ runner.os }}-${{ github.ref_name }}-v1-${{ steps.hashes.outputs.frontend }}
 
             - name: Verify Staged Frontend Assets
               if: env.ACT != 'true'
@@ -234,9 +242,20 @@ jobs:
             - name: Set up Docker Buildx
               uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2 # v3.10.0
 
-            # -----------------------------------------------------------------
-            # Decoupled Frontend Pre-Build & Cache (BuildKit Named Context)
-            # -----------------------------------------------------------------
+            - name: Compute Clean Build Hashes
+              id: hashes
+              shell: bash
+              run: |
+                  set -euo pipefail
+                  FE_HASH=$(git ls-files -s pnpm-lock.yaml pnpm-workspace.yaml turbo.json package.json frontend products/*/frontend packages common/esbuilder common/hogvm patches | sha256sum | awk '{print $1}')
+                  NODE_HASH=$(git ls-files -s common/plugin_transpiler products/canvas/packages/canvas_builder pnpm-lock.yaml | sha256sum | awk '{print $1}')
+                  GEOIP_HASH=$(git ls-files -s bin/download-mmdb | sha256sum | awk '{print $1}')
+                  WHEELS_HASH=$(git ls-files -s uv.lock | sha256sum | awk '{print $1}')
+                  echo "frontend=$FE_HASH" >> "$GITHUB_OUTPUT"
+                  echo "node_scripts=$NODE_HASH" >> "$GITHUB_OUTPUT"
+                  echo "geoip=$GEOIP_HASH" >> "$GITHUB_OUTPUT"
+                  echo "wheels=$WHEELS_HASH" >> "$GITHUB_OUTPUT"
+
             # -----------------------------------------------------------------
             # Decoupled Frontend Pre-Build & Cache (BuildKit Named Context)
             # -----------------------------------------------------------------
@@ -245,7 +264,7 @@ jobs:
               uses: actions/cache/restore@v4
               with:
                   path: dist/prebuilt-frontend
-                  key: frontend-assets-${{ runner.os }}-${{ github.ref_name }}-v1-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'turbo.json', 'package.json', 'frontend/**', 'products/**/*.ts', 'products/**/*.tsx', 'products/**/*.json', 'packages/**', 'common/esbuilder/**', 'common/hogvm/**', 'patches/**') }}
+                  key: frontend-assets-${{ runner.os }}-${{ github.ref_name }}-v1-${{ steps.hashes.outputs.frontend }}
                   restore-keys: |
                       frontend-assets-${{ runner.os }}-${{ github.ref_name }}-v1-
                       frontend-assets-${{ runner.os }}-master-v1-
@@ -277,7 +296,7 @@ jobs:
               uses: actions/cache/save@v4
               with:
                   path: dist/prebuilt-frontend
-                  key: ${{ steps.cache-frontend.outputs.primary-key || format('frontend-assets-{0}-{1}-v1-{2}', runner.os, github.ref_name, hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'turbo.json', 'package.json', 'frontend/**', 'products/**/*.ts', 'products/**/*.tsx', 'products/**/*.json', 'packages/**', 'common/esbuilder/**', 'common/hogvm/**', 'patches/**')) }}
+                  key: frontend-assets-${{ runner.os }}-${{ github.ref_name }}-v1-${{ steps.hashes.outputs.frontend }}
 
             - name: Verify Staged Frontend Assets
               if: env.ACT != 'true'
@@ -298,7 +317,7 @@ jobs:
               uses: actions/cache/restore@v4
               with:
                   path: dist/prebuilt-node-scripts
-                  key: node-scripts-assets-${{ runner.os }}-${{ github.ref_name }}-v1-${{ hashFiles('common/plugin_transpiler/**', 'products/canvas/packages/canvas_builder/**', 'pnpm-lock.yaml') }}
+                  key: node-scripts-assets-${{ runner.os }}-${{ github.ref_name }}-v1-${{ steps.hashes.outputs.node_scripts }}
                   restore-keys: |
                       node-scripts-assets-${{ runner.os }}-${{ github.ref_name }}-v1-
                       node-scripts-assets-${{ runner.os }}-master-v1-
@@ -317,7 +336,7 @@ jobs:
               uses: actions/cache/save@v4
               with:
                   path: dist/prebuilt-node-scripts
-                  key: ${{ steps.cache-node-scripts.outputs.primary-key || format('node-scripts-assets-{0}-{1}-v1-{2}', runner.os, github.ref_name, hashFiles('common/plugin_transpiler/**', 'products/canvas/packages/canvas_builder/**', 'pnpm-lock.yaml')) }}
+                  key: node-scripts-assets-${{ runner.os }}-${{ github.ref_name }}-v1-${{ steps.hashes.outputs.node_scripts }}
 
             # -----------------------------------------------------------------
             # Decoupled GeoIP Pre-Fetch & Cache (BuildKit Named Context)
@@ -327,7 +346,7 @@ jobs:
               uses: actions/cache/restore@v4
               with:
                   path: dist/geoip
-                  key: geoip-db-${{ runner.os }}-${{ github.ref_name }}-v1-${{ hashFiles('bin/download-mmdb') }}
+                  key: geoip-db-${{ runner.os }}-${{ github.ref_name }}-v1-${{ steps.hashes.outputs.geoip }}
                   restore-keys: |
                       geoip-db-${{ runner.os }}-${{ github.ref_name }}-v1-
                       geoip-db-${{ runner.os }}-master-v1-
@@ -347,7 +366,7 @@ jobs:
               uses: actions/cache/save@v4
               with:
                   path: dist/geoip
-                  key: ${{ steps.cache-geoip.outputs.primary-key || format('geoip-db-{0}-{1}-v1-{2}', runner.os, github.ref_name, hashFiles('bin/download-mmdb')) }}
+                  key: geoip-db-${{ runner.os }}-${{ github.ref_name }}-v1-${{ steps.hashes.outputs.geoip }}
 
             # -----------------------------------------------------------------
             # Decoupled Python Wheels Pre-Fetch & Cache (BuildKit Named Context)
@@ -357,7 +376,7 @@ jobs:
               uses: actions/cache/restore@v4
               with:
                   path: dist/wheel-cache
-                  key: uv-wheels-${{ runner.os }}-${{ github.ref_name }}-v1-${{ hashFiles('uv.lock') }}
+                  key: uv-wheels-${{ runner.os }}-${{ github.ref_name }}-v1-${{ steps.hashes.outputs.wheels }}
                   restore-keys: |
                       uv-wheels-${{ runner.os }}-${{ github.ref_name }}-v1-
                       uv-wheels-${{ runner.os }}-master-v1-
@@ -377,7 +396,7 @@ jobs:
               uses: actions/cache/save@v4
               with:
                   path: dist/wheel-cache
-                  key: ${{ steps.cache-wheels.outputs.primary-key || format('uv-wheels-{0}-{1}-v1-{2}', runner.os, github.ref_name, hashFiles('uv.lock')) }}
+                  key: uv-wheels-${{ runner.os }}-${{ github.ref_name }}-v1-${{ steps.hashes.outputs.wheels }}
 
             # -----------------------------------------------------------------
             # Prepare NGINX Unit Provider Named Context
