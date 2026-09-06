@@ -304,14 +304,42 @@ jobs:
                   key: ${{ steps.cache-node-scripts.outputs.primary-key || format('node-scripts-assets-{0}-v1-{1}', runner.os, hashFiles('common/plugin_transpiler/**', 'products/canvas/packages/canvas_builder/**', 'pnpm-lock.yaml')) }}
 
             # -----------------------------------------------------------------
-            # Prepare GeoIP & Unit Provider Named Contexts
+            # Decoupled GeoIP Pre-Fetch & Cache (BuildKit Named Context)
             # -----------------------------------------------------------------
-            - name: Prepare GeoIP & Unit Provider Named Contexts
+            - name: Restore GeoIP Database from GHA Cache
+              id: cache-geoip
+              uses: actions/cache/restore@v4
+              with:
+                  path: dist/geoip
+                  key: geoip-db-${{ runner.os }}-v1-${{ hashFiles('bin/download-mmdb') }}
+                  restore-keys: |
+                      geoip-db-${{ runner.os }}-v1-
+                      geoip-db-${{ runner.os }}-
+                      geoip-db-
+
+            - name: Stage GeoIP Context on Host (on cache miss)
+              if: steps.cache-geoip.outputs.cache-hit != 'true' && env.ACT != 'true'
               shell: bash
               run: |
                   set -euo pipefail
                   chmod +x scripts/prepare_build_contexts.sh
                   scripts/prepare_build_contexts.sh geoip
+
+            - name: Save GeoIP Database to GHA Cache
+              if: github.ref == 'refs/heads/master' && steps.cache-geoip.outputs.cache-hit != 'true' && env.ACT != 'true'
+              uses: actions/cache/save@v4
+              with:
+                  path: dist/geoip
+                  key: ${{ steps.cache-geoip.outputs.primary-key || format('geoip-db-{0}-v1-{1}', runner.os, hashFiles('bin/download-mmdb')) }}
+
+            # -----------------------------------------------------------------
+            # Prepare NGINX Unit Provider Named Context
+            # -----------------------------------------------------------------
+            - name: Prepare Unit Provider Named Context
+              shell: bash
+              run: |
+                  set -euo pipefail
+                  chmod +x scripts/prepare_build_contexts.sh
                   scripts/prepare_build_contexts.sh unit-provider
 
             - name: Verify Staged Build Contexts
