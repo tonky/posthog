@@ -73,6 +73,20 @@ jobs:
                   fi
                   enve --version
 
+            - name: Ensure Hermetic uv and Python Present
+              shell: bash
+              run: |
+                  set -euo pipefail
+                  if ! command -v uv >/dev/null 2>&1; then
+                      curl -LsSf https://astral.sh/uv/install.sh | sh
+                      if [ -f "$HOME/.local/bin/uv" ]; then
+                          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+                          export PATH="$HOME/.local/bin:$PATH"
+                      fi
+                  fi
+                  uv --version
+                  uv python install 3.13
+
             - name: Docker meta and registry login
               id: docker-meta
               if: ${{ vars.AWS_ECR_POSTHOG_MASTER_PUBLISH_IAM_ROLE != '' }}
@@ -116,7 +130,13 @@ jobs:
               run: |
                   set -euo pipefail
                   FE_HASH=$(git ls-files -s pnpm-lock.yaml pnpm-workspace.yaml turbo.json package.json frontend products/*/frontend packages common/esbuilder common/hogvm patches | sha256sum | awk '{print $1}')
+                  NODE_HASH=$(git ls-files -s common/plugin_transpiler products/canvas/packages/canvas_builder pnpm-lock.yaml | sha256sum | awk '{print $1}')
+                  GEOIP_HASH=$(git ls-files -s bin/download-mmdb | sha256sum | awk '{print $1}')
+                  WHEELS_HASH=$(git ls-files -s uv.lock | sha256sum | awk '{print $1}')
                   echo "frontend=$FE_HASH" >> "$GITHUB_OUTPUT"
+                  echo "node_scripts=$NODE_HASH" >> "$GITHUB_OUTPUT"
+                  echo "geoip=$GEOIP_HASH" >> "$GITHUB_OUTPUT"
+                  echo "wheels=$WHEELS_HASH" >> "$GITHUB_OUTPUT"
 
             # -----------------------------------------------------------------
             # Restore Pre-Built Frontend Assets from GHA Cache (< 3s)
@@ -171,17 +191,79 @@ jobs:
                   fi
                   echo "✓ Frontend assets verified in dist/prebuilt-frontend"
 
-            # Stage application assets, frontend bundles, and entrypoints (< 2s)
+            # -----------------------------------------------------------------
+            # Restore Pre-Built Node Scripts, GeoIP, and Python Wheels (< 3s)
+            # -----------------------------------------------------------------
+            - name: Restore Pre-Built Node Scripts from GHA Cache
+              id: cache-node-scripts
+              uses: actions/cache/restore@v4
+              with:
+                  path: dist/prebuilt-node-scripts
+                  key: node-scripts-assets-${{ runner.os }}-${{ github.ref_name }}-v1-${{ steps.hashes.outputs.node_scripts }}
+                  restore-keys: |
+                      node-scripts-assets-${{ runner.os }}-${{ github.ref_name }}-v1-
+                      node-scripts-assets-${{ runner.os }}-master-v1-
+                      node-scripts-assets-${{ runner.os }}-v1-
+
+            - name: Build and Stage Node Scripts on Host (on cache miss)
+              if: steps.cache-node-scripts.outputs.cache-hit != 'true' && env.ACT != 'true'
+              shell: bash
+              run: |
+                  set -euo pipefail
+                  chmod +x scripts/prepare_build_contexts.sh
+                  scripts/prepare_build_contexts.sh node-scripts
+
+            - name: Restore GeoIP Database from GHA Cache
+              id: cache-geoip
+              uses: actions/cache/restore@v4
+              with:
+                  path: dist/geoip
+                  key: geoip-db-${{ runner.os }}-${{ github.ref_name }}-v1-${{ steps.hashes.outputs.geoip }}
+                  restore-keys: |
+                      geoip-db-${{ runner.os }}-${{ github.ref_name }}-v1-
+                      geoip-db-${{ runner.os }}-master-v1-
+                      geoip-db-${{ runner.os }}-v1-
+                      geoip-db-
+
+            - name: Stage GeoIP Context on Host (on cache miss)
+              if: steps.cache-geoip.outputs.cache-hit != 'true' && env.ACT != 'true'
+              shell: bash
+              run: |
+                  set -euo pipefail
+                  chmod +x scripts/prepare_build_contexts.sh
+                  scripts/prepare_build_contexts.sh geoip
+
+            - name: Restore Python Wheels from GHA Cache
+              id: cache-wheels
+              uses: actions/cache/restore@v4
+              with:
+                  path: dist/wheel-cache
+                  key: uv-wheels-${{ runner.os }}-${{ github.ref_name }}-v1-${{ steps.hashes.outputs.wheels }}
+                  restore-keys: |
+                      uv-wheels-${{ runner.os }}-${{ github.ref_name }}-v1-
+                      uv-wheels-${{ runner.os }}-master-v1-
+                      uv-wheels-${{ runner.os }}-v1-
+                      uv-wheels-
+
+            - name: Fetch and Stage Python Wheels (on cache miss or update)
+              if: steps.cache-wheels.outputs.cache-hit != 'true' && env.ACT != 'true'
+              shell: bash
+              run: |
+                  set -euo pipefail
+                  chmod +x scripts/prepare_build_contexts.sh
+                  scripts/prepare_build_contexts.sh wheels
+
+            # Stage application assets, complete Python runtime, and entrypoints
             - name: Stage PostHog container assets
-              if: always() && (steps.preflight.conclusion == 'skipped' || steps.preflight.outputs.digest == '')
+              if: success() && (steps.preflight.conclusion == 'skipped' || steps.preflight.outputs.digest == '')
               run: |
                   chmod +x scripts/build_container_assets.sh
                   scripts/build_container_assets.sh dist/container-root
 
-            # Synthesize multi-arch OCI archive (pure Rust, sub-20s, zero Docker daemon)
+            # Synthesize multi-arch OCI archive (pure Rust, zero Docker daemon)
             - name: Synthesize Multi-Arch OCI Image via enve
               id: synthesize
-              if: always() && (steps.preflight.conclusion == 'skipped' || steps.preflight.outputs.digest == '')
+              if: success() && (steps.preflight.conclusion == 'skipped' || steps.preflight.outputs.digest == '')
               run: |
                   set -euo pipefail
                   START_TS=$(date +%s%N)
@@ -199,7 +281,7 @@ jobs:
 
             # Verify image equivalence and boot readiness before pushing
             - name: Verify Multi-Arch Equivalence & Golden Import Gate
-              if: always() && (steps.preflight.conclusion == 'skipped' || steps.preflight.outputs.digest == '')
+              if: success() && (steps.preflight.conclusion == 'skipped' || steps.preflight.outputs.digest == '')
               run: |
                   chmod +x scripts/verify_container_equivalence.sh
                   scripts/verify_container_equivalence.sh dist/posthog-enve-multiarch.tar
@@ -207,7 +289,7 @@ jobs:
             # Resolve image digest
             - name: Resolve image digest
               id: image
-              if: always() && (steps.preflight.conclusion == 'skipped' || steps.preflight.outputs.digest == '')
+              if: success() && (steps.preflight.conclusion == 'skipped' || steps.preflight.outputs.digest == '')
               env:
                   DIGEST: ${{ steps.preflight.outputs.digest }}
               run: |

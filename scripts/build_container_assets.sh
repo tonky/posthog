@@ -121,60 +121,45 @@ echo "$COMMIT_HASH" > "$STAGING_DIR/code/commit.txt"
 
 # 10. Stage Complete Production Python Runtime (/python-runtime)
 echo "• 10. Staging complete production Python runtime into /python-runtime..."
-mkdir -p "$STAGING_DIR/python-runtime"
+mkdir -p "$STAGING_DIR"
 
-if [ ! -f "$STAGING_DIR/python-runtime/bin/python3.13" ] || [ ! -d "$STAGING_DIR/python-runtime/lib" ]; then
-    PYTHON_DIST_DIR=""
-    # 1. Try finding via uv python list
-    UV_PY_MATCH="$(uv python list 2>/dev/null | grep 'cpython-3.13' | head -n 1 | awk '{print $NF}' || true)"
-    if [ -n "$UV_PY_MATCH" ] && [ -e "$UV_PY_MATCH" ]; then
-        RESOLVED_BIN="$(readlink -f "$UV_PY_MATCH")"
-        CANDIDATE_DIR="$(dirname "$(dirname "$RESOLVED_BIN")")"
-        if [ -d "$CANDIDATE_DIR/lib" ]; then
-            PYTHON_DIST_DIR="$CANDIDATE_DIR"
+# Ensure uv is in PATH
+if ! command -v uv >/dev/null 2>&1; then
+    for cand in "$HOME/.cargo/bin/uv" "$HOME/.local/bin/uv" "/usr/local/bin/uv"; do
+        if [ -x "$cand" ]; then
+            export PATH="$(dirname "$cand"):$PATH"
+            break
         fi
-    fi
-
-    # 2. Fallback candidates
-    if [ -z "$PYTHON_DIST_DIR" ]; then
-        for cand in \
-            "$HOME/.local/share/uv/python/cpython-3.13.13-linux-x86_64-gnu" \
-            "$HOME/.local/share/uv/python/cpython-3.13-linux-x86_64-gnu" \
-            "/root/.local/share/uv/python/cpython-3.13.13-linux-x86_64-gnu"; do
-            if [ -d "$cand/lib" ]; then
-                PYTHON_DIST_DIR="$cand"
-                break
-            fi
-        done
-    fi
-
-    if [ -n "$PYTHON_DIST_DIR" ] && [ -d "$PYTHON_DIST_DIR/lib" ]; then
-        echo "   -> Copying base standalone Python 3.13 distribution from: $PYTHON_DIST_DIR"
-        cp -a "$PYTHON_DIST_DIR/." "$STAGING_DIR/python-runtime/"
-    else
-        echo "   ⚠️ Standalone Python distribution not found; initializing virtualenv with uv"
-        uv venv "$STAGING_DIR/python-runtime" --python 3.13 --seed
-    fi
+    done
 fi
 
-# Run offline uv sync to populate all 433 production packages
-if [ -d "dist/wheel-cache" ] && [ "$(ls -1 dist/wheel-cache/*.whl 2>/dev/null | wc -l)" -gt 0 ]; then
-    echo "   -> Populating production site-packages via offline uv sync ($(ls -1 dist/wheel-cache/*.whl 2>/dev/null | wc -l) wheels)..."
-    UV_PROJECT_ENVIRONMENT="$STAGING_DIR/python-runtime" uv sync \
-        --frozen \
-        --no-dev \
-        --no-editable \
-        --no-install-workspace \
-        --no-index \
-        --find-links dist/wheel-cache
+if ! command -v uv >/dev/null 2>&1; then
+    echo "   ⚠️ 'uv' command not found in PATH; skipping /python-runtime staging (host toolchain mode)."
 else
-    echo "   ⚠️ dist/wheel-cache empty or not found; running online uv sync..."
-    UV_PROJECT_ENVIRONMENT="$STAGING_DIR/python-runtime" uv sync \
-        --frozen \
-        --no-dev \
-        --no-editable \
-        --no-install-workspace
-fi
+    if [ ! -f "$STAGING_DIR/python-runtime/pyvenv.cfg" ]; then
+        echo "   -> Initializing Python 3.13 virtual environment..."
+        rm -rf "$STAGING_DIR/python-runtime"
+        uv venv "$STAGING_DIR/python-runtime" --python 3.13
+    fi
+
+    # Run offline uv sync to populate all 433 production packages
+    if [ -d "dist/wheel-cache" ] && [ "$(ls -1 dist/wheel-cache/*.whl 2>/dev/null | wc -l)" -gt 0 ]; then
+        echo "   -> Populating production site-packages via offline uv sync ($(ls -1 dist/wheel-cache/*.whl 2>/dev/null | wc -l) wheels)..."
+        UV_PROJECT_ENVIRONMENT="$STAGING_DIR/python-runtime" uv sync \
+            --frozen \
+            --no-dev \
+            --no-editable \
+            --no-install-workspace \
+            --no-index \
+            --find-links dist/wheel-cache
+    else
+        echo "   ⚠️ dist/wheel-cache empty or not found; running online uv sync..."
+        UV_PROJECT_ENVIRONMENT="$STAGING_DIR/python-runtime" uv sync \
+            --frozen \
+            --no-dev \
+            --no-editable \
+            --no-install-workspace
+    fi
 
 # Stage in-tree workspace packages (tools/owners/posthog_owners) into site-packages
 if [ -d "tools/owners/posthog_owners" ] && [ -d "$STAGING_DIR/python-runtime/lib/python3.13/site-packages" ]; then
@@ -191,6 +176,7 @@ if [ -f "$STAGING_DIR/python-runtime/bin/granian" ]; then
 fi
 if [ -f "$STAGING_DIR/python-runtime/bin/celery" ]; then
     ln -sf ../../python-runtime/bin/celery "$STAGING_DIR/code/bin/celery"
+fi
 fi
 
 # 11. Prune Host Python Bytecode & Pycache (mirrors .dockerignore, keeps layers lean)
