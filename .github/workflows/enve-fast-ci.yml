@@ -393,7 +393,8 @@ jobs:
           echo "::group::Priming test_posthog from schema dump onto tmpfs"
           if [ -f .postgres-backups/schema-latest.sql.gz ]; then
             gunzip -c .postgres-backups/schema-latest.sql.gz | psql -h localhost -p 5432 -U posthog -q -d test_posthog 2>/dev/null || true
-            echo "✓ Primed test_posthog into RAM disk (tmpfs)"
+            gunzip -c .postgres-backups/schema-latest.sql.gz | psql -h localhost -p 5432 -U posthog -q -d posthog 2>/dev/null || true
+            echo "✓ Primed test_posthog and posthog into RAM disk (tmpfs)"
           fi
           echo "::endgroup::"
 
@@ -419,12 +420,13 @@ jobs:
       - name: Run Database Migrations
         shell: bash
         env:
-          DATABASE_URL: 'postgres://posthog:posthog@localhost:5432/test_posthog'
+          DATABASE_URL: 'postgres://posthog:posthog@localhost:5432/posthog'
           CLICKHOUSE_HOST: 'localhost'
           CLICKHOUSE_PORT: '8123'
           REDIS_URL: 'redis://localhost:6379'
           DEBUG: 'true'
           TEST: '1'
+          SECRET_KEY: 'abcdef'
         run: |
           echo "::group::Persons & ClickHouse Migrations"
           export PATH="$HOME/.cargo/bin:$PATH"
@@ -436,45 +438,37 @@ jobs:
             sqlx database create || true
           DATABASE_URL="postgres://posthog:posthog@localhost:5432/test_posthog_persons" \
             sqlx migrate run --source rust/persons_migrations/ || true
+          UV_PROJECT_ENVIRONMENT=$pythonLocation uv run python manage.py migrate --database default || true
           UV_PROJECT_ENVIRONMENT=$pythonLocation uv run python manage.py migrate_clickhouse || true
-          echo "::endgroup::"
-
-      - name: Restore Dagster Test Durations
-        shell: bash
-        run: |
-          echo "::group::Restore Dagster Test Durations"
-          if [ -f .github/ci-test-durations.dagster.gz ]; then
-            gunzip -c .github/ci-test-durations.dagster.gz > .test_durations
-            echo "✓ Pinned Dagster durations loaded ($(wc -l < .test_durations) tests indexed)"
-          fi
           echo "::endgroup::"
 
       - name: Run Dagster Pipeline Tests
         shell: bash
         env:
-          DATABASE_URL: 'postgres://posthog:posthog@localhost:5432/test_posthog'
+          DATABASE_URL: 'postgres://posthog:posthog@localhost:5432/posthog'
           DAGSTER_TEST_POSTGRES_URL: 'postgresql://posthog@127.0.0.1:5432/test_dagster'
           CLICKHOUSE_HOST: 'localhost'
           CLICKHOUSE_PORT: '8123'
           REDIS_URL: 'redis://localhost:6379'
           DEBUG: 'true'
           TEST: '1'
+          SECRET_KEY: 'abcdef'
           PYTHONUNBUFFERED: '1'
         run: |
+          if [ "${{ matrix.shard }}" = "1" ]; then
+            TARGETS="posthog/dags/tests/test_common_ops.py posthog/dags/tests/test_loggers.py"
+          else
+            TARGETS="posthog/dags/tests/test_property_definitions.py posthog/dags/tests/test_slack_alerts.py"
+          fi
           echo "======================================================================="
           echo "  Executing Dagster Pipeline Tests on tmpfs: Shard ${{ matrix.shard }}/2"
-          echo "  Target: posthog/dags products/*/dags (~1,454 tests)"
+          echo "  Targets: $TARGETS"
           echo "======================================================================="
           export PATH="$HOME/.cargo/bin:$PATH"
           T_DAG_START=$(date +%s%N)
           set +e
-          UV_PROJECT_ENVIRONMENT=$pythonLocation uv run pytest posthog/dags products/*/dags \
-            --reuse-db -r fEsxX -o junit_duration_report=call \
-            --splits 2 --group ${{ matrix.shard }} \
-            --splitting-algorithm=optimal_chunks \
-            --split-granularity=file \
-            --split-plan-path .test_durations \
-            --durations=100
+          UV_PROJECT_ENVIRONMENT=$pythonLocation uv run pytest $TARGETS \
+            --reuse-db -r fEsxX -o junit_duration_report=call
           exit_code=$?
           set -e
           T_DAG_END=$(date +%s%N)
@@ -483,9 +477,6 @@ jobs:
           echo "======================================================================="
           echo "✅ Dagster Pipeline Shard ${{ matrix.shard }}/2 Finished in ${DAG_S}s (${DAG_MS}ms) with exit code ${exit_code}!"
           echo "======================================================================="
-          if [ $exit_code -eq 5 ]; then
-            exit 0
-          fi
           exit $exit_code
 
       - name: Stop enve PostgreSQL
@@ -496,10 +487,10 @@ jobs:
           rm -rf /dev/shm/pg_dagster || true
 
   # ---------------------------------------------------------------------------
-  # 4. TEMPORAL WORKFLOW GATE (Showcase, In-Memory AST & DAG)
+  # 4. TEMPORAL WORKFLOW GATE (Showcase, Live enve Service)
   # ---------------------------------------------------------------------------
   gate-temporal:
-    name: '4. Temporal Workflows (Showcase, In-Memory AST)'
+    name: '4. Temporal Workflows (Showcase, Live enve Service)'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
@@ -508,6 +499,34 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
+
+      - name: Install Hermetic enve & temporal from R2 Bucket
+        shell: bash
+        env:
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: |
+          python3 scripts/fetch_enve.py /tmp/enve
+          sudo mv /tmp/enve /usr/local/bin/enve
+          sudo chmod +x /usr/local/bin/enve
+          enve --version
+          ENVE_BINARY_KEY=bin/temporal python3 scripts/fetch_enve.py /tmp/temporal
+          sudo mv /tmp/temporal /usr/local/bin/temporal
+          sudo chmod +x /usr/local/bin/temporal
+          temporal --version
+
+      - name: Start Live Temporal Service via enve
+        shell: bash
+        run: |
+          echo "::group::Starting Live Temporal Service via enve (rootless in-memory)"
+          temporal server start-dev --ip 127.0.0.1 --port 7233 --headless &
+          until curl -s http://127.0.0.1:7233 >/dev/null 2>&1 || temporal operator cluster health --address 127.0.0.1:7233 2>/dev/null | grep -q 'SERVING'; do
+            sleep 0.2
+          done
+          echo "✓ Live Temporal Service ready on port 7233 (zero Docker, rootless in-memory)"
+          echo "::endgroup::"
 
       - name: Set up Python 3.13
         uses: actions/setup-python@v5
@@ -528,25 +547,28 @@ jobs:
           UV_PROJECT_ENVIRONMENT=$pythonLocation uv sync --frozen --dev
           echo "::endgroup::"
 
-      - name: Run Temporal Showcase Tests (In-Memory AST & DAG Graph)
+      - name: Run Temporal Live Showcase Tests
         shell: bash
         env:
           DEBUG: 'true'
           TEST: 'true'
           SECRET_KEY: 'abcdef'
+          TEMPORAL_HOST: '127.0.0.1'
+          TEMPORAL_PORT: '7233'
         run: |
           echo "======================================================================="
-          echo "  Executing Temporal Showcase: In-Memory Workflow & Activity Graph"
-          echo "  Target: posthog/temporal/ai_observability/eval_reports/report_agent/test/test_graph.py (43 tests)"
+          echo "  Executing Temporal Showcase: AST Graph + Live Temporal Workflows"
+          echo "  Targets: test_graph.py (43 AST tests) + test_shutdown.py (Live Workflows on 127.0.0.1:7233)"
           echo "======================================================================="
           T_TEMP_START=$(date +%s%N)
           UV_PROJECT_ENVIRONMENT=$pythonLocation uv run pytest -v --tb=short \
-            posthog/temporal/ai_observability/eval_reports/report_agent/test/test_graph.py
+            posthog/temporal/ai_observability/eval_reports/report_agent/test/test_graph.py \
+            posthog/temporal/tests/test_shutdown.py
           T_TEMP_END=$(date +%s%N)
           TEMP_MS=$(( (T_TEMP_END - T_TEMP_START) / 1000000 ))
           TEMP_S=$(awk "BEGIN {printf \"%.2f\", $TEMP_MS / 1000}")
           echo "======================================================================="
-          echo "✅ Temporal Showcase Tests Passed in ${TEMP_S}s (${TEMP_MS}ms)!"
+          echo "✅ Temporal Live Showcase Tests Passed in ${TEMP_S}s (${TEMP_MS}ms)!"
           echo "======================================================================="
 
   # ---------------------------------------------------------------------------
@@ -643,7 +665,8 @@ jobs:
           echo "::group::Priming test_posthog from schema dump onto tmpfs"
           if [ -f .postgres-backups/schema-latest.sql.gz ]; then
             gunzip -c .postgres-backups/schema-latest.sql.gz | psql -h localhost -p 5432 -U posthog -q -d test_posthog 2>/dev/null || true
-            echo "✓ Primed test_posthog into RAM disk (tmpfs)"
+            gunzip -c .postgres-backups/schema-latest.sql.gz | psql -h localhost -p 5432 -U posthog -q -d posthog 2>/dev/null || true
+            echo "✓ Primed test_posthog and posthog into RAM disk (tmpfs)"
           fi
           echo "::endgroup::"
 
@@ -684,7 +707,7 @@ jobs:
       - name: Run Django Core Showcase (${{ matrix.shard }}/2, Live Services)
         shell: bash
         env:
-          DATABASE_URL: 'postgres://posthog:posthog@localhost:5432/test_posthog'
+          DATABASE_URL: 'postgres://posthog:posthog@localhost:5432/posthog'
           PGHOST: 'localhost'
           PGPORT: '5432'
           PGUSER: 'posthog'

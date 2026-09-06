@@ -28,7 +28,8 @@ devEnv: {
 		CLICKHOUSE_HTTP_PORT: "18123"
 		CLICKHOUSE_TCP_PORT:  "19000"
 		KAFKA_HOSTS:          "127.0.0.1:19092"
-		TEMPORAL_HOST:        "127.0.0.1:17233"
+		TEMPORAL_HOST:        "127.0.0.1"
+		TEMPORAL_PORT:        "7233"
 		CAPTURE_PORT:         "18000"
 	}
 
@@ -75,10 +76,10 @@ devEnv: {
 
 		temporal: {
 			name:    "temporal"
-			command: "temporal server start-dev --port 17233 --headless"
-			port:    17233
+			command: "temporal server start-dev --ip 127.0.0.1 --port 7233 --headless"
+			port:    7233
 			readinessProbe: {
-				port:      17233
+				port:      7233
 				timeoutMs: 5000
 			}
 		}
