@@ -453,7 +453,7 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Install Hermetic enve & temporal from R2 Bucket
+      - name: Install Hermetic enve Binary from R2 Bucket
         shell: bash
         env:
           R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
@@ -465,9 +465,19 @@ jobs:
           sudo mv /tmp/enve /usr/local/bin/enve
           sudo chmod +x /usr/local/bin/enve
           enve --version
-          ENVE_BINARY_KEY=bin/temporal python3 scripts/fetch_enve.py /tmp/temporal
-          sudo mv /tmp/temporal /usr/local/bin/temporal
-          sudo chmod +x /usr/local/bin/temporal
+
+      - name: Install Nix (Verified Package Manager)
+        uses: cachix/install-nix-action@v30
+        with:
+          extra_nix_config: |
+            trusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY=
+            substituters = https://cache.nixos.org
+            experimental-features = nix-command flakes
+
+      - name: Install Temporal CLI (Verified Nix Package)
+        shell: bash
+        run: |
+          nix profile install nixpkgs#temporal-cli
           temporal --version
 
       - name: Start Live Temporal Service via enve
@@ -643,6 +653,44 @@ jobs:
             sqlx migrate run --source rust/persons_migrations/ || true
           echo "::endgroup::"
 
+      - name: Install Nix (Shard 1 for ClickHouse)
+        if: matrix.shard == 1
+        uses: cachix/install-nix-action@v30
+        with:
+          extra_nix_config: |
+            trusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY=
+            substituters = https://cache.nixos.org
+            experimental-features = nix-command flakes
+
+      - name: Install ClickHouse (Verified Nix Package)
+        if: matrix.shard == 1
+        shell: bash
+        run: |
+          nix profile install nixpkgs#clickhouse
+          clickhouse-server --version
+
+      - name: Start Live ClickHouse Service via enve on tmpfs (Shard 1)
+        if: matrix.shard == 1
+        shell: bash
+        run: |
+          echo "::group::Starting Live ClickHouse Service via enve on tmpfs"
+          CH_DIR=/dev/shm/clickhouse_${{ matrix.shard }}
+          rm -rf "$CH_DIR"
+          mkdir -p "$CH_DIR/data" "$CH_DIR/tmp" "$CH_DIR/user_files" "$CH_DIR/format_schemas" "$CH_DIR/access" "$CH_DIR/keeper/log" "$CH_DIR/keeper/snapshots"
+          CLICKHOUSE_DATA_DIR="$CH_DIR/data/" \
+          CLICKHOUSE_TMP_DIR="$CH_DIR/tmp/" \
+          CLICKHOUSE_USER_FILES_DIR="$CH_DIR/user_files/" \
+          CLICKHOUSE_FORMAT_SCHEMA_DIR="$CH_DIR/format_schemas/" \
+          CLICKHOUSE_ACCESS_DIR="$CH_DIR/access/" \
+          CLICKHOUSE_KEEPER_LOG_DIR="$CH_DIR/keeper/log/" \
+          CLICKHOUSE_KEEPER_SNAPSHOT_DIR="$CH_DIR/keeper/snapshots/" \
+          enve run -- clickhouse server --config-file=data/clickhouse/config.xml &
+          until curl -s http://127.0.0.1:8123/ping | grep -q 'Ok'; do
+            sleep 0.2
+          done
+          echo "✓ Live ClickHouse running via enve on port 8123 (tmpfs RAM disk, embedded keeper, zero Docker)"
+          echo "::endgroup::"
+
       - name: Run Django Core Showcase (${{ matrix.shard }}/2, Live Services)
         shell: bash
         env:
@@ -654,8 +702,7 @@ jobs:
           REDIS_URL: 'redis://localhost:6379'
           CLICKHOUSE_HOST: '127.0.0.1'
           CLICKHOUSE_PORT: '8123'
-          SKIP_CLICKHOUSE_SETUP: 'true'
-          SKIP_CLICKHOUSE_RESET: 'true'
+          CLICKHOUSE_HTTP_PORT: '8123'
           DEBUG: 'true'
           TEST: 'true'
           SECRET_KEY: 'abcdef'
@@ -666,13 +713,20 @@ jobs:
           T_SETUP_START=$(date +%s%N)
           pg_isready -h localhost -p 5432
           redis-cli ping
+          if [ "${{ matrix.shard }}" = "1" ]; then
+            curl -s http://127.0.0.1:8123/ping
+          fi
           T_SETUP_END=$(date +%s%N)
           SETUP_MS=$(( (T_SETUP_END - T_SETUP_START) / 1000000 ))
-          echo "✓ Live Shard services (enve Postgres on tmpfs & Redis) ready in ${SETUP_MS}ms"
+          echo "✓ Live Shard services ready in ${SETUP_MS}ms"
 
           if [ "${{ matrix.shard }}" = "1" ]; then
-            TARGETS="posthog/test/test_instance_setting_model.py posthog/test/test_redis.py"
+            export SKIP_CLICKHOUSE_SETUP="false"
+            export SKIP_CLICKHOUSE_RESET="false"
+            TARGETS="posthog/test/test_instance_setting_model.py posthog/test/test_redis.py posthog/models/exchange_rate/test/test_sql.py"
           else
+            export SKIP_CLICKHOUSE_SETUP="true"
+            export SKIP_CLICKHOUSE_RESET="true"
             TARGETS="posthog/test/test_jwt.py posthog/test/test_dbrouter.py posthog/test/test_cache_utils.py"
           fi
 
@@ -704,6 +758,8 @@ jobs:
         if: always()
         shell: bash
         run: |
+          pkill -f "clickhouse server" || true
+          rm -rf /dev/shm/clickhouse_${{ matrix.shard }} || true
           redis-cli shutdown 2>/dev/null || true
           enve run -- pg_ctl -D /dev/shm/pg_core_${{ matrix.shard }} stop || true
           rm -rf /dev/shm/pg_core_${{ matrix.shard }} || true
