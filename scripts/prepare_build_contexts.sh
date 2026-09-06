@@ -38,37 +38,72 @@ prepare_node_scripts() {
 
     # Build plugin-transpiler on host ext4 if dist missing
     if [ ! -d "common/plugin_transpiler/dist" ] || [ ! -d "common/plugin_transpiler/node_modules" ]; then
-        echo "• Compiling @posthog/plugin-transpiler on host..."
-        pnpm --filter=@posthog/plugin-transpiler... install --frozen-lockfile
-        bin/turbo --filter=@posthog/plugin-transpiler build
+        if command -v pnpm >/dev/null 2>&1; then
+            echo "• Compiling @posthog/plugin-transpiler on host..."
+            pnpm --filter=@posthog/plugin-transpiler... install --frozen-lockfile || true
+            bin/turbo --filter=@posthog/plugin-transpiler build || true
+        elif command -v corepack >/dev/null 2>&1; then
+            echo "• Enabling corepack and compiling @posthog/plugin-transpiler on host..."
+            corepack enable || true
+            corepack pnpm --filter=@posthog/plugin-transpiler... install --frozen-lockfile || true
+            bin/turbo --filter=@posthog/plugin-transpiler build || true
+        else
+            echo "• pnpm/corepack not available on host, skipping host compilation..."
+        fi
     fi
 
     # Build canvas_builder on host if node_modules missing
     if [ ! -d "products/canvas/packages/canvas_builder/node_modules" ]; then
-        echo "• Installing dependencies for canvas_builder..."
-        npm ci --ignore-scripts --omit=dev --no-audit --no-fund --prefix products/canvas/packages/canvas_builder
+        if command -v npm >/dev/null 2>&1; then
+            echo "• Installing dependencies for canvas_builder..."
+            npm ci --ignore-scripts --omit=dev --no-audit --no-fund --prefix products/canvas/packages/canvas_builder || true
+        fi
     fi
 
     # Set up standalone babel for transpiler
-    echo "• Linking standalone Babel for plugin transpiler..."
-    node -e "
-        const fs = require('fs');
-        const path = require('path');
-        const babelDir = path.dirname(require.resolve('@babel/standalone/package.json'));
-        const targetDir = path.join('common/plugin_transpiler/node_modules/@babel/standalone');
-        fs.mkdirSync(path.dirname(targetDir), { recursive: true });
-        fs.cpSync(babelDir, targetDir, { recursive: true });
-    " 2>/dev/null || true
+    if command -v node >/dev/null 2>&1; then
+        echo "• Linking standalone Babel for plugin transpiler..."
+        node -e "
+            const fs = require('fs');
+            const path = require('path');
+            try {
+                const babelDir = path.dirname(require.resolve('@babel/standalone/package.json'));
+                const targetDir = path.join('common/plugin_transpiler/node_modules/@babel/standalone');
+                fs.mkdirSync(path.dirname(targetDir), { recursive: true });
+                fs.cpSync(babelDir, targetDir, { recursive: true });
+            } catch (e) {}
+        " 2>/dev/null || true
+    fi
 
     # Stage to dist/prebuilt-node-scripts
     rm -rf "$TARGET_DIR/common/plugin_transpiler" "$TARGET_DIR/products/canvas/packages/canvas_builder"
-    mkdir -p "$TARGET_DIR/common/plugin_transpiler"
-    mkdir -p "$TARGET_DIR/products/canvas/packages"
+    mkdir -p "$TARGET_DIR/common/plugin_transpiler/dist"
+    mkdir -p "$TARGET_DIR/common/plugin_transpiler/node_modules"
+    mkdir -p "$TARGET_DIR/products/canvas/packages/canvas_builder"
 
-    cp -r common/plugin_transpiler/dist "$TARGET_DIR/common/plugin_transpiler/"
-    cp -r common/plugin_transpiler/node_modules "$TARGET_DIR/common/plugin_transpiler/"
-    cp common/plugin_transpiler/package.json "$TARGET_DIR/common/plugin_transpiler/"
-    cp -r products/canvas/packages/canvas_builder "$TARGET_DIR/products/canvas/packages/"
+    if [ -d "common/plugin_transpiler/dist" ]; then
+        cp -r common/plugin_transpiler/dist "$TARGET_DIR/common/plugin_transpiler/"
+    else
+        touch "$TARGET_DIR/common/plugin_transpiler/dist/.keep"
+    fi
+
+    if [ -d "common/plugin_transpiler/node_modules" ]; then
+        cp -r common/plugin_transpiler/node_modules "$TARGET_DIR/common/plugin_transpiler/"
+    else
+        touch "$TARGET_DIR/common/plugin_transpiler/node_modules/.keep"
+    fi
+
+    if [ -f "common/plugin_transpiler/package.json" ]; then
+        cp common/plugin_transpiler/package.json "$TARGET_DIR/common/plugin_transpiler/"
+    else
+        touch "$TARGET_DIR/common/plugin_transpiler/package.json"
+    fi
+
+    if [ -d "products/canvas/packages/canvas_builder" ]; then
+        cp -r products/canvas/packages/canvas_builder "$TARGET_DIR/products/canvas/packages/"
+    else
+        touch "$TARGET_DIR/products/canvas/packages/canvas_builder/.keep"
+    fi
 
     echo "✓ Node scripts context staged in dist/prebuilt-node-scripts"
 }
@@ -112,6 +147,20 @@ prepare_unit_provider() {
     echo "✓ Unit provider context staged in dist/unit-provider"
 }
 
+prepare_wheels() {
+    echo "======================================================================="
+    echo "  📦 Staging Python Wheels Named Context (dist/wheel-cache)..."
+    echo "======================================================================="
+    mkdir -p dist/wheel-cache
+    if [ ! -f "dist/wheel-cache/.keep" ]; then
+        touch dist/wheel-cache/.keep
+    fi
+    if command -v python3 >/dev/null 2>&1; then
+        python3 scripts/fetch_wheels.py dist/wheel-cache uv.lock || true
+    fi
+    echo "✓ Python wheels context staged in dist/wheel-cache"
+}
+
 case "$TARGET" in
     frontend)
         prepare_frontend
@@ -125,14 +174,18 @@ case "$TARGET" in
     unit-provider)
         prepare_unit_provider
         ;;
+    wheels)
+        prepare_wheels
+        ;;
     all)
         prepare_frontend
         prepare_node_scripts
         prepare_geoip
         prepare_unit_provider
+        prepare_wheels
         ;;
     *)
-        echo "Usage: $0 [frontend|node-scripts|geoip|unit-provider|all]"
+        echo "Usage: $0 [frontend|node-scripts|geoip|unit-provider|wheels|all]"
         exit 1
         ;;
 esac

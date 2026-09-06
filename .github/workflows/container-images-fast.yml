@@ -331,7 +331,33 @@ jobs:
               uses: actions/cache/save@v4
               with:
                   path: dist/geoip
-                  key: ${{ steps.cache-geoip.outputs.primary-key || format('geoip-db-{0}-v1-{1}', runner.os, hashFiles('bin/download-mmdb')) }}
+            # -----------------------------------------------------------------
+            # Decoupled Python Wheels Pre-Fetch & Cache (BuildKit Named Context)
+            # -----------------------------------------------------------------
+            - name: Restore Python Wheels from GHA Cache
+              id: cache-wheels
+              uses: actions/cache/restore@v4
+              with:
+                  path: dist/wheel-cache
+                  key: uv-wheels-${{ runner.os }}-v1-${{ hashFiles('uv.lock') }}
+                  restore-keys: |
+                      uv-wheels-${{ runner.os }}-v1-
+                      uv-wheels-${{ runner.os }}-
+
+            - name: Fetch and Stage Python Wheels (on cache miss or update)
+              if: steps.cache-wheels.outputs.cache-hit != 'true' && env.ACT != 'true'
+              shell: bash
+              run: |
+                  set -euo pipefail
+                  chmod +x scripts/prepare_build_contexts.sh
+                  scripts/prepare_build_contexts.sh wheels
+
+            - name: Save Python Wheels to GHA Cache
+              if: github.ref == 'refs/heads/master' && steps.cache-wheels.outputs.cache-hit != 'true' && env.ACT != 'true'
+              uses: actions/cache/save@v4
+              with:
+                  path: dist/wheel-cache
+                  key: ${{ steps.cache-wheels.outputs.primary-key || format('uv-wheels-{0}-v1-{1}', runner.os, hashFiles('uv.lock')) }}
 
             # -----------------------------------------------------------------
             # Prepare NGINX Unit Provider Named Context
@@ -352,7 +378,8 @@ jobs:
                   [ ! -d "dist/prebuilt-node-scripts/code/common/plugin_transpiler/dist" ] && scripts/prepare_build_contexts.sh node-scripts
                   [ ! -f "dist/geoip/code/share/GeoLite2-City.mmdb" ] && scripts/prepare_build_contexts.sh geoip
                   [ ! -d "dist/unit-provider/opt/unit" ] && scripts/prepare_build_contexts.sh unit-provider
-                  echo "✓ All 4 BuildKit named contexts verified and ready for Docker Buildx"
+                  [ ! -d "dist/wheel-cache" ] && scripts/prepare_build_contexts.sh wheels
+                  echo "✓ All 5 BuildKit named contexts verified and ready for Docker Buildx"
 
             - name: Record Build Start Timestamp
               id: timing-start
@@ -371,13 +398,13 @@ jobs:
                       node-scripts-build=dist/prebuilt-node-scripts
                       fetch-geoip-db=dist/geoip
                       unit-binary-provider=dist/unit-provider
+                      wheel-cache=dist/wheel-cache
                   tags: ghcr.io/posthog/posthog:${{ github.sha }}-docker
                   build-args: |
                       COMMIT_HASH=${{ github.sha }}
                   cache-from: |
                       type=gha,scope=docker-enve
                       type=gha
-                  cache-to: type=gha,mode=max,scope=docker-enve
                   push: false
                   load: false
 
