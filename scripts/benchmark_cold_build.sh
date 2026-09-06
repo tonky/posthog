@@ -47,8 +47,8 @@ echo "  Clean Build: $CLEAN_BUILD"
 echo "-----------------------------------------------------------------------"
 
 if [ "$CLEAN_BUILD" = true ]; then
-    echo "🧹 Cleaning previous build outputs..."
-    rm -rf dist/container-root dist/posthog-enve-multiarch.tar frontend/dist dist/prebuilt-frontend
+    echo "🧹 Cleaning previous build outputs and caches..."
+    rm -rf dist/container-root dist/posthog-enve-multiarch.tar frontend/dist dist/prebuilt-frontend .turbo node_modules/.cache
 fi
 
 TOTAL_START=$(date +%s%N)
@@ -79,8 +79,14 @@ echo "🔨 Step 2: Compiling production frontend bundle from source..."
 P2_START=$(date +%s%N)
 
 if [ ! -d "frontend/dist" ] || [ "$CLEAN_BUILD" = true ]; then
-    echo "   Running: bin/turbo --filter=@posthog/frontend build"
-    bin/turbo --filter=@posthog/frontend build
+    EXTRA_FLAGS=""
+    if [ "$CLEAN_BUILD" = true ]; then
+        EXTRA_FLAGS="--force"
+        echo "   Running: bin/turbo --filter=@posthog/frontend build --force (100% cold compilation, bypassing Turbo cache)"
+    else
+        echo "   Running: bin/turbo --filter=@posthog/frontend build"
+    fi
+    bin/turbo --filter=@posthog/frontend build $EXTRA_FLAGS
 else
     echo "   ✓ frontend/dist already present ($(find frontend/dist -type f | wc -l) files)."
 fi
