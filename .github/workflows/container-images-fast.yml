@@ -60,9 +60,9 @@ jobs:
                       /usr/local/bin/enve
                       ~/.enve/store
                       /nix/store
-                  key: ${{ runner.os }}-enve-bin-v3-${{ hashFiles('enve.lock', 'enve.cue') }}
+                  key: ${{ runner.os }}-enve-bin-v0.7.0-${{ hashFiles('enve.lock', 'enve.cue') }}
                   restore-keys: |
-                      ${{ runner.os }}-enve-bin-v3-
+                      ${{ runner.os }}-enve-bin-v0.7.0-
 
             - name: Save enve binary and closures to GHA Cache
               if: github.ref == 'refs/heads/master' && steps.cache-enve.outputs.cache-hit != 'true'
@@ -72,10 +72,9 @@ jobs:
                       /usr/local/bin/enve
                       ~/.enve/store
                       /nix/store
-                  key: ${{ runner.os }}-enve-bin-v3-${{ hashFiles('enve.lock', 'enve.cue') }}
+                  key: ${{ runner.os }}-enve-bin-v0.7.0-${{ hashFiles('enve.lock', 'enve.cue') }}
 
-            - name: Install Hermetic enve Binary (on GHA cache miss)
-              if: steps.cache-enve.outputs.cache-hit != 'true'
+            - name: Ensure Hermetic enve Binary Present
               shell: bash
               env:
                   R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
@@ -85,15 +84,17 @@ jobs:
                   ENVE_TOKEN: ${{ secrets.ENVE_TOKEN }}
                   GH_TOKEN: ${{ secrets.ENVE_TOKEN || secrets.GITHUB_TOKEN }}
               run: |
-                  python3 scripts/fetch_enve.py /tmp/enve
-                  if [ "$EUID" -eq 0 ] || sudo -n true 2>/dev/null; then
-                      sudo mv /tmp/enve /usr/local/bin/enve
-                      sudo chmod +x /usr/local/bin/enve
-                  else
-                      mkdir -p "$HOME/.local/bin"
-                      mv /tmp/enve "$HOME/.local/bin/enve"
-                      chmod +x "$HOME/.local/bin/enve"
-                      echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+                  if ! command -v enve >/dev/null 2>&1 || ! enve image build --help 2>&1 | grep -q "app-dir"; then
+                      python3 scripts/fetch_enve.py /tmp/enve
+                      if [ "$EUID" -eq 0 ] || sudo -n true 2>/dev/null; then
+                          sudo mv /tmp/enve /usr/local/bin/enve
+                          sudo chmod +x /usr/local/bin/enve
+                      else
+                          mkdir -p "$HOME/.local/bin"
+                          mv /tmp/enve "$HOME/.local/bin/enve"
+                          chmod +x "$HOME/.local/bin/enve"
+                          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+                      fi
                   fi
                   enve --version
 

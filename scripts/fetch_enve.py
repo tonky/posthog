@@ -75,22 +75,66 @@ def fetch_enve(destination: str):
     bucket = os.environ.get("R2_BUCKET") or os.environ.get("ENVE_CACHE_BUCKET") or "posthog-enve"
     key = os.environ.get("ENVE_BINARY_KEY") or "bin/enve"
     token = os.environ.get("ENVE_TOKEN") or os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
+    if not token:
+        try:
+            import subprocess
+
+            token = subprocess.check_output(["gh", "auth", "token"], text=True).strip()
+        except Exception:
+            token = None
 
     dest_dir = os.path.dirname(os.path.abspath(destination))
     os.makedirs(dest_dir, exist_ok=True)
 
     # 1. First attempt: download updated enve binary from GitHub releases if token is available
     if token:
+        # Try pure-Python GitHub API asset download first (works even without gh CLI installed)
+        try:
+            import json
+
+            print("📥 Fetching latest enve v0.7.0 binary via GitHub API...", file=sys.stderr)
+            api_url = "https://api.github.com/repos/tonky/enve/releases/tags/v0.7.0"
+            req = urllib.request.Request(
+                api_url,
+                headers={"Authorization": f"Bearer {token}", "User-Agent": "enve-fetcher"},
+            )
+            with urllib.request.urlopen(req) as resp:
+                rel_data = json.load(resp)
+            asset_url = None
+            for a in rel_data.get("assets", []):
+                if a.get("name") == "enve":
+                    asset_url = a.get("url")
+                    break
+            if asset_url:
+                dl_req = urllib.request.Request(
+                    asset_url,
+                    headers={
+                        "Authorization": f"Bearer {token}",
+                        "Accept": "application/octet-stream",
+                        "User-Agent": "enve-fetcher",
+                    },
+                )
+                with urllib.request.urlopen(dl_req) as resp, open(destination, "wb") as f:
+                    f.write(resp.read())
+                os.chmod(destination, 0o755)
+                size_mb = os.path.getsize(destination) / (1024 * 1024)
+                print(f"✅ Downloaded enve v0.7.0 ({size_mb:.2f} MB) via GitHub API to {destination}")
+                if access_key and secret_key:
+                    sync_to_r2(destination, endpoint, bucket, key, access_key, secret_key)
+                return
+        except Exception as e:
+            print(f"ℹ️ GitHub API download notice: {e}, falling back to gh CLI / R2...", file=sys.stderr)
+
+        # Fallback to gh release download if CLI available
         try:
             import subprocess
 
-            print("📥 Fetching latest enve binary from tonky/enve release v0.5.0...", file=sys.stderr)
             res = subprocess.run(
                 [
                     "gh",
                     "release",
                     "download",
-                    "v0.5.0",
+                    "v0.7.0",
                     "--repo",
                     "tonky/enve",
                     "-p",
@@ -106,7 +150,7 @@ def fetch_enve(destination: str):
             if res.returncode == 0 and os.path.exists(destination) and os.path.getsize(destination) > 1000000:
                 os.chmod(destination, 0o755)
                 size_mb = os.path.getsize(destination) / (1024 * 1024)
-                print(f"✅ Downloaded updated enve ({size_mb:.2f} MB) successfully to {destination}")
+                print(f"✅ Downloaded enve v0.7.0 ({size_mb:.2f} MB) successfully to {destination}")
                 if access_key and secret_key:
                     sync_to_r2(destination, endpoint, bucket, key, access_key, secret_key)
                 return

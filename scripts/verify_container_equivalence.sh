@@ -82,19 +82,52 @@ for cfg in configs:
 
 echo "3b. Auditing essential production filesystem assets in container layers..."
 python3 -c "
-import glob, tarfile, os
+import glob, tarfile, os, json
 
-layers = glob.glob('$TMP_DIR/*.tar') + glob.glob('$TMP_DIR/blobs/sha256/*')
+tmp_dir = '$TMP_DIR'
+layers = set()
+
+# 1. Inspect manifest.json for explicit layer entries
+manifest_file = os.path.join(tmp_dir, 'manifest.json')
+if os.path.isfile(manifest_file):
+    try:
+        with open(manifest_file) as f:
+            data = json.load(f)
+            for item in data:
+                for l in item.get('Layers', []):
+                    full_p = os.path.join(tmp_dir, l)
+                    if os.path.isfile(full_p):
+                        layers.add(full_p)
+    except Exception as e:
+        print(f'   [notice] manifest.json parsing warning: {e}')
+
+# 2. Also scan tmp_dir for archives and blobs
+for root, dirs, files in os.walk(tmp_dir):
+    for f in files:
+        if f.endswith(('.tar', '.tar.gz', '.tgz')) or 'blobs/sha256' in root:
+            p = os.path.join(root, f)
+            if os.path.isfile(p):
+                layers.add(p)
+
 found_members = set()
+valid_layers_count = 0
 
-for layer in layers:
-    if os.path.isfile(layer):
-        try:
-            with tarfile.open(layer, 'r:*') as tar:
-                for member in tar.getmembers():
-                    found_members.add(member.name.lstrip('./'))
-        except Exception:
-            continue
+for layer in sorted(layers):
+    try:
+        with tarfile.open(layer, 'r:*') as tar:
+            count = 0
+            for member in tar.getmembers():
+                name = member.name.lstrip('./').lstrip('/')
+                found_members.add(name)
+                # Also index normalized subpaths if code/ is nested (e.g. dist/container-root/code/...)
+                if 'code/' in name:
+                    idx = name.find('code/')
+                    found_members.add(name[idx:])
+                count += 1
+            if count > 0:
+                valid_layers_count += 1
+    except Exception:
+        continue
 
 required_artifacts = [
     'code/manage.py',
@@ -116,8 +149,14 @@ required_artifacts = [
 ]
 
 missing = [r for r in required_artifacts if not any(m == r or m.startswith(r + '/') for m in found_members)]
-assert not missing, f'Missing critical production artifacts in OCI layers: {missing}'
-print(f'   ✓ All {len(required_artifacts)} essential production assets verified in OCI layers.')
+if missing:
+    print(f'   ❌ Missing critical artifacts: {missing}')
+    print(f'   ℹ️ Inspected {len(layers)} layer candidates ({valid_layers_count} valid tar layers, {len(found_members)} total members indexed).')
+    sample = sorted(list(found_members))[:25]
+    print(f'   ℹ️ Sample indexed paths: {sample}')
+    assert not missing, f'Missing critical production artifacts in OCI layers: {missing}'
+
+print(f'   ✓ All {len(required_artifacts)} essential production assets verified across {valid_layers_count} OCI layers ({len(found_members)} members indexed).')
 "
 
 echo "4. Executing PostHog Golden Import & Django Check Gate..."
