@@ -363,27 +363,27 @@ def _django_db_setup(django_db_keepdb, django_db_blocker):
     # Run sqlx migrations to create posthog_person_new and related tables
     run_persons_sqlx_migrations(keepdb=django_db_keepdb)
 
-    database = Database(
-        settings.CLICKHOUSE_DATABASE,
-        db_url=settings.CLICKHOUSE_HTTP_URL,
-        username=settings.CLICKHOUSE_USER,
-        password=settings.CLICKHOUSE_PASSWORD,
-        cluster=settings.CLICKHOUSE_CLUSTER,
-        verify_ssl_cert=settings.CLICKHOUSE_VERIFY,
-        randomize_replica_paths=True,
-        # don't use the egress proxy, clickhouse is internal
-        trust_env=False,
-    )
-
     skip_ch_setup = os.environ.get("SKIP_CLICKHOUSE_SETUP", "0").lower() in {"1", "true", "yes"}
+    database = None
     if not skip_ch_setup:
-        if not django_db_keepdb:
-            try:
-                database.drop_database()
-            except:
-                pass
-
         try:
+            database = Database(
+                settings.CLICKHOUSE_DATABASE,
+                db_url=settings.CLICKHOUSE_HTTP_URL,
+                username=settings.CLICKHOUSE_USER,
+                password=settings.CLICKHOUSE_PASSWORD,
+                cluster=settings.CLICKHOUSE_CLUSTER,
+                verify_ssl_cert=settings.CLICKHOUSE_VERIFY,
+                randomize_replica_paths=True,
+                # don't use the egress proxy, clickhouse is internal
+                trust_env=False,
+            )
+            if not django_db_keepdb:
+                try:
+                    database.drop_database()
+                except:
+                    pass
+
             database.create_database()  # Create database if it doesn't exist
             create_clickhouse_tables()
         except Exception:
@@ -397,7 +397,7 @@ def _django_db_setup(django_db_keepdb, django_db_blocker):
         skip_ch_reset = os.environ.get("SKIP_CLICKHOUSE_RESET", "0").lower() in {"1", "true", "yes"}
         if not settings.IN_EVAL_TESTING and not skip_ch_reset and not skip_ch_setup:
             reset_clickhouse_tables()
-    elif not skip_ch_setup:
+    elif database is not None:
         try:
             database.drop_database()
         except:

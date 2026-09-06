@@ -407,6 +407,8 @@ jobs:
           DEBUG: 'true'
           TEST: '1'
           SECRET_KEY: 'abcdef'
+          SKIP_CLICKHOUSE_SETUP: 'true'
+          SKIP_CLICKHOUSE_RESET: 'true'
           PYTHONUNBUFFERED: '1'
         run: |
           if [ "${{ matrix.shard }}" = "1" ]; then
