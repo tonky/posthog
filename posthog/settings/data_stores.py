@@ -471,10 +471,14 @@ TOKENS_HISTORICAL_DATA = os.getenv("TOKENS_HISTORICAL_DATA", "").split(",")
 
 # The last case happens when someone upgrades Heroku but doesn't have Redis installed yet. Collectstatic gets called before we can provision Redis.
 if TEST or DEBUG or IS_COLLECT_STATIC:
-    if PYTEST_XDIST_WORKER_NUM is not None:
-        REDIS_URL = os.getenv("REDIS_URL", f"redis://redis7/{PYTEST_XDIST_WORKER_NUM}")
+    base_redis = os.getenv("REDIS_URL", "redis://redis7/")
+    if PYTEST_XDIST_WORKER_NUM is not None and base_redis:
+        from urllib.parse import urlparse, urlunparse
+
+        parsed = urlparse(base_redis)
+        REDIS_URL = urlunparse((parsed.scheme, parsed.netloc, f"/{PYTEST_XDIST_WORKER_NUM}", "", "", ""))
     else:
-        REDIS_URL = os.getenv("REDIS_URL", "redis://redis7/")
+        REDIS_URL = base_redis
 else:
     REDIS_URL = os.getenv("REDIS_URL", "")
 

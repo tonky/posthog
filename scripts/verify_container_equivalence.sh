@@ -80,6 +80,46 @@ for cfg in configs:
     print(f'   ✓ Architecture [{arch}] configuration matches exact upstream contract.')
 "
 
+echo "3b. Auditing essential production filesystem assets in container layers..."
+python3 -c "
+import glob, tarfile, os
+
+layers = glob.glob('$TMP_DIR/*.tar') + glob.glob('$TMP_DIR/blobs/sha256/*')
+found_members = set()
+
+for layer in layers:
+    if os.path.isfile(layer):
+        try:
+            with tarfile.open(layer, 'r:*') as tar:
+                for member in tar.getmembers():
+                    found_members.add(member.name.lstrip('./'))
+        except Exception:
+            continue
+
+required_artifacts = [
+    'code/manage.py',
+    'code/bin/docker-server-unit',
+    'code/bin/docker-worker-celery',
+    'code/bin/temporal-django-worker',
+    'code/unit.json.tpl',
+    'code/commit.txt',
+    'code/posthog/__init__.py',
+    'code/posthog/asgi.py',
+    'code/ee/__init__.py',
+    'code/common/hogvm/__init__.py',
+    'code/products/__init__.py',
+    'code/frontend/src/products.json',
+    'code/frontend/dist/index.html',
+    'code/rust/persons_migrations',
+    'code/services/mcp/schema/tool-definitions.json',
+    'code/share/GeoLite2-City.mmdb',
+]
+
+missing = [r for r in required_artifacts if not any(m == r or m.startswith(r + '/') for m in found_members)]
+assert not missing, f'Missing critical production artifacts in OCI layers: {missing}'
+print(f'   ✓ All {len(required_artifacts)} essential production assets verified in OCI layers.')
+"
+
 echo "4. Executing PostHog Golden Import & Django Check Gate..."
 PYTHON_BIN="python3"
 if [ -f ".venv/bin/python" ]; then

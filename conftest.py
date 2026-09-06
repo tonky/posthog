@@ -24,11 +24,9 @@ def _end_gc_boot_window() -> None:
     # reclaims only ~1MB, so the garbage gets frozen along with the survivors.
     gc.freeze()
     gc.enable()
-    # Collect far less often than the default (700, 10, 10): test runs allocate heavily and
-    # cyclic garbage is reclaimed fine at these thresholds, while frequent young-gen sweeps
-    # over a large frozen heap cost real wall time (~10% of a unit-heavy suite; measured on
-    # products/warehouse_sources with peak RSS within 1% of the default thresholds).
-    gc.set_threshold(50_000, 20, 20)
+    # Collect with balanced thresholds: test runs allocate heavily and cyclic garbage
+    # is reclaimed fine at these thresholds without rescanning the frozen boot heap.
+    gc.set_threshold(10_000, 10, 10)
     # gc.get_referrers() cannot see referrers in the frozen permanent generation,
     # which turns hypothesis's register_random() liveness check into a false positive
     # for Randoms registered after the freeze (e.g. trio's module-level instance,
@@ -247,6 +245,20 @@ def pytest_runtestloop() -> None:
     # Safety net for processes that never run a local collection (e.g. the
     # pytest-xdist controller): end the window before the test loop starts.
     _end_gc_boot_window()
+
+
+_test_count = 0
+
+
+@pytest.hookimpl(trylast=True)
+def pytest_runtest_teardown(item, nextitem) -> None:
+    global _test_count
+    _test_count += 1
+    # Periodically collect young-gen cyclic garbage (querysets, mock calls, model instances)
+    # before they accumulate across long multi-test suites. Since the boot heap is frozen,
+    # scanning generations 0 and 1 takes <5ms.
+    if _test_count % 25 == 0:
+        gc.collect(1)
 
 
 def pytest_unconfigure() -> None:

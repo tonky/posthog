@@ -3,6 +3,16 @@ name: 'enve Fast CI & Rootless Gatekeeper (PostHog PoC)'
 on:
   workflow_dispatch:
   pull_request:
+    paths:
+      - 'enve.cue'
+      - 'enve.lock'
+      - 'Justfile'
+      - 'scripts/**'
+      - '.github/workflows/enve-fast-ci.yml'
+      - 'posthog/**'
+      - 'ee/**'
+      - 'products/**'
+      - 'common/**'
   push:
     branches:
       - master
@@ -138,7 +148,7 @@ jobs:
 
       - name: Restore sqlx-cli binary from GHA Cache
         id: cache-sqlx
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: /home/runner/.cargo/bin/sqlx
           key: ${{ runner.os }}-sqlx-cli-0.8.2
@@ -328,7 +338,7 @@ jobs:
 
       - name: Restore sqlx-cli binary from GHA Cache
         id: cache-sqlx
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: /home/runner/.cargo/bin/sqlx
           key: ${{ runner.os }}-sqlx-cli-0.8.2
@@ -524,7 +534,7 @@ jobs:
           echo "::endgroup::"
 
       - name: Save Temporal CLI Closure to GHA Cache
-        if: steps.gha-temporal-cache.outputs.cache-hit != 'true'
+        if: github.ref == 'refs/heads/master' && steps.gha-temporal-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: /nix/store
@@ -623,7 +633,7 @@ jobs:
 
       - name: Restore sqlx-cli binary from GHA Cache
         id: cache-sqlx
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: /home/runner/.cargo/bin/sqlx
           key: ${{ runner.os }}-sqlx-cli-0.8.2
@@ -749,7 +759,7 @@ jobs:
           echo "::endgroup::"
 
       - name: Save ClickHouse Closure to GHA Cache (Shard 1)
-        if: matrix.shard == 1 && steps.gha-clickhouse-cache.outputs.cache-hit != 'true'
+        if: github.ref == 'refs/heads/master' && matrix.shard == 1 && steps.gha-clickhouse-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: /nix/store

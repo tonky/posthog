@@ -13,6 +13,10 @@
     <user_files_path from_env="CLICKHOUSE_USER_FILES_DIR" replace="true">/dev/shm/clickhouse/user_files/</user_files_path>
     <format_schema_path from_env="CLICKHOUSE_FORMAT_SCHEMA_DIR" replace="true">/dev/shm/clickhouse/format_schemas/</format_schema_path>
 
+    <merge_tree>
+        <allow_dimensions_outside_sorting_key>1</allow_dimensions_outside_sorting_key>
+    </merge_tree>
+
     <users_config>users.xml</users_config>
     <user_directories>
         <users_xml>
@@ -55,4 +59,78 @@
             <port>9181</port>
         </node>
     </zookeeper>
+    <remote_servers>
+        <posthog>
+            <shard>
+                <replica>
+                    <host>127.0.0.1</host>
+                    <port>9000</port>
+                </replica>
+            </shard>
+        </posthog>
+        <posthog_single_shard>
+            <shard>
+                <replica>
+                    <host>127.0.0.1</host>
+                    <port>9000</port>
+                </replica>
+            </shard>
+        </posthog_single_shard>
+        <posthog_migrations>
+            <shard>
+                <replica>
+                    <host>127.0.0.1</host>
+                    <port>9000</port>
+                </replica>
+            </shard>
+        </posthog_migrations>
+        <posthog_writable>
+            <shard>
+                <replica>
+                    <host>127.0.0.1</host>
+                    <port>9000</port>
+                </replica>
+            </shard>
+        </posthog_writable>
+        <posthog_primary_replica>
+            <shard>
+                <replica>
+                    <host>127.0.0.1</host>
+                    <port>9000</port>
+                </replica>
+            </shard>
+        </posthog_primary_replica>
+        <ai_events>
+            <shard>
+                <replica>
+                    <host>127.0.0.1</host>
+                    <port>9000</port>
+                </replica>
+            </shard>
+        </ai_events>
+        <aux>
+            <shard>
+                <replica>
+                    <host>127.0.0.1</host>
+                    <port>9000</port>
+                </replica>
+            </shard>
+        </aux>
+        <ops>
+            <shard>
+                <replica>
+                    <host>127.0.0.1</host>
+                    <port>9000</port>
+                </replica>
+            </shard>
+        </ops>
+        <sessions>
+            <shard>
+                <replica>
+                    <host>127.0.0.1</host>
+                    <port>9000</port>
+                </replica>
+            </shard>
+        </sessions>
+    </remote_servers>
 </clickhouse>

@@ -187,6 +187,9 @@ QAREPORT.md
 .migration-checkpoint.json
 data/seaweedfs
 data/seaweedfs/
+data/postgres/
+data/clickhouse/*.pid
+dist/
 
 # No env files except for the example, development defaults, services, and local-overrides template
 .env*

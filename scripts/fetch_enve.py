@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
+# ruff: noqa: T201
 """
 scripts/fetch_enve.py: Pure zero-dependency SigV4 downloader to fetch the hermetic
 enve binary directly from Cloudflare R2 / S3 binary cache buckets.
 """
-import datetime
-import hashlib
-import hmac
+
 import os
 import sys
+import hmac
+import hashlib
+import datetime
 import urllib.error
 import urllib.request
 
@@ -18,7 +20,7 @@ def sync_to_r2(source: str, endpoint: str, bucket: str, key: str, access_key: st
             data = f.read()
         host = endpoint.split("://")[-1].split("/")[0]
         path = f"/{bucket}/{key}"
-        now = datetime.datetime.now(datetime.timezone.utc)
+        now = datetime.datetime.now(datetime.UTC)
         amz_date = now.strftime("%Y%m%dT%H%M%SZ")
         date_stamp = now.strftime("%Y%m%d")
         payload_hash = hashlib.sha256(data).hexdigest()
@@ -41,8 +43,7 @@ def sync_to_r2(source: str, endpoint: str, bucket: str, key: str, access_key: st
         signature = hmac.new(k_signing, string_to_sign.encode("utf-8"), hashlib.sha256).hexdigest()
 
         auth_header = (
-            f"AWS4-HMAC-SHA256 Credential={access_key}/{scope}, "
-            f"SignedHeaders={signed_headers}, Signature={signature}"
+            f"AWS4-HMAC-SHA256 Credential={access_key}/{scope}, SignedHeaders={signed_headers}, Signature={signature}"
         )
         url = f"{endpoint}/{bucket}/{key}"
         req = urllib.request.Request(
@@ -57,8 +58,8 @@ def sync_to_r2(source: str, endpoint: str, bucket: str, key: str, access_key: st
             },
             method="PUT",
         )
-        with urllib.request.urlopen(req) as resp:
-            print(f"🚀 Synced updated enve binary to R2 cache ({url})")
+        with urllib.request.urlopen(req):
+            print(f"🚀 Synced updated enve binary to R2 cache ({url})")  # noqa: T201
     except Exception as e:
         print(f"Notice: R2 sync skipped: {e}", file=sys.stderr)
 
@@ -82,9 +83,22 @@ def fetch_enve(destination: str):
     if token:
         try:
             import subprocess
+
             print("📥 Fetching latest enve binary from tonky/enve release v0.5.0...", file=sys.stderr)
             res = subprocess.run(
-                ["gh", "release", "download", "v0.5.0", "--repo", "tonky/enve", "-p", "enve", "--output", destination, "--clobber"],
+                [
+                    "gh",
+                    "release",
+                    "download",
+                    "v0.5.0",
+                    "--repo",
+                    "tonky/enve",
+                    "-p",
+                    "enve",
+                    "--output",
+                    destination,
+                    "--clobber",
+                ],
                 env={**os.environ, "GH_TOKEN": token},
                 capture_output=True,
                 text=True,
@@ -108,7 +122,7 @@ def fetch_enve(destination: str):
     host = endpoint.split("://")[-1].split("/")[0]
     path = f"/{bucket}/{key}"
 
-    now = datetime.datetime.now(datetime.timezone.utc)
+    now = datetime.datetime.now(datetime.UTC)
     amz_date = now.strftime("%Y%m%dT%H%M%SZ")
     date_stamp = now.strftime("%Y%m%d")
 
@@ -133,8 +147,7 @@ def fetch_enve(destination: str):
     signature = hmac.new(k_signing, string_to_sign.encode("utf-8"), hashlib.sha256).hexdigest()
 
     auth_header = (
-        f"AWS4-HMAC-SHA256 Credential={access_key}/{scope}, "
-        f"SignedHeaders={signed_headers}, Signature={signature}"
+        f"AWS4-HMAC-SHA256 Credential={access_key}/{scope}, SignedHeaders={signed_headers}, Signature={signature}"
     )
 
     req = urllib.request.Request(

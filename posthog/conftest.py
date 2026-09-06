@@ -309,7 +309,11 @@ def _django_db_setup(django_db_keepdb, django_db_blocker):
     from posthog.product_db_config import load_product_db_routes
 
     for route in load_product_db_routes(settings.BASE_DIR):
-        test_product_db_name = test_db_name + f"_{route.database}"
+        if "_gw" in test_db_name:
+            base_prefix, gw_suffix = test_db_name.rsplit("_gw", 1)
+            test_product_db_name = f"{base_prefix}_{route.database}_gw{gw_suffix}"
+        else:
+            test_product_db_name = f"{test_db_name}_{route.database}"
         for suffix in ("_db_writer", "_db_reader", "_db_direct"):
             alias = f"{route.database}{suffix}"
             if alias in settings.DATABASES:

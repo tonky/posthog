@@ -54,7 +54,7 @@ jobs:
             # -----------------------------------------------------------------
             - name: Restore enve binary and store closures from GHA Cache
               id: cache-enve
-              uses: actions/cache@v4
+              uses: actions/cache/restore@v4
               with:
                   path: |
                       /usr/local/bin/enve
@@ -63,6 +63,16 @@ jobs:
                   key: ${{ runner.os }}-enve-bin-v3-${{ hashFiles('enve.lock', 'enve.cue') }}
                   restore-keys: |
                       ${{ runner.os }}-enve-bin-v3-
+
+            - name: Save enve binary and closures to GHA Cache
+              if: github.ref == 'refs/heads/master' && steps.cache-enve.outputs.cache-hit != 'true'
+              uses: actions/cache/save@v4
+              with:
+                  path: |
+                      /usr/local/bin/enve
+                      ~/.enve/store
+                      /nix/store
+                  key: ${{ runner.os }}-enve-bin-v3-${{ hashFiles('enve.lock', 'enve.cue') }}
 
             - name: Install Hermetic enve Binary (on GHA cache miss)
               if: steps.cache-enve.outputs.cache-hit != 'true'
@@ -76,8 +86,15 @@ jobs:
                   GH_TOKEN: ${{ secrets.ENVE_TOKEN || secrets.GITHUB_TOKEN }}
               run: |
                   python3 scripts/fetch_enve.py /tmp/enve
-                  sudo mv /tmp/enve /usr/local/bin/enve
-                  sudo chmod +x /usr/local/bin/enve
+                  if [ "$EUID" -eq 0 ] || sudo -n true 2>/dev/null; then
+                      sudo mv /tmp/enve /usr/local/bin/enve
+                      sudo chmod +x /usr/local/bin/enve
+                  else
+                      mkdir -p "$HOME/.local/bin"
+                      mv /tmp/enve "$HOME/.local/bin/enve"
+                      chmod +x "$HOME/.local/bin/enve"
+                      echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+                  fi
                   enve --version
 
             - name: Docker meta and registry login
@@ -117,7 +134,17 @@ jobs:
                   [ "$digest" = "None" ] && digest=""
                   echo "digest=$digest" >> "$GITHUB_OUTPUT"
 
-            # Stage application assets and entrypoints (< 2s)
+            # -----------------------------------------------------------------
+            # Restore Pre-Built Frontend Assets from GHA Cache (< 3s)
+            # -----------------------------------------------------------------
+            - name: Restore Pre-Built Frontend Assets from GHA Cache
+              id: cache-frontend
+              uses: actions/cache/restore@v4
+              with:
+                  path: dist/prebuilt-frontend
+                  key: frontend-assets-${{ runner.os }}-v1-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'turbo.json', 'package.json', 'frontend/**', 'products/**/*.ts', 'products/**/*.tsx', 'products/**/*.json', 'packages/**', 'common/esbuilder/**', 'common/hogvm/**', 'patches/**') }}
+
+            # Stage application assets, frontend bundles, and entrypoints (< 2s)
             - name: Stage PostHog container assets
               if: always() && (steps.preflight.conclusion == 'skipped' || steps.preflight.outputs.digest == '')
               run: |
@@ -219,7 +246,7 @@ jobs:
                   echo "✅ Frontend compilation and staging complete."
 
             - name: Save Pre-Built Frontend Assets to GHA Cache
-              if: steps.cache-frontend.outputs.cache-hit != 'true'
+              if: github.ref == 'refs/heads/master' && steps.cache-frontend.outputs.cache-hit != 'true'
               uses: actions/cache/save@v4
               with:
                   path: dist/prebuilt-frontend
@@ -263,6 +290,7 @@ jobs:
         name: "Benchmark: Measure Docker Daemon Overhead"
         needs: [path1_pure_enve_synthesis, path2_dockerfile_enve_build]
         runs-on: ubuntu-24.04
+        timeout-minutes: 5
         if: always()
         steps:
             - name: Generate Side-by-Side Benchmark Summary
@@ -300,6 +328,7 @@ jobs:
         name: "Trigger Deployment"
         needs: [path1_pure_enve_synthesis]
         runs-on: ubuntu-24.04
+        timeout-minutes: 5
         if: github.repository_owner == 'PostHog' && vars.CD_DEPLOY_ENABLED == 'true' && needs.path1_pure_enve_synthesis.outputs.image-digest != ''
         steps:
             - name: Get deployer token

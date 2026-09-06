@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# ruff: noqa: T201
 """
 Generate and update .migration_contract.json by statically scanning all
 historical migrations across the monorepo for internal imports (posthog.*, products.*, ee.*).
@@ -8,13 +9,13 @@ is caught deterministically in CI in milliseconds without needing to execute a 2
 from-scratch database migration replay.
 """
 
-import ast
-import hashlib
-import importlib
-import inspect
-import json
 import os
+import ast
 import sys
+import json
+import hashlib
+import inspect
+import importlib
 from pathlib import Path
 
 
@@ -57,7 +58,9 @@ def generate_migration_contract(repo_root: Path = Path(".")) -> dict:
             elif isinstance(node, ast.Import):
                 for alias in node.names:
                     name = alias.name
-                    if (name.startswith("posthog") or name.startswith("products") or name.startswith("ee")) and "migrations" not in name:
+                    if (
+                        name.startswith("posthog") or name.startswith("products") or name.startswith("ee")
+                    ) and "migrations" not in name:
                         raw_imports.setdefault(name, {}).setdefault("*", set()).add(rel_path)
 
     contract = {}

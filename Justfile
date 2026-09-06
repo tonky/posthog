@@ -129,7 +129,12 @@ test-django *ARGS:
     enve up --dry-run postgres redis clickhouse
     SETUP_MS=$(( ($(date +%s%N) - START_MS) / 1000000 ))
     echo "• 2. Executing pytest with multi-core parallelization..."
-    DEBUG=true TEST=true SECRET_KEY=abcdef uv run pytest -v --tb=short "${FINAL_ARGS[@]}"
+    DEBUG=true TEST=true SECRET_KEY=abcdef \
+        PGHOST=127.0.0.1 PGPORT=15432 PGUSER=posthog \
+        DATABASE_URL="postgres://posthog@127.0.0.1:15432/posthog" \
+        REDIS_URL="redis://127.0.0.1:6379" \
+        CLICKHOUSE_HOST=127.0.0.1 CLICKHOUSE_HTTP_PORT=8123 CLICKHOUSE_TCP_PORT=9000 \
+        uv run pytest -v --tb=short "${FINAL_ARGS[@]}"
     END_MS=$(date +%s%N)
     DURATION_MS=$(( (END_MS - START_MS) / 1000000 ))
     DURATION_S=$(awk "BEGIN {printf \"%.2f\", $DURATION_MS / 1000}")
@@ -146,7 +151,7 @@ test-django *ARGS:
 test-full-xdist *ARGS:
     #!/usr/bin/env bash
     set -euo pipefail
-    DEFAULT_TARGET="posthog/test/test_settings_debug_guard.py"
+    DEFAULT_TARGET="posthog/test"
     RAW_ARGS=( {{ARGS}} )
     HAS_N=false
     HAS_TARGET=false
@@ -181,13 +186,90 @@ test-full-xdist *ARGS:
     echo "  Executing: pytest -v --tb=short ${FINAL_ARGS[*]}"
     echo "======================================================================="
     START_MS=$(date +%s%N)
+
+    # Determine worker count
+    WORKER_COUNT=10
+    NPROC=$(nproc 2>/dev/null || echo 8)
+    for ((i=0; i<${#FINAL_ARGS[@]}; i++)); do
+        if [[ "${FINAL_ARGS[i]}" == "-n" && $((i+1)) -lt ${#FINAL_ARGS[@]} ]]; then
+            val="${FINAL_ARGS[i+1]}"
+            if [[ "$val" =~ ^[0-9]+$ ]]; then
+                WORKER_COUNT="$val"
+            elif [[ "$val" == "auto" ]]; then
+                WORKER_COUNT=$(( NPROC > 10 ? 10 : NPROC ))
+            fi
+        elif [[ "${FINAL_ARGS[i]}" =~ ^--numprocesses=([0-9]+)$ ]]; then
+            WORKER_COUNT="${BASH_REMATCH[1]}"
+        elif [[ "${FINAL_ARGS[i]}" == "--numprocesses=auto" ]]; then
+            WORKER_COUNT=$(( NPROC > 10 ? 10 : NPROC ))
+        fi
+    done
+
+    # Fast-provision missing worker databases from template (<0.5s per worker)
+    if psql -h 127.0.0.1 -p 15432 -U posthog -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='test_posthog'" 2>/dev/null | grep -q 1; then
+        EXISTING_DBS=$(psql -h 127.0.0.1 -p 15432 -U posthog -d postgres -tAc "SELECT datname FROM pg_database" 2>/dev/null || true)
+        for ((w=0; w<WORKER_COUNT; w++)); do
+            for db in "test_posthog_gw$w" "test_posthog_gw${w}_persons"; do
+                if ! echo "$EXISTING_DBS" | grep -qx "$db"; then
+                    echo "• Fast-cloning missing $db from test_posthog template (<0.5s)..."
+                    psql -h 127.0.0.1 -p 15432 -U posthog -d postgres -c "CREATE DATABASE $db TEMPLATE test_posthog;" >/dev/null 2>&1 || true
+                fi
+            done
+            for p in "stamphog" "visual_review" "warehouse_sources_queue"; do
+                pdb="test_posthog_${p}_gw$w"
+                src="test_posthog_${p}_gw0"
+                if echo "$EXISTING_DBS" | grep -qx "$src" && ! echo "$EXISTING_DBS" | grep -qx "$pdb"; then
+                    echo "• Fast-cloning missing $pdb from $src template (<0.1s)..."
+                    psql -h 127.0.0.1 -p 15432 -U posthog -d postgres -c "CREATE DATABASE $pdb TEMPLATE $src;" >/dev/null 2>&1 || true
+                fi
+            done
+        done
+    fi
+
     echo "• Auto-provisioning worker product databases & executing multi-core pytest..."
-    DEBUG=true TEST=true SECRET_KEY=abcdef uv run pytest -v --tb=short "${FINAL_ARGS[@]}"
+    DEBUG=true TEST=true SECRET_KEY=abcdef \
+        PGHOST=127.0.0.1 PGPORT=15432 PGUSER=posthog \
+        DATABASE_URL="postgres://posthog@127.0.0.1:15432/posthog" \
+        REDIS_URL="redis://127.0.0.1:6379" \
+        CLICKHOUSE_HOST=127.0.0.1 CLICKHOUSE_HTTP_PORT=8123 CLICKHOUSE_TCP_PORT=9000 \
+        uv run pytest -v --tb=short "${FINAL_ARGS[@]}"
     END_MS=$(date +%s%N)
     DURATION_MS=$(( (END_MS - START_MS) / 1000000 ))
     DURATION_S=$(awk "BEGIN {printf \"%.2f\", $DURATION_MS / 1000}")
     echo "======================================================================="
     echo "✅ Full Test Suite Completed in ${DURATION_S}s (${DURATION_MS}ms)!"
+    echo "======================================================================="
+
+# Fast-provision N worker databases from base template in sub-second time
+_prewarm-workers COUNT="10":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    TARGET_COUNT={{COUNT}}
+    echo "======================================================================="
+    echo "  🚀 Fast-Provisioning $TARGET_COUNT Pytest Worker Databases (TEMPLATE clone)"
+    echo "======================================================================="
+    if ! psql -h 127.0.0.1 -p 15432 -U posthog -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='test_posthog'" 2>/dev/null | grep -q 1; then
+        echo "❌ Base test database 'test_posthog' does not exist yet."
+        exit 1
+    fi
+    EXISTING_DBS=$(psql -h 127.0.0.1 -p 15432 -U posthog -d postgres -tAc "SELECT datname FROM pg_database" 2>/dev/null)
+    for i in $(seq 0 $((TARGET_COUNT - 1))); do
+        for db in "test_posthog_gw$i" "test_posthog_gw${i}_persons"; do
+            if ! echo "$EXISTING_DBS" | grep -qx "$db"; then
+                echo "• Cloning $db from test_posthog template (<0.5s)..."
+                psql -h 127.0.0.1 -p 15432 -U posthog -d postgres -c "CREATE DATABASE $db TEMPLATE test_posthog;" >/dev/null
+            fi
+        done
+        for p in "stamphog" "visual_review" "warehouse_sources_queue"; do
+            pdb="test_posthog_${p}_gw$i"
+            src="test_posthog_${p}_gw0"
+            if echo "$EXISTING_DBS" | grep -qx "$src" && ! echo "$EXISTING_DBS" | grep -qx "$pdb"; then
+                echo "• Cloning $pdb from $src template (<0.1s)..."
+                psql -h 127.0.0.1 -p 15432 -U posthog -d postgres -c "CREATE DATABASE $pdb TEMPLATE $src;" >/dev/null
+            fi
+        done
+    done
+    echo "✅ All $TARGET_COUNT worker databases are provisioned and ready for pytest-xdist!"
     echo "======================================================================="
 
 # Run in-memory AST migration contract & DAG verification (<2s, replaces 22-min scratch replay)

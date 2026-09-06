@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
+# ruff: noqa: T201
 """
 scripts/put_enve.py: Pure zero-dependency SigV4 uploader to upload hermetic
 enve binary directly to Cloudflare R2 / S3 binary cache buckets.
 """
-import datetime
-import hashlib
-import hmac
+
 import os
 import sys
+import hmac
+import hashlib
+import datetime
 import urllib.error
 import urllib.request
 
@@ -37,7 +39,7 @@ def put_enve(source: str, key: str = "bin/enve") -> bool:
     host = endpoint.split("://")[-1].split("/")[0]
     path = f"/{bucket}/{key}"
 
-    now = datetime.datetime.now(datetime.timezone.utc)
+    now = datetime.datetime.now(datetime.UTC)
     amz_date = now.strftime("%Y%m%dT%H%M%SZ")
     date_stamp = now.strftime("%Y%m%d")
 
@@ -68,8 +70,7 @@ def put_enve(source: str, key: str = "bin/enve") -> bool:
     signature = hmac.new(k_signing, string_to_sign.encode("utf-8"), hashlib.sha256).hexdigest()
 
     auth_header = (
-        f"AWS4-HMAC-SHA256 Credential={access_key}/{scope}, "
-        f"SignedHeaders={signed_headers}, Signature={signature}"
+        f"AWS4-HMAC-SHA256 Credential={access_key}/{scope}, SignedHeaders={signed_headers}, Signature={signature}"
     )
 
     req = urllib.request.Request(
