@@ -93,6 +93,7 @@ test-django *ARGS:
     DEFAULT_TARGET="posthog/test/test_settings_debug_guard.py"
     RAW_ARGS=( {{ARGS}} )
     HAS_N=false
+    HAS_DIST=false
     HAS_TARGET=false
     FINAL_ARGS=()
     SKIP_NEXT=false
@@ -102,10 +103,13 @@ test-django *ARGS:
         if [[ "$arg" == "-n" || "$arg" =~ ^--numprocesses(=.*)?$ ]]; then
             HAS_N=true
         fi
+        if [[ "$arg" == "--dist" || "$arg" =~ ^--dist(=.*)?$ ]]; then
+            HAS_DIST=true
+        fi
         if [[ "$arg" != -* && "$SKIP_NEXT" == false ]]; then
             HAS_TARGET=true
         fi
-        if [[ "$arg" =~ ^-[kmo]$ || "$arg" == "-n" ]]; then
+        if [[ "$arg" =~ ^-[kmo]$ || "$arg" == "-n" || "$arg" == "--dist" ]]; then
             SKIP_NEXT=true
         else
             SKIP_NEXT=false
@@ -118,6 +122,9 @@ test-django *ARGS:
     fi
     if [ "$HAS_N" = false ]; then
         FINAL_ARGS+=("-n" "auto")
+    fi
+    if [ "$HAS_DIST" = false ]; then
+        FINAL_ARGS+=("--dist=worksteal")
     fi
 
     echo "======================================================================="
@@ -208,6 +215,7 @@ test-full-xdist *ARGS:
     DEFAULT_TARGET="posthog/test"
     RAW_ARGS=( {{ARGS}} )
     HAS_N=false
+    HAS_DIST=false
     HAS_TARGET=false
     FINAL_ARGS=()
     SKIP_NEXT=false
@@ -217,10 +225,13 @@ test-full-xdist *ARGS:
         if [[ "$arg" == "-n" || "$arg" =~ ^--numprocesses(=.*)?$ ]]; then
             HAS_N=true
         fi
+        if [[ "$arg" == "--dist" || "$arg" =~ ^--dist(=.*)?$ ]]; then
+            HAS_DIST=true
+        fi
         if [[ "$arg" != -* && "$SKIP_NEXT" == false ]]; then
             HAS_TARGET=true
         fi
-        if [[ "$arg" =~ ^-[kmo]$ || "$arg" == "-n" ]]; then
+        if [[ "$arg" =~ ^-[kmo]$ || "$arg" == "-n" || "$arg" == "--dist" ]]; then
             SKIP_NEXT=true
         else
             SKIP_NEXT=false
@@ -233,6 +244,9 @@ test-full-xdist *ARGS:
     fi
     if [ "$HAS_N" = false ]; then
         FINAL_ARGS+=("-n" "auto")
+    fi
+    if [ "$HAS_DIST" = false ]; then
+        FINAL_ARGS+=("--dist=worksteal")
     fi
 
     echo "======================================================================="
@@ -420,15 +434,22 @@ test-hogvm *ARGS:
     set -euo pipefail
     RAW_ARGS=( {{ARGS}} )
     HAS_N=false
+    HAS_DIST=false
     for arg in "${RAW_ARGS[@]+"${RAW_ARGS[@]}"}"; do
         [ -z "$arg" ] && continue
         if [[ "$arg" == "-n" || "$arg" =~ ^--numprocesses(=.*)?$ ]]; then
             HAS_N=true
         fi
+        if [[ "$arg" == "--dist" || "$arg" =~ ^--dist(=.*)?$ ]]; then
+            HAS_DIST=true
+        fi
     done
     FINAL_ARGS=()
     if [ "$HAS_N" = false ]; then
         FINAL_ARGS+=("-n" "auto")
+    fi
+    if [ "$HAS_DIST" = false ]; then
+        FINAL_ARGS+=("--dist=worksteal")
     fi
     echo "======================================================================="
     echo "  🚀 HogVM Bytecode Interpreter Tests (pytest-xdist -n auto)"
@@ -441,15 +462,22 @@ test-invariants *ARGS:
     set -euo pipefail
     RAW_ARGS=( {{ARGS}} )
     HAS_N=false
+    HAS_DIST=false
     for arg in "${RAW_ARGS[@]+"${RAW_ARGS[@]}"}"; do
         [ -z "$arg" ] && continue
         if [[ "$arg" == "-n" || "$arg" =~ ^--numprocesses(=.*)?$ ]]; then
             HAS_N=true
         fi
+        if [[ "$arg" == "--dist" || "$arg" =~ ^--dist(=.*)?$ ]]; then
+            HAS_DIST=true
+        fi
     done
     FINAL_ARGS=()
     if [ "$HAS_N" = false ]; then
         FINAL_ARGS+=("-n" "auto")
+    fi
+    if [ "$HAS_DIST" = false ]; then
+        FINAL_ARGS+=("--dist=worksteal")
     fi
     echo "======================================================================="
     echo "  🚀 Architecture & Scoping Invariants Tests (pytest-xdist -n auto)"
