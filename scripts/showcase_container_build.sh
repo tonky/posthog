@@ -83,7 +83,7 @@ TABLE
         enve run -- uv run python -c "import posthog; print('  ✓ Core Module: posthog namespace OK')"
         enve run -- uv run python -c "from posthog.celery import app; print('  ✓ Celery Worker: task queues & brokers OK')"
         enve run -- bash -c "DJANGO_SECRET_KEY=showcase_test_secret_key DEBUG=1 uv run python -c 'import posthog.asgi; print(\"  ✓ Web Gateway: ASGI application & routers OK\")'"
-        enve run -- bash -c "DJANGO_SECRET_KEY=showcase_test_secret_key DEBUG=1 uv run python -c 'import posthog.management.commands.start_temporal_worker; print(\"  ✓ Temporal Worker: background worker OK\")'"
+        enve run -- bash -c "DJANGO_SECRET_KEY=showcase_test_secret_key DEBUG=1 uv run python -c 'import posthog.asgi; import posthog.management.commands.start_temporal_worker; print(\"  ✓ Temporal Worker: background worker OK\")'"
     else
         echo "  ✓ Core Module: posthog namespace OK"
         echo "  ✓ Celery Worker: task queues & brokers OK"
