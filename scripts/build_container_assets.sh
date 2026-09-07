@@ -188,6 +188,11 @@ find "$STAGING_DIR" -type f -name "*.pyc" -delete 2>/dev/null || true
 echo "• 12. Purging unused CUDA / NCCL libraries (saves ~410MB)..."
 rm -rf "$STAGING_DIR"/python-runtime/lib/python*/site-packages/nvidia* 2>/dev/null || true
 
+# 13. Strip Unneeded Debug Symbols from Native C Extensions & Rust Binaries (excluding OpenBLAS)
+echo "• 13. Stripping unneeded symbols from native extensions (saves ~300MB, exempting OpenBLAS)..."
+if command -v strip >/dev/null 2>&1; then
+    find "$STAGING_DIR/python-runtime/lib" -type f -name "*.so*" ! -name "*openblas*" -exec strip --strip-unneeded {} + 2>/dev/null || true
+fi
 
 # 14. Strip Sourcemap Files unless explicitly preserved (KEEP_SOURCEMAPS=1)
 if [ "${KEEP_SOURCEMAPS:-0}" != "1" ]; then
@@ -210,6 +215,12 @@ find "$STAGING_DIR/code/posthog" "$STAGING_DIR/code/ee" -type d -name "__snapsho
 # 17. Prune Third-Party Test Suites from Site-Packages (safely preserving django & rest_framework)
 echo "• 17. Pruning bundled third-party test suites from site-packages (saves ~65MB)..."
 find "$STAGING_DIR/python-runtime/lib/python3.13/site-packages" -type d -name "tests" ! -path "*/django/*" ! -path "*/rest_framework/*" -exec rm -rf {} + 2>/dev/null || true
+
+# 18. Deduplicate Static Assets (keep only HTML templates and array.js in frontend/dist)
+echo "• 18. Deduplicating static assets in frontend/dist (saves ~100MB duplicate assets)..."
+if [ -d "$STAGING_DIR/code/staticfiles" ] && [ -d "$STAGING_DIR/code/frontend/dist" ]; then
+    find "$STAGING_DIR/code/frontend/dist" -type f ! -name "*.html" ! -name "array.js" -delete 2>/dev/null || true
+fi
 
 TOTAL_FILES=$(find "$STAGING_DIR" -type f | wc -l)
 TOTAL_SIZE=$(du -sh "$STAGING_DIR" | awk '{print $1}')
