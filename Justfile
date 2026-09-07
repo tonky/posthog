@@ -285,12 +285,20 @@ test-full-xdist *ARGS:
     if psql -h 127.0.0.1 -p 15432 -U posthog -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='test_posthog'" 2>/dev/null | grep -q 1; then
         EXISTING_DBS=$(psql -h 127.0.0.1 -p 15432 -U posthog -d postgres -tAc "SELECT datname FROM pg_database" 2>/dev/null || true)
         for ((w=0; w<WORKER_COUNT; w++)); do
-            for db in "test_posthog_gw$w" "test_posthog_gw${w}_persons"; do
-                if ! echo "$EXISTING_DBS" | grep -qx "$db"; then
-                    echo "• Fast-cloning missing $db from test_posthog template (<0.5s)..."
-                    psql -h 127.0.0.1 -p 15432 -U posthog -d postgres -c "CREATE DATABASE $db TEMPLATE test_posthog;" >/dev/null 2>&1 || true
+            db="test_posthog_gw$w"
+            if ! echo "$EXISTING_DBS" | grep -qx "$db"; then
+                echo "• Fast-cloning missing $db from test_posthog template (<0.5s)..."
+                psql -h 127.0.0.1 -p 15432 -U posthog -d postgres -c "CREATE DATABASE $db TEMPLATE test_posthog;" >/dev/null 2>&1 || true
+            fi
+            pdb_persons="test_posthog_gw${w}_persons"
+            if ! echo "$EXISTING_DBS" | grep -qx "$pdb_persons"; then
+                tmpl_persons="test_posthog"
+                if echo "$EXISTING_DBS" | grep -qx "test_posthog_persons"; then
+                    tmpl_persons="test_posthog_persons"
                 fi
-            done
+                echo "• Fast-cloning missing $pdb_persons from $tmpl_persons template (<0.5s)..."
+                psql -h 127.0.0.1 -p 15432 -U posthog -d postgres -c "CREATE DATABASE $pdb_persons TEMPLATE $tmpl_persons;" >/dev/null 2>&1 || true
+            fi
             for p in "stamphog" "visual_review" "warehouse_sources_queue"; do
                 pdb="test_posthog_${p}_gw$w"
                 src="test_posthog_${p}_gw0"

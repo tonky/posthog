@@ -72,44 +72,84 @@ STEP1_DURATION=$(awk "BEGIN {printf \"%.2f\", ($P1_END - $P1_START) / 1000000000
 echo "   ✓ Dependencies ready in ${STEP1_DURATION}s"
 
 # -----------------------------------------------------------------------------
-# Step 2: Compile Production Frontend from Source
+# -----------------------------------------------------------------------------
+# Step 2 & 3: Parallelized Frontend Compilation & Application/Runtime Staging
 # -----------------------------------------------------------------------------
 echo ""
-echo "🔨 Step 2: Compiling production frontend bundle from source..."
-P2_START=$(date +%s%N)
+echo "⚡ Step 2 & 3: Compiling frontend & staging Python runtime concurrently..."
+P_START=$(date +%s%N)
 
-if [ ! -d "frontend/dist" ] || [ "$CLEAN_BUILD" = true ]; then
+FE_TIMING_FILE=$(mktemp)
+ASSETS_TIMING_FILE=$(mktemp)
+FE_LOG=$(mktemp)
+ASSETS_LOG=$(mktemp)
+
+# 2a. Compile production frontend bundle in background with PARALLEL_HEAVY=1
+(
+    set -euo pipefail
+    T_START=$(date +%s%N)
     EXTRA_FLAGS=""
     if [ "$CLEAN_BUILD" = true ]; then
         EXTRA_FLAGS="--force"
-        echo "   Running: bin/turbo --filter=@posthog/frontend build --force (100% cold compilation, bypassing Turbo cache)"
-    else
-        echo "   Running: bin/turbo --filter=@posthog/frontend build"
     fi
-    bin/turbo --filter=@posthog/frontend build $EXTRA_FLAGS
-else
-    echo "   ✓ frontend/dist already present ($(find frontend/dist -type f | wc -l) files)."
+    PARALLEL_HEAVY=1 bin/turbo --filter=@posthog/frontend build $EXTRA_FLAGS > "$FE_LOG" 2>&1
+    T_END=$(date +%s%N)
+    echo "$T_START $T_END" > "$FE_TIMING_FILE"
+) &
+FE_PID=$!
+
+# 3a. Stage application assets and full Python runtime in background
+(
+    set -euo pipefail
+    T_START=$(date +%s%N)
+    mkdir -p dist
+    scripts/build_container_assets.sh dist/container-root > "$ASSETS_LOG" 2>&1
+    T_END=$(date +%s%N)
+    echo "$T_START $T_END" > "$ASSETS_TIMING_FILE"
+) &
+ASSETS_PID=$!
+
+# Wait for both concurrent stages to complete
+FE_FAILED=false
+ASSETS_FAILED=false
+wait $FE_PID || FE_FAILED=true
+wait $ASSETS_PID || ASSETS_FAILED=true
+
+if [ "$FE_FAILED" = true ]; then
+    echo "❌ Frontend compilation failed!"
+    cat "$FE_LOG"
+    rm -f "$FE_LOG" "$ASSETS_LOG" "$FE_TIMING_FILE" "$ASSETS_TIMING_FILE"
+    exit 1
 fi
 
-P2_END=$(date +%s%N)
-STEP2_DURATION=$(awk "BEGIN {printf \"%.2f\", ($P2_END - $P2_START) / 1000000000}")
-echo "   ✓ Frontend compiled in ${STEP2_DURATION}s"
+if [ "$ASSETS_FAILED" = true ]; then
+    echo "❌ Application asset staging failed!"
+    cat "$ASSETS_LOG"
+    rm -f "$FE_LOG" "$ASSETS_LOG" "$FE_TIMING_FILE" "$ASSETS_TIMING_FILE"
+    exit 1
+fi
 
-# -----------------------------------------------------------------------------
-# Step 3: Stage Production Filesystem & Complete Python Runtime
-# -----------------------------------------------------------------------------
-echo ""
-echo "📂 Step 3: Staging container application assets & production Python runtime (433 packages)..."
-P3_START=$(date +%s%N)
+# Synchronize compiled frontend bundle into the final container root
+cp -rf frontend/dist dist/container-root/code/frontend/
+if [ -f "frontend/src/products.json" ]; then
+    cp -f frontend/src/products.json dist/container-root/code/frontend/src/products.json
+fi
 
-mkdir -p dist
-scripts/build_container_assets.sh dist/container-root
+P_END=$(date +%s%N)
+STEP_PARALLEL_DURATION=$(awk "BEGIN {printf \"%.2f\", ($P_END - $P_START) / 1000000000}")
 
-P3_END=$(date +%s%N)
-STEP3_DURATION=$(awk "BEGIN {printf \"%.2f\", ($P3_END - $P3_START) / 1000000000}")
+read -r FE_S FE_E < "$FE_TIMING_FILE"
+read -r ASSETS_S ASSETS_E < "$ASSETS_TIMING_FILE"
+rm -f "$FE_LOG" "$ASSETS_LOG" "$FE_TIMING_FILE" "$ASSETS_TIMING_FILE"
+
+STEP2_DURATION=$(awk "BEGIN {printf \"%.2f\", ($FE_E - $FE_S) / 1000000000}")
+STEP3_DURATION=$(awk "BEGIN {printf \"%.2f\", ($ASSETS_E - $ASSETS_S) / 1000000000}")
 STAGED_COUNT=$(find dist/container-root -type f 2>/dev/null | wc -l || echo "100,000+")
 STAGED_SIZE=$(du -sh dist/container-root 2>/dev/null | awk '{print $1}' || echo "4.5GB")
-echo "   ✓ ${STAGED_COUNT} files (${STAGED_SIZE}) staged in ${STEP3_DURATION}s"
+
+echo "   ✓ Frontend compiled in ${STEP2_DURATION}s (PARALLEL_HEAVY=1)"
+echo "   ✓ ${STAGED_COUNT} files (${STAGED_SIZE}) staged in ${STEP3_DURATION}s (Python runtime + 433 packages)"
+echo "   ✓ Combined parallel stage completed in ${STEP_PARALLEL_DURATION}s (overlapped)"
 
 # -----------------------------------------------------------------------------
 # Step 4: Synthesize Multi-Arch OCI Image via enve (Pure Rust)
@@ -157,8 +197,7 @@ echo "  OCI Multi-Arch Image Size:    ${IMAGE_SIZE}"
 echo ""
 echo "  Detailed Step Breakdown:"
 echo "    • Dependencies check:        ${STEP1_DURATION}s"
-echo "    • Frontend compilation:      ${STEP2_DURATION}s"
-echo "    • Application & runtime:     ${STEP3_DURATION}s"
+echo "    • Concurrent Frontend & App: ${STEP_PARALLEL_DURATION}s (Frontend: ${STEP2_DURATION}s, App & Python: ${STEP3_DURATION}s)"
 echo "    • enve multi-arch synthesis: ${STEP4_DURATION}s (pure Rust)"
 echo "    • Golden import verification:${STEP5_DURATION}s"
 echo ""

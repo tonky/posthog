@@ -184,6 +184,33 @@ echo "• 11. Pruning bytecode caches (__pycache__ / .pyc)..."
 find "$STAGING_DIR" -type d -name "__pycache__" -prune -exec rm -rf {} + 2>/dev/null || true
 find "$STAGING_DIR" -type f -name "*.pyc" -delete 2>/dev/null || true
 
+# 12. Purge Unused CUDA / NCCL Libraries (xgboost uses CPU inference only)
+echo "• 12. Purging unused CUDA / NCCL libraries (saves ~410MB)..."
+rm -rf "$STAGING_DIR"/python-runtime/lib/python*/site-packages/nvidia* 2>/dev/null || true
+
+
+# 14. Strip Sourcemap Files unless explicitly preserved (KEEP_SOURCEMAPS=1)
+if [ "${KEEP_SOURCEMAPS:-0}" != "1" ]; then
+    echo "• 14. Stripping uncompressed sourcemap files (*.map, saves ~1.1GB+)..."
+    find "$STAGING_DIR/code/frontend" "$STAGING_DIR/code/staticfiles" -type f -name "*.map*" -delete 2>/dev/null || true
+fi
+
+# 15. Prune Raw Products Frontend Source Code (already compiled into frontend/dist)
+echo "• 15. Pruning unneeded raw frontend source code in products (saves ~50MB)..."
+rm -rf "$STAGING_DIR"/code/products/*/frontend 2>/dev/null || true
+
+# 16. Prune Non-Runtime Test Suites and Fixtures
+echo "• 16. Pruning non-runtime test files and fixtures in posthog & ee (saves ~91MB)..."
+find "$STAGING_DIR/code/posthog" "$STAGING_DIR/code/ee" -type f -name "test_*.py" ! -name "test_cases_discovery.py" -delete 2>/dev/null || true
+find "$STAGING_DIR/code/posthog" "$STAGING_DIR/code/ee" -type f -name "*_test.py" -delete 2>/dev/null || true
+find "$STAGING_DIR/code/posthog" "$STAGING_DIR/code/ee" -type d -name "tests" -exec rm -rf {} + 2>/dev/null || true
+find "$STAGING_DIR/code/posthog" "$STAGING_DIR/code/ee" -type d -name "__tests__" -exec rm -rf {} + 2>/dev/null || true
+find "$STAGING_DIR/code/posthog" "$STAGING_DIR/code/ee" -type d -name "__snapshots__" -exec rm -rf {} + 2>/dev/null || true
+
+# 17. Prune Third-Party Test Suites from Site-Packages (safely preserving django & rest_framework)
+echo "• 17. Pruning bundled third-party test suites from site-packages (saves ~65MB)..."
+find "$STAGING_DIR/python-runtime/lib/python3.13/site-packages" -type d -name "tests" ! -path "*/django/*" ! -path "*/rest_framework/*" -exec rm -rf {} + 2>/dev/null || true
+
 TOTAL_FILES=$(find "$STAGING_DIR" -type f | wc -l)
 TOTAL_SIZE=$(du -sh "$STAGING_DIR" | awk '{print $1}')
 echo "======================================================================="
