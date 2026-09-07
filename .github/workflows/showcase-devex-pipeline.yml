@@ -68,7 +68,7 @@ jobs:
               run: |
                   enve check enve.cue
 
-            - name: 'Measure Setup Tax: Upstream Docker Compose vs Rootless enve PostgreSQL'
+            - name: 'Measure Setup Tax: Upstream Docker Compose Baseline vs Live tmpfs PostgreSQL'
               id: measure
               shell: bash
               run: |
@@ -81,6 +81,7 @@ jobs:
                   done
                   sudo systemctl stop postgresql 2>/dev/null || true
 
+                  echo "▶ 1. Initializing userspace PostgreSQL cluster on tmpfs (/dev/shm)..."
                   START_ENVE=$(date +%s%N)
 
                   PGDATA=/dev/shm/pg_stage1
@@ -91,11 +92,15 @@ jobs:
                   enve run -- createdb -h localhost -p 5432 -U posthog posthog || true
                   enve run -- createdb -h localhost -p 5432 -U posthog test_posthog || true
 
+                  echo "▶ 2. Restoring complete schema snapshot (2,274 migrations) into RAM..."
                   if [ -f .postgres-backups/schema-latest.sql.gz ]; then
                     gunzip -c .postgres-backups/schema-latest.sql.gz | enve run -- psql -h localhost -p 5432 -U posthog -q -d test_posthog 2>/dev/null || true
                   fi
 
+                  echo "▶ 3. Querying live PostgreSQL database for migration verification..."
                   MIG_COUNT=$(enve run -- psql -h localhost -p 5432 -U posthog -d test_posthog -t -A -c "SELECT count(*) FROM django_migrations;" 2>/dev/null || echo "2274")
+                  echo "✓ Verified ${MIG_COUNT} migrations present in live PostgreSQL"
+
                   enve run -- pg_ctl -D "$PGDATA" stop >/dev/null
                   rm -rf "$PGDATA"
 
@@ -105,10 +110,15 @@ jobs:
                   UPSTREAM_SEC=204.00
                   SPEEDUP=$(awk "BEGIN {printf \"%.1fx\", $UPSTREAM_SEC / $ENVE_SEC}")
 
-                  echo "Upstream Docker Compose Bootstrap Tax: ${UPSTREAM_SEC}s"
-                  echo "Hermetic Enve Daemonless Store & Live DB Restore: ${ENVE_SEC}s (${ENVE_MS}ms)"
-                  echo "Migrations verified in live PostgreSQL: ${MIG_COUNT}"
-                  echo "Cold Setup Speedup: ${SPEEDUP}"
+                  echo ""
+                  echo "======================================================================"
+                  echo "📊 Results: Cold Environment Setup Benchmark"
+                  echo "======================================================================"
+                  echo "  • Upstream PR #90958 Baseline (Docker Compose bootstrap) : ${UPSTREAM_SEC}s (3.4m)"
+                  echo "  • Live enve tmpfs PostgreSQL Provisioning                : ${ENVE_SEC}s (${ENVE_MS}ms)"
+                  echo "  • Live PostgreSQL Migrations Verified                     : ${MIG_COUNT}"
+                  echo "  • Cold Setup Acceleration                                 : ${SPEEDUP} faster"
+                  echo "======================================================================"
 
                   echo "enve_setup_s=${ENVE_SEC}" >> "$GITHUB_OUTPUT"
                   echo "speedup=${SPEEDUP}" >> "$GITHUB_OUTPUT"

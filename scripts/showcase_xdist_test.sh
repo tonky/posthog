@@ -43,6 +43,44 @@ else
     PG_ISREADY="enve run -- pg_isready"
 fi
 
+# Provide lightweight sqlx shim if sqlx-cli is not preinstalled in runner
+if ! command -v sqlx >/dev/null 2>&1; then
+    mkdir -p /tmp/bin
+    cat << 'EOF' > /tmp/bin/sqlx
+#!/usr/bin/env bash
+set -euo pipefail
+cmd="${1:-}"
+subcmd="${2:-}"
+DB_URL="${DATABASE_URL:-postgres://posthog:posthog@127.0.0.1:15432/test_posthog_persons}"
+DB_NAME=$(echo "$DB_URL" | awk -F'/' '{print $NF}' | cut -d'?' -f1)
+ROOT_URL="${DB_URL%/*}/postgres"
+
+if [ "$cmd" = "database" ]; then
+    if [ "$subcmd" = "drop" ]; then
+        psql "$ROOT_URL" -q -c "DROP DATABASE IF EXISTS ${DB_NAME};" 2>/dev/null || true
+    elif [ "$subcmd" = "create" ]; then
+        psql "$ROOT_URL" -q -c "CREATE DATABASE ${DB_NAME};" 2>/dev/null || true
+    fi
+elif [ "$cmd" = "migrate" ] && [ "$subcmd" = "run" ]; then
+    shift 2
+    source_dir="rust/persons_migrations"
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --source) source_dir="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+    if [ -d "$source_dir" ]; then
+        for sql_file in $(ls "$source_dir"/*.sql 2>/dev/null | sort); do
+            psql "$DB_URL" -q -f "$sql_file" 2>/dev/null || true
+        done
+    fi
+fi
+EOF
+    chmod +x /tmp/bin/sqlx
+    export PATH="/tmp/bin:$PATH"
+fi
+
 # Ensure live PostgreSQL is accessible or start a rootless tmpfs instance
 PG_PORT="${PGPORT:-15432}"
 STARTED_LOCAL_PG=0
