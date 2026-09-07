@@ -16,7 +16,6 @@ devEnv: {
 		"clickhouse",
 		"postgresql_15",
 		"redis",
-		"redpanda",
 		"temporal",
 	]
 

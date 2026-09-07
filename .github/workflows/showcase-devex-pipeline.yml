@@ -47,7 +47,7 @@ jobs:
                       /usr/local/bin/enve
                       ~/.cache/enve
                       /nix/store
-                  key: enve-store-${{ runner.os }}-${{ hashFiles('enve.cue') }}
+                  key: enve-store-${{ runner.os }}-${{ hashFiles('enve.cue', 'enve.lock') }}
                   restore-keys: |
                       enve-store-${{ runner.os }}-
 
@@ -78,8 +78,8 @@ jobs:
             - name: Pre-materialize all declared enve toolchains into /nix/store
               shell: bash
               run: |
-                  echo "▶ Pre-materializing all 11 toolchains declared in enve.cue..."
-                  enve run -- true
+                  echo "▶ Pre-materializing all declared enve toolchains into /nix/store..."
+                  enve run -- which redis-server clickhouse-server temporal weed postgres uv
 
             - name: Save enve Store & Binary Cache to GHA Cache
               if: steps.cache-enve.outputs.cache-hit != 'true'
@@ -89,7 +89,7 @@ jobs:
                       /usr/local/bin/enve
                       ~/.cache/enve
                       /nix/store
-                  key: enve-store-${{ runner.os }}-${{ hashFiles('enve.cue') }}
+                  key: enve-store-${{ runner.os }}-${{ hashFiles('enve.cue', 'enve.lock') }}
 
             - name: 'Measure Setup Tax: Upstream Docker Compose Baseline vs Live tmpfs PostgreSQL'
               id: measure
@@ -228,7 +228,7 @@ jobs:
                       /usr/local/bin/enve
                       ~/.cache/enve
                       /nix/store
-                  key: enve-store-${{ runner.os }}-${{ hashFiles('enve.cue') }}
+                  key: enve-store-${{ runner.os }}-${{ hashFiles('enve.cue', 'enve.lock') }}
                   restore-keys: |
                       enve-store-${{ runner.os }}-
 
@@ -353,7 +353,7 @@ jobs:
                       /usr/local/bin/enve
                       ~/.cache/enve
                       /nix/store
-                  key: enve-store-${{ runner.os }}-${{ hashFiles('enve.cue') }}
+                  key: enve-store-${{ runner.os }}-${{ hashFiles('enve.cue', 'enve.lock') }}
                   restore-keys: |
                       enve-store-${{ runner.os }}-
 
