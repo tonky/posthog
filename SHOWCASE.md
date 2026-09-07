@@ -145,7 +145,7 @@ GitHub Actions strictly isolates PR caches from `master`. In upstream CI, this f
 
 Our architecture addresses this with a **Two-Tier Cache Hierarchy** (GHA local cache + Cloudflare R2 bucket keyed by `MIG_HASH`, `WHEELS_HASH`, and `FRONTEND_HASH`).
 
-### The Pre-Flight CD Production Boot Sanity Gate (Stage 5)
+### The Pre-Flight CD Production Boot Sanity Gate (Stage 4 & Stage 5)
 
 In upstream PostHog, master push triggers [`container-images-cd.yml`](.github/workflows/container-images-cd.yml#L280-L297), which runs a zero-DB headless check before dispatching Helm charts:
 
@@ -154,18 +154,17 @@ python -c "import posthog.asgi; import posthog.management.commands.start_tempora
 python manage.py check
 ```
 
-**Our Showcase Enhancement:**
-Because zero-DB checks cannot detect database model regressions or schema mismatches, our pipeline upgrades this to a **Complete Live Schema Boot Gate** in Stage 5:
+**Our Showcase Architecture:**
+Because zero-DB checks cannot detect database model regressions or schema mismatches, and because the container image is synthesized in Stage 4, our pipeline integrates the **Complete Live Schema Boot Gate directly into Stage 4**:
 
-1. **Pulls Canonical Schema:** Downloads `migrated-schema` (`schema.sql.gz`) generated in Stage 1.
-2. **Ephemeral tmpfs DB Startup (<2s):** Boots rootless PostgreSQL on `/dev/shm` and restores `schema.sql.gz` into RAM in 1.5s.
-3. **Full Production Verification (<10s):**
+1. **Ephemeral tmpfs DB Startup (<2s):** Stage 4 boots rootless PostgreSQL on `/dev/shm` (port 15432) and restores the production schema (`.postgres-backups/schema-latest.sql.gz`) into RAM in ~1s.
+2. **Full Container Production Verification (<10s):**
    - **ASGI Web Gateway:** `import posthog.asgi`
    - **Temporal Background Worker:** `import posthog.management.commands.start_temporal_worker`
    - **Celery Worker Queues:** `from posthog.celery import app; app.loader.import_default_modules()`
    - **Live Schema Model Checks:** `python manage.py check --database default`
    - **Live ORM Query Connectivity:** `from posthog.models import Organization; Organization.objects.count()`
-4. **Deploy Gate:** Only upon 100% green exit is the `commit_state_update` payload emitted to `PostHog/charts`.
+3. **Stage 5 CD Rollout Dispatch:** Only when all 16 test shards (Stage 2), the AST merge queue gate (Stage 3), and the container boot gate (Stage 4) are 100% green, Stage 5 emits the production `commit_state_update` deployment payload to `PostHog/charts` in under 3 seconds.
 
 ---
 
