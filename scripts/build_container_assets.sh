@@ -161,29 +161,35 @@ fi
 if ! command -v uv >/dev/null 2>&1; then
     echo "   ⚠️ 'uv' command not found in PATH; skipping /python-runtime staging (host toolchain mode)."
 else
-    if [ ! -f "$STAGING_DIR/python-runtime/pyvenv.cfg" ]; then
-        echo "   -> Initializing Python 3.13 virtual environment..."
+    if [ -d ".venv" ] && [ -f ".venv/pyvenv.cfg" ]; then
+        echo "   -> Staging pre-warmed production virtual environment from .venv (< 2s)..."
         rm -rf "$STAGING_DIR/python-runtime"
-        uv venv "$STAGING_DIR/python-runtime" --python 3.13
-    fi
-
-    # Run offline uv sync to populate all 433 production packages
-    if [ -d "dist/wheel-cache" ] && [ "$(ls -1 dist/wheel-cache/*.whl 2>/dev/null | wc -l)" -gt 0 ]; then
-        echo "   -> Populating production site-packages via offline uv sync ($(ls -1 dist/wheel-cache/*.whl 2>/dev/null | wc -l) wheels)..."
-        UV_PROJECT_ENVIRONMENT="$STAGING_DIR/python-runtime" uv sync \
-            --frozen \
-            --no-dev \
-            --no-editable \
-            --no-install-workspace \
-            --no-index \
-            --find-links dist/wheel-cache
+        cp -a .venv "$STAGING_DIR/python-runtime"
     else
-        echo "   ⚠️ dist/wheel-cache empty or not found; running online uv sync..."
-        UV_PROJECT_ENVIRONMENT="$STAGING_DIR/python-runtime" uv sync \
-            --frozen \
-            --no-dev \
-            --no-editable \
-            --no-install-workspace
+        if [ ! -f "$STAGING_DIR/python-runtime/pyvenv.cfg" ]; then
+            echo "   -> Initializing Python 3.13 virtual environment..."
+            rm -rf "$STAGING_DIR/python-runtime"
+            uv venv "$STAGING_DIR/python-runtime" --python 3.13
+        fi
+
+        # Run offline uv sync to populate all 433 production packages
+        if [ -d "dist/wheel-cache" ] && [ "$(ls -1 dist/wheel-cache/*.whl 2>/dev/null | wc -l)" -gt 0 ]; then
+            echo "   -> Populating production site-packages via offline uv sync ($(ls -1 dist/wheel-cache/*.whl 2>/dev/null | wc -l) wheels)..."
+            UV_PROJECT_ENVIRONMENT="$STAGING_DIR/python-runtime" uv sync \
+                --frozen \
+                --no-dev \
+                --no-editable \
+                --no-install-workspace \
+                --no-index \
+                --find-links dist/wheel-cache
+        else
+            echo "   ⚠️ dist/wheel-cache empty or not found; running online uv sync..."
+            UV_PROJECT_ENVIRONMENT="$STAGING_DIR/python-runtime" uv sync \
+                --frozen \
+                --no-dev \
+                --no-editable \
+                --no-install-workspace
+        fi
     fi
 
 # Stage in-tree workspace packages (tools/owners/posthog_owners) into site-packages

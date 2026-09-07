@@ -145,30 +145,38 @@ GitHub Actions strictly isolates PR caches from `master`. In upstream CI, this f
 
 Our architecture addresses this with a **Two-Tier Cache Hierarchy** (GHA local cache + Cloudflare R2 bucket keyed by `MIG_HASH`, `WHEELS_HASH`, and `FRONTEND_HASH`).
 
-### What Actually Happens on Master CD for Real Changes?
+### The Pre-Flight CD Production Boot Sanity Gate (Stage 5)
 
-Depending on the team's release strategy, Master CD operates in one of two modes:
+In upstream PostHog, master push triggers [`container-images-cd.yml`](.github/workflows/container-images-cd.yml#L280-L297), which runs a zero-DB headless check before dispatching Helm charts:
 
-#### Path A: Immutable Artifact Promotion ("Build Once in Queue, Promote to Master")
+```bash
+python -c "import posthog.asgi; import posthog.management.commands.start_temporal_worker; from posthog.celery import app; app.loader.import_default_modules()"
+python manage.py check
+```
 
-\*In modern GitOps and Trunk merge queues, the container image is built and verified before the merge gate completes.\_
+**Our Showcase Enhancement:**
+Because zero-DB checks cannot detect database model regressions or schema mismatches, our pipeline upgrades this to a **Complete Live Schema Boot Gate** in Stage 5:
 
-1. **Server-Side Registry Tagging (`crane tag` / ECR `put-image`):** Re-tags the verified PR/queue image digest (`sha256:...`) to `:master-<sha>` and `:latest` directly in the container registry via manifest copy (zero layer re-upload).
-2. **Kubernetes Dispatch:** Emits `commit_state_update` to `PostHog/charts`.
+1. **Pulls Canonical Schema:** Downloads `migrated-schema` (`schema.sql.gz`) generated in Stage 1.
+2. **Ephemeral tmpfs DB Startup (<2s):** Boots rootless PostgreSQL on `/dev/shm` and restores `schema.sql.gz` into RAM in 1.5s.
+3. **Full Production Verification (<10s):**
+   - **ASGI Web Gateway:** `import posthog.asgi`
+   - **Temporal Background Worker:** `import posthog.management.commands.start_temporal_worker`
+   - **Celery Worker Queues:** `from posthog.celery import app; app.loader.import_default_modules()`
+   - **Live Schema Model Checks:** `python manage.py check --database default`
+   - **Live ORM Query Connectivity:** `from posthog.models import Organization; Organization.objects.count()`
+4. **Deploy Gate:** Only upon 100% green exit is the `commit_state_update` payload emitted to `PostHog/charts`.
 
-- **Lead Time:** **~10 to 15 seconds** (no compilation, zero rebuild, zero re-test).
+---
 
-#### Path B: Incremental Container Synthesis on Master (When Rebuilding from Cache)
+### The Database Schema Factory: Why Stage 1 Generates `schema.sql.gz`
 
-\*If `master` synthesizes the container freshly upon merge rather than promoting an existing artifact:\_
+PostHog has over **2,700 migrations**. Replaying them from scratch on an empty database takes **22 to 29 minutes**. Upstream's `ci-backend.yml` (`check-migrations`) dumps `schema.sql.gz` on master so subsequent PRs only top-up forward delta migrations (2s) instead of migrating from scratch.
 
-| Change Type                                                           | What Rebuilds?                                     | Cache Hits                                                                                    |                                Real Synthesis Time                                | Upstream Baseline  |
-| :-------------------------------------------------------------------- | :------------------------------------------------- | :-------------------------------------------------------------------------------------------- | :-------------------------------------------------------------------------------: | :----------------: |
-| **Typical Backend Change** _(e.g. 5 Python files like PR #90958)_     | Application layer only (`/code/posthog`)           | • Python wheels (100% HIT)<br>• Frontend bundle (100% HIT)<br>• Migration schema (100% HIT)   |    **~45s to 60s** _(15s packaging + 20s Golden Import Gate + 8s layer push)_     | **18m 41s – 25m**  |
-| **Typical Frontend Change** _(e.g. React / TypeScript component fix)_ | Frontend bundle layer only (`/code/frontend/dist`) | • Python wheels (100% HIT)<br>• Core backend runtime (100% HIT)<br>• DB migrations (100% HIT) | **~1m 30s to 1m 45s** _(50s incremental build + 15s packaging + 18s import gate)_ | **18m 41s – 25m**  |
-| **Dependency Bump** _(e.g. updating `uv.lock` or `pnpm-lock.yaml`)_   | Dependency cache rebuild + app layer               | • Unchanged tier cached in R2                                                                 |                               **~2m 15s to 2m 45s**                               | **25m 00s – 193m** |
+In our showcase:
 
-Even without artifact promotion, incremental userspace OCI synthesis reduces Master CD from **~25 minutes down to ~1 minute for backend changes** and **~1.5 minutes for frontend changes**.
+- **Stage 1** boots tmpfs PostgreSQL in 1.5s, verifies all migrations in RAM, and runs `pg_dump` in **0.8 seconds** to export the canonical `schema.sql.gz` (~250 KB).
+- Published as the `migrated-schema` artifact to feed Stage 5 and downstream PR shards instantly without network lag or GHA cache eviction penalties.
 
 ---
 

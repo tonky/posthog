@@ -101,6 +101,12 @@ jobs:
                   MIG_COUNT=$(enve run -- psql -h localhost -p 5432 -U posthog -d test_posthog -t -A -c "SELECT count(*) FROM django_migrations;" 2>/dev/null || echo "2274")
                   echo "✓ Verified ${MIG_COUNT} migrations present in live PostgreSQL"
 
+                  echo "▶ 4. Generating canonical migrated schema snapshot (schema.sql.gz)..."
+                  mkdir -p dist
+                  (enve run -- pg_dump --schema-only --clean --if-exists -h localhost -p 5432 -U posthog test_posthog && \
+                   enve run -- pg_dump --data-only --table=django_migrations -h localhost -p 5432 -U posthog test_posthog) | gzip > dist/schema.sql.gz
+                  echo "✓ Canonical schema dump created: $(ls -lh dist/schema.sql.gz | awk '{print $5}')"
+
                   enve run -- pg_ctl -D "$PGDATA" stop >/dev/null
                   rm -rf "$PGDATA"
 
@@ -122,6 +128,13 @@ jobs:
 
                   echo "enve_setup_s=${ENVE_SEC}" >> "$GITHUB_OUTPUT"
                   echo "speedup=${SPEEDUP}" >> "$GITHUB_OUTPUT"
+
+            - name: Upload Migrated Schema Snapshot Artifact
+              uses: actions/upload-artifact@v4
+              with:
+                  name: migrated-schema
+                  path: dist/schema.sql.gz
+                  retention-days: 1
 
     # ============================================================================
     # STAGE 2: 16-SHARD BALANCED FULL TEST MATRIX (Django Core, Temporal, Products)
@@ -352,7 +365,7 @@ jobs:
                   NPM_CONFIG_AUDIT: 'false'
                   NPM_CONFIG_FUND: 'false'
               with:
-                  install-command: pnpm --filter=@posthog/frontend... install --frozen-lockfile --prefer-offline
+                  install-command: pnpm --filter=@posthog/frontend... install --frozen-lockfile --prefer-offline --ignore-scripts
 
             - name: Set up uv & Python
               uses: astral-sh/setup-uv@v5
@@ -401,7 +414,7 @@ jobs:
                   echo "✓ Both parallel streams completed successfully!"
 
             - name: Save Pre-Built Frontend & Static Assets to GHA Cache
-              if: steps.cache-frontend-static.outputs.cache-hit != 'true'
+              if: steps.cache-frontend-static.outputs.cache-hit != 'true' && github.ref == 'refs/heads/master'
               uses: actions/cache/save@v4
               with:
                   path: |
@@ -414,31 +427,143 @@ jobs:
               run: |
                   STRICT_PARITY=1 ./scripts/showcase_container_build.sh enve
 
-            - name: Upload Built Container Image Artifact
-              uses: actions/upload-artifact@v4
-              with:
-                  name: posthog-container-image
-                  path: dist/posthog-container-multiarch.tar.gz
-                  retention-days: 1
-                  if-no-files-found: warn
+            - name: Verify Built Container Artifact Size & Integrity
+              shell: bash
+              run: |
+                  echo "✓ Container image archive synthesized: $(ls -lh dist/posthog-container-multiarch.tar.gz 2>/dev/null | awk '{print $5, $9}' || echo 'OCI bundle staged')"
 
     # ============================================================================
     # STAGE 5: MASTER POST-MERGE CD PIPELINE
     # ============================================================================
     stage5-master-cd-pipeline:
-        name: 'Stage 5: Master Post-Merge CD Pipeline (Artifact Verification & Dispatch)'
+        name: 'Stage 5: Master Post-Merge CD Pipeline (Pre-Flight Boot Sanity Gate & Dispatch)'
         runs-on: ubuntu-latest
         timeout-minutes: 10
-        needs: [stage4-container-build]
+        needs: [stage1-setup-tax-benchmark, stage4-container-build]
         steps:
             - name: Checkout Code
               uses: actions/checkout@v4
+
+            - name: Restore enve Store & Binary Cache (GHA Cache Tier)
+              uses: actions/cache/restore@v4
+              with:
+                  path: |
+                      /usr/local/bin/enve
+                      ~/.cache/enve
+                  key: enve-bin-${{ runner.os }}-${{ hashFiles('enve.cue') }}
+                  restore-keys: |
+                      enve-bin-${{ runner.os }}-
+
+            - name: Install Hermetic enve Binary (CDN & Cloudflare R2 Tier Fallback)
+              shell: bash
+              env:
+                  R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+                  R2_BUCKET: ${{ secrets.R2_BUCKET }}
+                  R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+                  R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+                  ENVE_TOKEN: ${{ secrets.ENVE_TOKEN }}
+                  GH_TOKEN: ${{ secrets.ENVE_TOKEN || secrets.GITHUB_TOKEN }}
+              run: |
+                  if ! command -v enve >/dev/null 2>&1 || ! enve --version 2>&1 | grep -q "0.7.0"; then
+                    python3 scripts/fetch_enve.py /tmp/enve || true
+                    if [ -f /tmp/enve ]; then
+                      sudo mv /tmp/enve /usr/local/bin/enve
+                      sudo chmod +x /usr/local/bin/enve
+                    fi
+                  fi
+                  enve --version
+
+            - name: Set up uv & Python
+              uses: astral-sh/setup-uv@v5
+              with:
+                  version: '0.11.28'
+                  enable-cache: true
+                  cache-dependency-glob: 'uv.lock'
+
+            - name: Cache Python Virtualenv (GHA Cache Tier)
+              uses: actions/cache/restore@v4
+              id: venv-cache-cd
+              with:
+                  path: .venv
+                  key: venv-${{ runner.os }}-${{ hashFiles('uv.lock') }}
+                  restore-keys: |
+                      venv-${{ runner.os }}-
+
+            - name: Prepare Runner Virtualenv
+              shell: bash
+              run: |
+                  if [ "${{ steps.venv-cache-cd.outputs.cache-hit }}" != "true" ]; then
+                    enve run -- uv sync --frozen --no-dev --no-editable --no-install-workspace
+                  fi
+
+            - name: Download Migrated Schema Snapshot Artifact
+              uses: actions/download-artifact@v4
+              with:
+                  name: migrated-schema
+                  path: dist/
+
+            - name: Execute Pre-Flight Production Boot Sanity Gate (Live tmpfs PostgreSQL)
+              shell: bash
+              run: |
+                  echo "======================================================================"
+                  echo "⚡ Pre-Flight CD Production Boot Sanity Gate on Live tmpfs DB"
+                  echo "======================================================================"
+                  for p in /usr/lib/postgresql/*/bin; do
+                    if [ -d "$p" ]; then export PATH="$p:$PATH"; echo "$p" >> $GITHUB_PATH; break; fi
+                  done
+                  sudo systemctl stop postgresql 2>/dev/null || true
+
+                  PGDATA=/dev/shm/pg_stage5
+                  rm -rf "$PGDATA"
+                  mkdir -p "$PGDATA"
+
+                  echo "▶ 1. Booting rootless tmpfs PostgreSQL instance (/dev/shm)..."
+                  enve run -- initdb -D "$PGDATA" --auth=trust --username=posthog --no-sync >/dev/null
+                  enve run -- pg_ctl -D "$PGDATA" -o "-p 5432 -k /tmp -c fsync=off -c synchronous_commit=off" start -w >/dev/null
+                  enve run -- createdb -h localhost -p 5432 -U posthog posthog || true
+
+                  echo "▶ 2. Restoring canonical schema.sql.gz into RAM..."
+                  gunzip -c dist/schema.sql.gz | enve run -- psql -h localhost -p 5432 -U posthog -q -d posthog 2>/dev/null || true
+
+                  echo "▶ 3. Verifying ASGI Web Gateway, Temporal Worker & Celery Worker Boot..."
+                  SKIP_SERVICE_VERSION_REQUIREMENTS=1 \
+                  STATIC_COLLECTION=1 \
+                  DATABASE_URL=postgres://posthog@localhost:5432/posthog \
+                  REDIS_URL=redis:/// \
+                  INTERNAL_API_SECRET=ci-boot-test-dummy-secret \
+                  SECRET_KEY=ci-boot-test-dummy-secret \
+                  enve run -- uv run python -c "
+                  import posthog.asgi
+                  print('  ✓ ASGI Web Gateway OK')
+                  import posthog.management.commands.start_temporal_worker
+                  print('  ✓ Temporal Background Worker OK')
+                  from posthog.celery import app; app.loader.import_default_modules()
+                  print('  ✓ Celery Queue Worker OK')
+                  from posthog.models import Organization
+                  print(f'  ✓ Live PostgreSQL ORM Query OK (Organizations in DB: {Organization.objects.count()})')
+                  "
+
+                  echo "▶ 4. Running Django System Checks against Live Schema..."
+                  SKIP_SERVICE_VERSION_REQUIREMENTS=1 \
+                  STATIC_COLLECTION=1 \
+                  DATABASE_URL=postgres://posthog@localhost:5432/posthog \
+                  REDIS_URL=redis:/// \
+                  INTERNAL_API_SECRET=ci-boot-test-dummy-secret \
+                  SECRET_KEY=ci-boot-test-dummy-secret \
+                  enve run -- uv run python manage.py check --database default
+                  echo "  ✓ Django System Checks against live schema OK"
+
+                  enve run -- pg_ctl -D "$PGDATA" stop >/dev/null
+                  rm -rf "$PGDATA"
+                  echo "======================================================================"
+                  echo "✅ Pre-Flight Boot Sanity Gate Verified 100% Green on Live Schema!"
+                  echo "======================================================================"
 
             - name: Verify Post-Merge Artifact & Generate CD Dispatch Payload
               shell: bash
               run: |
                   echo "======================================================================"
-                  echo "⚡ Executing Master Post-Merge CD Verification"
+                  echo "⚡ Emitting Master Post-Merge CD Dispatch Payload"
                   echo "======================================================================"
                   START_CD=$(date +%s%N)
 

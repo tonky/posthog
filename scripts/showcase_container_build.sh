@@ -50,6 +50,9 @@ TABLE
             --app-dir "$STAGING_DIR" \
             --tag "posthog:showcase" \
             --out "$IMAGE_ARCHIVE"
+    elif command -v pigz >/dev/null 2>&1; then
+        echo "▶ Packaging OCI container rootfs archive via multi-core pigz..."
+        tar --use-compress-program=pigz -cf "$IMAGE_ARCHIVE" -C "$STAGING_DIR" .
     else
         echo "▶ Packaging OCI container rootfs archive..."
         tar -czf "$IMAGE_ARCHIVE" -C "$STAGING_DIR" .

@@ -21,7 +21,7 @@ fi
 echo "🔨 Compiling frontend via bin/turbo --filter=@posthog/frontend build..."
 START_FE=$(date +%s%N)
 
-bin/turbo --filter=@posthog/frontend build
+PARALLEL_HEAVY=1 bin/turbo --filter=@posthog/frontend build
 
 END_FE=$(date +%s%N)
 FE_MS=$(( (END_FE - START_FE) / 1000000 ))
