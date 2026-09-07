@@ -402,6 +402,21 @@ jobs:
                   restore-keys: |
                       venv-${{ runner.os }}-
 
+            - name: Restore Turborepo Task Cache (< 5s Cache)
+              id: cache-turbo
+              uses: actions/cache/restore@v4
+              with:
+                  path: |
+                      .turbo
+                      frontend/.turbo
+                      packages/*/.turbo
+                      packages/*/dist
+                      common/hogvm/*/.turbo
+                      common/hogvm/typescript/dist
+                  key: turbo-tasks-${{ runner.os }}-v1-${{ hashFiles('packages/**', 'common/hogvm/**', 'pnpm-lock.yaml', 'turbo.json') }}
+                  restore-keys: |
+                      turbo-tasks-${{ runner.os }}-v1-
+
             - name: Execute Parallel Compilation & Staging Streams
               shell: bash
               run: |
@@ -412,7 +427,7 @@ jobs:
 
                   # Stream A: Frontend Rebuild & Static Collection (Simulating PR frontend modification)
                   (
-                    echo "🔨 [Stream A] Compiling frontend (PARALLEL_HEAVY=1) & collecting static..."
+                    echo "🔨 [Stream A] Compiling frontend & collecting static..."
                     FORCE_FRONTEND_BUILD=1 ./scripts/build_frontend_and_static_cached.sh
                   ) &
                   PID_FRONTEND=$!
@@ -438,6 +453,19 @@ jobs:
                       packages/*/node_modules
                       common/*/node_modules
                   key: node-modules-${{ runner.os }}-v1-${{ hashFiles('pnpm-lock.yaml') }}
+
+            - name: Save Turborepo Task Cache
+              if: steps.cache-turbo.outputs.cache-hit != 'true'
+              uses: actions/cache/save@v4
+              with:
+                  path: |
+                      .turbo
+                      frontend/.turbo
+                      packages/*/.turbo
+                      packages/*/dist
+                      common/hogvm/*/.turbo
+                      common/hogvm/typescript/dist
+                  key: turbo-tasks-${{ runner.os }}-v1-${{ hashFiles('packages/**', 'common/hogvm/**', 'pnpm-lock.yaml', 'turbo.json') }}
 
             - name: Save Pre-Built Frontend & Static Assets to GHA Cache
               if: steps.cache-frontend-static.outputs.cache-hit != 'true' && github.ref == 'refs/heads/master'

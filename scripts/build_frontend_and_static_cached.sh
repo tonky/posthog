@@ -21,7 +21,7 @@ fi
 echo "🔨 Compiling frontend via bin/turbo --filter=@posthog/frontend build..."
 START_FE=$(date +%s%N)
 
-PARALLEL_HEAVY=1 bin/turbo --filter=@posthog/frontend build
+bin/turbo --filter=@posthog/frontend build
 
 END_FE=$(date +%s%N)
 FE_MS=$(( (END_FE - START_FE) / 1000000 ))
@@ -44,7 +44,7 @@ STATIC_COLLECTION=1 \
 STATIC_PRECOMPRESS=0 \
 DATABASE_URL='postgres:///' \
 REDIS_URL='redis:///' \
-uv run python manage.py collectstatic --noinput
+uv run --no-dev python manage.py collectstatic --noinput
 
 END_STATIC=$(date +%s%N)
 STATIC_MS=$(( (END_STATIC - START_STATIC) / 1000000 ))
