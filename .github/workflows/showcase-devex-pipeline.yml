@@ -361,24 +361,7 @@ jobs:
                   restore-keys: |
                       frontend-static-${{ runner.os }}-v1-
 
-            - name: Set up pnpm and Node
-              uses: ./.github/actions/setup-pnpm
-
-            - name: Restore node_modules (< 5s Cache)
-              id: cache-node-modules
-              uses: actions/cache/restore@v4
-              with:
-                  path: |
-                      node_modules
-                      frontend/node_modules
-                      packages/*/node_modules
-                      common/*/node_modules
-                  key: node-modules-${{ runner.os }}-v1-${{ hashFiles('pnpm-lock.yaml') }}
-                  restore-keys: |
-                      node-modules-${{ runner.os }}-v1-
-
-            - name: Restore Canonical pnpm Store & Link Dependencies (Fallback)
-              if: steps.cache-node-modules.outputs.cache-hit != 'true'
+            - name: Restore Canonical pnpm Store & Link Dependencies
               uses: ./.github/actions/pnpm-install
               env:
                   NPM_CONFIG_AUDIT: 'false'
@@ -409,9 +392,9 @@ jobs:
                   path: |
                       .turbo
                       frontend/.turbo
-                      packages/*/.turbo
-                      packages/*/dist
-                      common/hogvm/*/.turbo
+                      packages/**/.turbo
+                      packages/**/dist
+                      common/hogvm/**/.turbo
                       common/hogvm/typescript/dist
                   key: turbo-tasks-${{ runner.os }}-v1-${{ hashFiles('packages/**', 'common/hogvm/**', 'pnpm-lock.yaml', 'turbo.json') }}
                   restore-keys: |
@@ -443,17 +426,6 @@ jobs:
                   wait $PID_BACKEND
                   echo "✓ Both parallel streams completed successfully!"
 
-            - name: Save node_modules to GHA Cache
-              if: steps.cache-node-modules.outputs.cache-hit != 'true'
-              uses: actions/cache/save@v4
-              with:
-                  path: |
-                      node_modules
-                      frontend/node_modules
-                      packages/*/node_modules
-                      common/*/node_modules
-                  key: node-modules-${{ runner.os }}-v1-${{ hashFiles('pnpm-lock.yaml') }}
-
             - name: Save Turborepo Task Cache
               if: steps.cache-turbo.outputs.cache-hit != 'true'
               uses: actions/cache/save@v4
@@ -461,9 +433,9 @@ jobs:
                   path: |
                       .turbo
                       frontend/.turbo
-                      packages/*/.turbo
-                      packages/*/dist
-                      common/hogvm/*/.turbo
+                      packages/**/.turbo
+                      packages/**/dist
+                      common/hogvm/**/.turbo
                       common/hogvm/typescript/dist
                   key: turbo-tasks-${{ runner.os }}-v1-${{ hashFiles('packages/**', 'common/hogvm/**', 'pnpm-lock.yaml', 'turbo.json') }}
 
