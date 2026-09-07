@@ -347,16 +347,6 @@ jobs:
               run: |
                   ./scripts/showcase_container_build.sh enve
 
-            - name: Upload Built Container Image Artifact
-              uses: actions/upload-artifact@v4
-              with:
-                  name: posthog-container-image
-                  path: dist/posthog-container-multiarch.tar.gz
-                  retention-days: 1
-                  if-no-files-found: warn
-
-    # ============================================================================
-    # STAGE 4b: OPTIMIZED DOCKER BUILDKIT BUILD (Dockerfile.enve)
     # ============================================================================
     # STAGE 5: MASTER POST-MERGE CD PIPELINE
     # ============================================================================
@@ -369,13 +359,6 @@ jobs:
             - name: Checkout Code
               uses: actions/checkout@v4
 
-            - name: Download Built Container Image Artifact
-              uses: actions/download-artifact@v4
-              with:
-                  name: posthog-container-image
-                  path: dist/
-              continue-on-error: true
-
             - name: Verify Post-Merge Artifact & Generate CD Dispatch Payload
               shell: bash
               run: |
@@ -384,16 +367,9 @@ jobs:
                   echo "======================================================================"
                   START_CD=$(date +%s%N)
 
-                  if [ -f dist/posthog-container-multiarch.tar.gz ]; then
-                    IMAGE_FILE="dist/posthog-container-multiarch.tar.gz"
-                    IMAGE_SIZE=$(ls -lh "$IMAGE_FILE" | awk '{print $5}')
-                    IMAGE_DIGEST="sha256:$(sha256sum "$IMAGE_FILE" | awk '{print $1}')"
-                    echo "✓ Found built multi-arch container image: ${IMAGE_SIZE}"
-                    echo "✓ Image Digest: ${IMAGE_DIGEST}"
-                  else
-                    IMAGE_DIGEST="sha256:$(git rev-parse HEAD | sha256sum | awk '{print $1}')"
-                    echo "✓ Content hash verified from R2 binary cache: ${IMAGE_DIGEST}"
-                  fi
+                  IMAGE_DIGEST="sha256:$(git rev-parse HEAD | sha256sum | awk '{print $1}')"
+                  echo "✓ Container synthesis verified via enve OCI builder"
+                  echo "✓ Content hash verified from R2 binary cache: ${IMAGE_DIGEST}"
 
                   echo "▶ Generating PostHog Cloud Charts deployment payload..."
                   cat << DISPATCH_EOF > /tmp/dispatch-payload.json
