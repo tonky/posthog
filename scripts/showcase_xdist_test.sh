@@ -7,12 +7,8 @@ set -euo pipefail
 # models and live PostgreSQL on tmpfs with template database branching.
 # ==============================================================================
 
-DEFAULT_WORKERS="auto"
-NUM_CORES=$(nproc 2>/dev/null || echo 2)
-if [ "$NUM_CORES" -gt 4 ]; then
-    DEFAULT_WORKERS=4
-fi
-WORKERS="${WORKERS:-$DEFAULT_WORKERS}"
+# Cap workers at 2 to protect developer workstation RAM and align with standard 2-vCPU CI runners
+WORKERS="${WORKERS:-2}"
 
 TEST_TARGETS=${*:-"posthog/test/test_jwt.py posthog/test/test_dbrouter.py posthog/test/test_instance_setting_model.py posthog/models/exchange_rate/test/test_sql.py"}
 

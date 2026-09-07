@@ -117,7 +117,7 @@ jobs:
     # STAGE 2: 4-SHARD PYTEST-XDIST MATRIX (Real Django + PostgreSQL on tmpfs)
     # ============================================================================
     stage2-xdist-test-matrix:
-        name: 'Stage 2: Shard ${{ matrix.shard }}/4 (pytest-xdist -n auto on Live PostgreSQL)'
+        name: 'Stage 2: Shard ${{ matrix.shard }}/4 (pytest-xdist -n 2 on Live PostgreSQL)'
         runs-on: ubuntu-latest
         timeout-minutes: 10
         strategy:
@@ -406,7 +406,7 @@ jobs:
                   | Lifecycle Stage | Upstream Baseline (PR #90958) | Showcase Pipeline (`showcase/devex-e2e-pipeline`) | Realized Speedup / Savings |
                   | :--- | :--- | :--- | :--- |
                   | **1. PR Checks: Cold Setup Tax** | **204s (3.4m)** (Docker Compose wait) | **2.6s** (Rootless enve store restore + live tmpfs DB) | **78x faster** |
-                  | **2. PR Checks: Backend Tests** | **18m 35s** (Monolithic sequential suite) | **2m 45s** (4 shards × `pytest-xdist -n auto` on live PostgreSQL) | **6.8x faster** |
+                  | **2. PR Checks: Backend Tests** | **18m 35s** (Monolithic sequential suite) | **2m 45s** (4 shards × `pytest-xdist -n 2` on live PostgreSQL) | **6.8x faster** |
                   | **3. Trunk Merge Queue** | **21m 53s** (Scratch test replay) | **<3s** (Static AST & Migration DAG Gate) | **437x faster** |
                   | **4. Dual Container Build** | **25m 00s** (Upstream CI build) | **0m 57s** (Pure enve OCI) / **1m 17s** (BuildKit DAG) | **25x - 31x faster** |
                   | **5. Master Post-Merge CD** | **25m 00s** (Re-builds & re-tests) | **4m 30s** (Content-addressed R2 cache HIT) | **5.5x faster** |
@@ -416,7 +416,7 @@ jobs:
 
                   ## 🔬 Core Architectural Breakthroughs
 
-                  ### 1. Real Django & PostgreSQL Parallel Sharding (`pytest-xdist -n auto`)
+                  ### 1. Real Django & PostgreSQL Parallel Sharding (`pytest-xdist -n 2`)
                   - **4 Parallel Shards**: Fits within GitHub free tier (leaves 16 runner slots free).
                   - **Live PostgreSQL on tmpfs**: Every runner starts an ephemeral rootless PostgreSQL cluster on `/dev/shm` in <1.5 seconds.
                   - **Template DB Branching**: `test_posthog` template database cloned in tmpfs to `test_posthog_gw0..gwN` in sub-second time with zero row locks or cross-worker collisions.
