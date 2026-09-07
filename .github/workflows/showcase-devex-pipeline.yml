@@ -400,31 +400,15 @@ jobs:
                   restore-keys: |
                       turbo-tasks-${{ runner.os }}-v1-
 
-            - name: Execute Parallel Compilation & Staging Streams
+            - name: Pre-warm Python Virtualenv Runtime
               shell: bash
               run: |
-                  set -euo pipefail
-                  echo "======================================================================"
-                  echo "⚡ Launching Parallel Processing Streams in Single Checkout"
-                  echo "======================================================================"
+                  uv sync --frozen --no-dev --no-editable --no-install-workspace
 
-                  # Stream A: Frontend Rebuild & Static Collection (Simulating PR frontend modification)
-                  (
-                    echo "🔨 [Stream A] Compiling frontend & collecting static..."
-                    FORCE_FRONTEND_BUILD=1 ./scripts/build_frontend_and_static_cached.sh
-                  ) &
-                  PID_FRONTEND=$!
-
-                  # Stream B: Python Virtualenv Pre-warming & Runtime Prep
-                  (
-                    echo "📦 [Stream B] Pre-warming Python runtime dependencies..."
-                    uv sync --frozen --no-dev --no-editable --no-install-workspace
-                  ) &
-                  PID_BACKEND=$!
-
-                  wait $PID_FRONTEND
-                  wait $PID_BACKEND
-                  echo "✓ Both parallel streams completed successfully!"
+            - name: Execute Frontend Build & Static Asset Collection
+              shell: bash
+              run: |
+                  FORCE_FRONTEND_BUILD=1 ./scripts/build_frontend_and_static_cached.sh
 
             - name: Save Turborepo Task Cache
               if: steps.cache-turbo.outputs.cache-hit != 'true' && github.ref == 'refs/heads/master'
@@ -476,7 +460,7 @@ jobs:
                   echo "▶ 2. Restoring production schema snapshot (2,274 migrations) into RAM..."
                   gunzip -c .postgres-backups/schema-latest.sql.gz | enve run -- psql -h localhost -p 15432 -U posthog -q -d posthog 2>/dev/null || true
 
-                  echo "▶ 3. Verifying Container ASGI Web Gateway, Temporal Worker & Celery Worker Boot..."
+                  echo "▶ 3. Verifying Container Web Gateway, Workers, Live ORM & Django System Checks..."
                   SKIP_SERVICE_VERSION_REQUIREMENTS=1 \
                   STATIC_COLLECTION=1 \
                   DATABASE_URL=postgres://posthog@localhost:15432/posthog \
@@ -493,18 +477,10 @@ jobs:
                   print('  ✓ Celery Queue Worker OK')
                   from posthog.models import Organization
                   print(f'  ✓ Live PostgreSQL ORM Query OK (Organizations in DB: {Organization.objects.count()})')
+                  from django.core.management import call_command
+                  call_command('check', database=['default'])
+                  print('  ✓ Django System Checks against live schema OK')
                   "
-
-                  echo "▶ 4. Running Django System Checks against Live Schema..."
-                  SKIP_SERVICE_VERSION_REQUIREMENTS=1 \
-                  STATIC_COLLECTION=1 \
-                  DATABASE_URL=postgres://posthog@localhost:15432/posthog \
-                  PGPORT=15432 \
-                  REDIS_URL=redis:/// \
-                  INTERNAL_API_SECRET=ci-boot-test-dummy-secret \
-                  SECRET_KEY=ci-boot-test-dummy-secret \
-                  enve run -- uv run python manage.py check --database default
-                  echo "  ✓ Django System Checks against live schema OK"
 
                   enve run -- pg_ctl -D "$PGDATA" stop >/dev/null
                   rm -rf "$PGDATA"

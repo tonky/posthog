@@ -39,6 +39,7 @@ declare global {
     }
 }
 
+// DeveX benchmark: simulated frontend PR modification to measure uncached esbuild time
 function renderApp(): void {
     const rootElement = document.getElementById('root')
     if (!rootElement) {
