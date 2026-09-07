@@ -50,12 +50,15 @@ cp unit.json.tpl "$STAGING_DIR/code/unit.json.tpl"
 echo "• 5. Staging compiled frontend assets & catalog schema..."
 mkdir -p "$STAGING_DIR/code/frontend"
 # Check standard location or prebuilt staging location
-if [ -d "frontend/dist" ]; then
-    cp -r frontend/dist "$STAGING_DIR/code/frontend/"
-elif [ -d "dist/prebuilt-frontend/code/frontend/dist" ]; then
+if [ -d "dist/prebuilt-frontend/code/frontend/dist" ] && [ -s "dist/prebuilt-frontend/code/frontend/dist/index.html" ]; then
     cp -r dist/prebuilt-frontend/code/frontend/dist "$STAGING_DIR/code/frontend/"
+elif [ -d "frontend/dist" ] && [ -s "frontend/dist/index.html" ]; then
+    cp -r frontend/dist "$STAGING_DIR/code/frontend/"
+elif [ "${STRICT_PARITY:-0}" = "1" ] || [ "${CI:-}" = "true" ]; then
+    echo "❌ STRICT PARITY FAILURE: Compiled frontend bundle not found in frontend/dist or dist/prebuilt-frontend!" >&2
+    exit 1
 else
-    echo "⚠️ frontend/dist not found — creating structural layout"
+    echo "⚠️ frontend/dist not found — creating structural layout (dev fallback only)"
     mkdir -p "$STAGING_DIR/code/frontend/dist"
     touch "$STAGING_DIR/code/frontend/dist/index.html"
     touch "$STAGING_DIR/code/frontend/dist/layout.html"
@@ -63,21 +66,43 @@ else
 fi
 
 mkdir -p "$STAGING_DIR/code/frontend/src"
-if [ -f "frontend/src/products.json" ]; then
-    cp frontend/src/products.json "$STAGING_DIR/code/frontend/src/"
-elif [ -f "dist/prebuilt-frontend/code/frontend/src/products.json" ]; then
+if [ -f "dist/prebuilt-frontend/code/frontend/src/products.json" ]; then
     cp dist/prebuilt-frontend/code/frontend/src/products.json "$STAGING_DIR/code/frontend/src/"
+elif [ -f "frontend/src/products.json" ]; then
+    cp frontend/src/products.json "$STAGING_DIR/code/frontend/src/"
 else
     echo "⚠️ products.json not found — writing empty schema"
     echo '{"products": []}' > "$STAGING_DIR/code/frontend/src/products.json"
 fi
 
+# Verify strict parity on frontend assets
+if [ "${STRICT_PARITY:-0}" = "1" ] || [ "${CI:-}" = "true" ]; then
+    if [ ! -s "$STAGING_DIR/code/frontend/dist/index.html" ]; then
+        echo "❌ STRICT PARITY FAILURE: $STAGING_DIR/code/frontend/dist/index.html is empty or missing!" >&2
+        exit 1
+    fi
+    echo "   ✓ Strict Parity Verified: Real frontend bundle index.html ($(ls -lh "$STAGING_DIR/code/frontend/dist/index.html" | awk '{print $5}'))"
+fi
+
 # 6. Django Static Assets (staticfiles)
 echo "• 6. Staging collected staticfiles..."
-if [ -d "staticfiles" ] && [ "$(ls -A staticfiles 2>/dev/null)" ]; then
-    cp -r staticfiles/* "$STAGING_DIR/code/staticfiles/"
-elif [ -d "dist/staticfiles" ]; then
+if [ -d "dist/staticfiles" ] && [ "$(ls -A dist/staticfiles 2>/dev/null)" ]; then
     cp -r dist/staticfiles/* "$STAGING_DIR/code/staticfiles/"
+elif [ -d "staticfiles" ] && [ "$(ls -A staticfiles 2>/dev/null)" ]; then
+    cp -r staticfiles/* "$STAGING_DIR/code/staticfiles/"
+elif [ "${STRICT_PARITY:-0}" = "1" ] || [ "${CI:-}" = "true" ]; then
+    echo "❌ STRICT PARITY FAILURE: Collected staticfiles not found in staticfiles/ or dist/staticfiles/!" >&2
+    exit 1
+fi
+
+# Verify strict parity on staticfiles
+if [ "${STRICT_PARITY:-0}" = "1" ] || [ "${CI:-}" = "true" ]; then
+    TOTAL_STATIC_COUNT=$(find "$STAGING_DIR/code/staticfiles" -type f | wc -l)
+    if [ "$TOTAL_STATIC_COUNT" -eq 0 ]; then
+        echo "❌ STRICT PARITY FAILURE: No staticfiles staged in $STAGING_DIR/code/staticfiles!" >&2
+        exit 1
+    fi
+    echo "   ✓ Strict Parity Verified: $TOTAL_STATIC_COUNT staticfiles staged"
 fi
 
 # 7. Plugin Transpiler & Canvas Builder

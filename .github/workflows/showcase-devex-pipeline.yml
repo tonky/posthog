@@ -287,11 +287,10 @@ jobs:
                   echo "conflict_time_us=<1" >> "$GITHUB_OUTPUT"
 
     # ============================================================================
+    # STAGE 4: PARALLEL FRONTEND/STATIC & PURE ENVE CONTAINER ASSEMBLY
     # ============================================================================
-    # STAGE 4a: PURE ENVE COLD CONTAINER BUILD & 1.8GB SLIMMING (DAEMONLESS OCI)
-    # ============================================================================
-    stage4a-enve-container-build:
-        name: 'Stage 4a: Pure enve Cold Container Build & 1.8GB Slimming (Daemonless OCI)'
+    stage4-container-build:
+        name: 'Stage 4: Parallel Frontend/Static & Pure enve Container Build (Daemonless OCI)'
         runs-on: ubuntu-latest
         timeout-minutes: 15
         steps:
@@ -327,6 +326,34 @@ jobs:
                   fi
                   enve --version
 
+            - name: Compute Clean Input Hashes
+              id: hashes
+              shell: bash
+              run: |
+                  set -euo pipefail
+                  FE_HASH=$(git ls-files -s pnpm-lock.yaml pnpm-workspace.yaml turbo.json package.json frontend products/*/frontend packages common/esbuilder common/hogvm patches | sha256sum | awk '{print $1}')
+                  echo "frontend=$FE_HASH" >> "$GITHUB_OUTPUT"
+
+            - name: Restore Pre-Built Frontend & Static Assets (< 3s Tier 1 Cache)
+              id: cache-frontend-static
+              uses: actions/cache/restore@v4
+              with:
+                  path: |
+                      dist/prebuilt-frontend
+                      dist/staticfiles
+                  key: frontend-static-${{ runner.os }}-v1-${{ steps.hashes.outputs.frontend }}
+                  restore-keys: |
+                      frontend-static-${{ runner.os }}-v1-
+
+            - name: Restore Canonical pnpm Store & Link Dependencies (Tier 2 Fallback)
+              if: steps.cache-frontend-static.outputs.cache-hit != 'true'
+              uses: ./.github/actions/pnpm-install
+              env:
+                  NPM_CONFIG_AUDIT: 'false'
+                  NPM_CONFIG_FUND: 'false'
+              with:
+                  install-command: pnpm --filter=@posthog/frontend... install --frozen-lockfile --prefer-offline
+
             - name: Set up uv & Python
               uses: astral-sh/setup-uv@v5
               with:
@@ -343,10 +370,57 @@ jobs:
                   restore-keys: |
                       venv-${{ runner.os }}-
 
-            - name: Execute Pure enve Cold Container Synthesis & Golden Import Gate
+            - name: Execute Parallel Compilation & Staging Streams
               shell: bash
               run: |
-                  ./scripts/showcase_container_build.sh enve
+                  set -euo pipefail
+                  echo "======================================================================"
+                  echo "⚡ Launching Parallel Processing Streams in Single Checkout"
+                  echo "======================================================================"
+
+                  # Stream A: Frontend & Static Collection
+                  (
+                    if [ "${{ steps.cache-frontend-static.outputs.cache-hit }}" = "true" ]; then
+                      echo "✓ [Stream A] Tier 1 Cache hit: Using restored frontend & static assets (< 2s)"
+                    else
+                      echo "🔨 [Stream A] Tier 1 Cache miss: Compiling frontend & collecting static..."
+                      ./scripts/build_frontend_and_static_cached.sh
+                    fi
+                  ) &
+                  PID_FRONTEND=$!
+
+                  # Stream B: Python Virtualenv Pre-warming & Runtime Prep
+                  (
+                    echo "📦 [Stream B] Pre-warming Python runtime dependencies..."
+                    uv sync --frozen --no-dev --no-editable --no-install-workspace
+                  ) &
+                  PID_BACKEND=$!
+
+                  wait $PID_FRONTEND
+                  wait $PID_BACKEND
+                  echo "✓ Both parallel streams completed successfully!"
+
+            - name: Save Pre-Built Frontend & Static Assets to GHA Cache
+              if: steps.cache-frontend-static.outputs.cache-hit != 'true'
+              uses: actions/cache/save@v4
+              with:
+                  path: |
+                      dist/prebuilt-frontend
+                      dist/staticfiles
+                  key: frontend-static-${{ runner.os }}-v1-${{ steps.hashes.outputs.frontend }}
+
+            - name: Synthesize Pure enve Cold Container & Run Golden Import Gate
+              shell: bash
+              run: |
+                  STRICT_PARITY=1 ./scripts/showcase_container_build.sh enve
+
+            - name: Upload Built Container Image Artifact
+              uses: actions/upload-artifact@v4
+              with:
+                  name: posthog-container-image
+                  path: dist/posthog-container-multiarch.tar.gz
+                  retention-days: 1
+                  if-no-files-found: warn
 
     # ============================================================================
     # STAGE 5: MASTER POST-MERGE CD PIPELINE
@@ -355,7 +429,7 @@ jobs:
         name: 'Stage 5: Master Post-Merge CD Pipeline (Artifact Verification & Dispatch)'
         runs-on: ubuntu-latest
         timeout-minutes: 10
-        needs: [stage4a-enve-container-build]
+        needs: [stage4-container-build]
         steps:
             - name: Checkout Code
               uses: actions/checkout@v4
@@ -409,7 +483,7 @@ jobs:
             - stage1-setup-tax-benchmark
             - stage2-horizontal-test-matrix
             - stage3-merge-queue-dag-gate
-            - stage4a-enve-container-build
+            - stage4-container-build
             - stage5-master-cd-pipeline
         if: always()
         steps:
