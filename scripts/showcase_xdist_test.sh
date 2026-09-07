@@ -23,9 +23,22 @@ echo "Detected CPU Cores: ${NUM_CORES} | Active Shard Workers: ${WORKERS}"
 echo "Running test targets: ${TEST_TARGETS}"
 echo ""
 
+# Ensure postgresql binaries are discoverable in PATH for enve
+for p in /usr/lib/postgresql/*/bin; do
+    if [ -d "$p" ]; then
+        export PATH="$p:$PATH"
+        break
+    fi
+done
+
 # Ensure live PostgreSQL is accessible or start a rootless tmpfs instance
 PG_PORT="${PGPORT:-5432}"
 STARTED_LOCAL_PG=0
+
+# If port 5432 is occupied by an external host daemon, attempt to stop system service if running
+if [ "$PG_PORT" -eq 5432 ] && command -v systemctl >/dev/null 2>&1; then
+    sudo systemctl stop postgresql 2>/dev/null || true
+fi
 
 if ! enve run -- pg_isready -h localhost -p "$PG_PORT" >/dev/null 2>&1; then
     echo "▶ Starting rootless PostgreSQL cluster on tmpfs (/dev/shm)..."
@@ -42,6 +55,15 @@ if ! enve run -- pg_isready -h localhost -p "$PG_PORT" >/dev/null 2>&1; then
     fi
     STARTED_LOCAL_PG=1
     echo "✓ Live PostgreSQL ready on tmpfs port ${PG_PORT}"
+else
+    # Verify if existing instance has test_posthog primed
+    if ! enve run -- psql -h localhost -p "$PG_PORT" -U posthog -d test_posthog -c "SELECT 1 FROM django_migrations LIMIT 1;" >/dev/null 2>&1; then
+        enve run -- createdb -h localhost -p "$PG_PORT" -U posthog test_posthog 2>/dev/null || true
+        if [ -f .postgres-backups/schema-latest.sql.gz ]; then
+            echo "▶ Priming existing PostgreSQL test_posthog database from schema snapshot..."
+            gunzip -c .postgres-backups/schema-latest.sql.gz | enve run -- psql -h localhost -p "$PG_PORT" -U posthog -q -d test_posthog 2>/dev/null || true
+        fi
+    fi
 fi
 
 cleanup() {

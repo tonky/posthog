@@ -34,7 +34,17 @@ jobs:
             - name: Checkout Code
               uses: actions/checkout@v4
 
-            - name: Install Hermetic enve Binary
+            - name: Restore enve Store & Binary Cache (GHA Cache Tier)
+              uses: actions/cache/restore@v4
+              with:
+                  path: |
+                      /usr/local/bin/enve
+                      ~/.cache/enve
+                  key: enve-bin-${{ runner.os }}-${{ hashFiles('enve.cue') }}
+                  restore-keys: |
+                      enve-bin-${{ runner.os }}-
+
+            - name: Install Hermetic enve Binary (CDN & Cloudflare R2 Tier Fallback)
               shell: bash
               env:
                   R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
@@ -65,6 +75,12 @@ jobs:
                   echo "======================================================================"
                   echo "⚡ Benchmarking Cold Setup Tax: Live tmpfs PostgreSQL via enve"
                   echo "======================================================================"
+                  # Discover postgres tools in PATH and stop host system daemon
+                  for p in /usr/lib/postgresql/*/bin; do
+                    if [ -d "$p" ]; then export PATH="$p:$PATH"; echo "$p" >> $GITHUB_PATH; break; fi
+                  done
+                  sudo systemctl stop postgresql 2>/dev/null || true
+
                   START_ENVE=$(date +%s%N)
 
                   PGDATA=/dev/shm/pg_stage1
@@ -120,7 +136,17 @@ jobs:
             - name: Checkout Code
               uses: actions/checkout@v4
 
-            - name: Install Hermetic enve Binary
+            - name: Restore enve Store & Binary Cache (GHA Cache Tier)
+              uses: actions/cache/restore@v4
+              with:
+                  path: |
+                      /usr/local/bin/enve
+                      ~/.cache/enve
+                  key: enve-bin-${{ runner.os }}-${{ hashFiles('enve.cue') }}
+                  restore-keys: |
+                      enve-bin-${{ runner.os }}-
+
+            - name: Install Hermetic enve Binary (CDN & Cloudflare R2 Tier Fallback)
               shell: bash
               env:
                   R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
@@ -144,6 +170,30 @@ jobs:
               with:
                   version: '0.11.28'
                   enable-cache: true
+                  cache-dependency-glob: 'uv.lock'
+
+            - name: Cache Python Virtualenv (GHA Cache Tier)
+              uses: actions/cache/restore@v4
+              id: venv-cache
+              with:
+                  path: .venv
+                  key: venv-${{ runner.os }}-${{ hashFiles('uv.lock') }}
+                  restore-keys: |
+                      venv-${{ runner.os }}-
+
+            - name: Install Python Dependencies & Prepare Runner Environment
+              shell: bash
+              run: |
+                  for p in /usr/lib/postgresql/*/bin; do
+                    if [ -d "$p" ]; then export PATH="$p:$PATH"; echo "$p" >> $GITHUB_PATH; break; fi
+                  done
+                  sudo systemctl stop postgresql 2>/dev/null || true
+                  if [ "${{ steps.venv-cache.outputs.cache-hit }}" != "true" ]; then
+                    enve run -- uv sync --frozen
+                  else
+                    echo "✓ Virtualenv cache hit: skipping full sync"
+                    enve run -- uv sync --frozen --offline || enve run -- uv sync --frozen
+                  fi
 
             - name: Run Real Django Tests on Live PostgreSQL (${{ matrix.targets }})
               shell: bash
@@ -197,7 +247,17 @@ jobs:
             - name: Checkout Code
               uses: actions/checkout@v4
 
-            - name: Install Hermetic enve Binary
+            - name: Restore enve Store & Binary Cache (GHA Cache Tier)
+              uses: actions/cache/restore@v4
+              with:
+                  path: |
+                      /usr/local/bin/enve
+                      ~/.cache/enve
+                  key: enve-bin-${{ runner.os }}-${{ hashFiles('enve.cue') }}
+                  restore-keys: |
+                      enve-bin-${{ runner.os }}-
+
+            - name: Install Hermetic enve Binary (CDN & Cloudflare R2 Tier Fallback)
               shell: bash
               env:
                   R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
@@ -221,6 +281,19 @@ jobs:
               with:
                   version: '0.11.28'
                   enable-cache: true
+                  cache-dependency-glob: 'uv.lock'
+
+            - name: Cache Python Virtualenv (GHA Cache Tier)
+              uses: actions/cache/restore@v4
+              id: venv-cache-build
+              with:
+                  path: .venv
+                  key: venv-${{ runner.os }}-${{ hashFiles('uv.lock') }}
+                  restore-keys: |
+                      venv-${{ runner.os }}-
+
+            - name: Set up Docker Buildx (BuildKit Caching Engine)
+              uses: docker/setup-buildx-action@v3
 
             - name: Execute Real Multi-Arch Container Build & Golden Import Gate
               shell: bash
