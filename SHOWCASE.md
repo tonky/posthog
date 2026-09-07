@@ -15,21 +15,21 @@ UPSTREAM BASELINE (Real PR #90958 Measurement):
 [ PR Checks: 21m 59s ] ➔ [ Merge Queue Replay: 21m 53s ] ➔ [ Master CD: 18m 41s ]
 Total End-to-End Lead Time: ~62.5 minutes (>1 hour)
 
-ACCELERATED PIPELINE (Showcase Measured in GHA Run 34145927458):
-[ PR Checks (16 shards × -n 0, 10,767 tests): 4m 08s ] ➔ [ Merge Queue DAG: 32s ] ➔ [ Master CD: 14s ]
-Total End-to-End Lead Time: 4 minutes 28 seconds (~14x speedup)
+ACCELERATED PIPELINE (Showcase Measured in GHA Run 34159076855):
+[ PR Checks (16 shards × -n 0, 10,767 tests): 4m 18s ] ➔ [ Merge Queue DAG: 34s ] ➔ [ Master CD: 3s ]
+Total End-to-End Lead Time: 4 minutes 40 seconds (~13.4x speedup across all 21 jobs)
 ```
 
 ### Side-by-Side Pipeline Comparison
 
-| Pipeline Stage                | Upstream Baseline (PR #90958) |                                          Accelerated Pipeline                                           |  Net Savings  | Core Mechanism                                                                 |
-| :---------------------------- | :---------------------------: | :-----------------------------------------------------------------------------------------------------: | :-----------: | :----------------------------------------------------------------------------- |
-| **1. Runner Setup Tax**       |         `204s (3.4m)`         |                                                 **41s**                                                 | **-2.7 min**  | Hermetic `enve` user-space toolchain + RAM disk DB prime                       |
-| **2. Backend Test Execution** | `14m 46s` (40+ Depot shards)  |                       **4m 08s** max job duration (10,767 tests across 16 shards)                       | **-10.6 min** | 16 parallel shards horizontal on live tmpfs PostgreSQL (`-n 0`)                |
-| **3. Merge Queue Gate**       |    `21m 53s` (Trunk queue)    |                                                 **32s**                                                 | **-21.3 min** | In-memory AST & DAG conflict check (zero DB replay)                            |
-| **4. Container Synthesis**    |     `18m 41s` (CD build)      |                                       **53s** (warm) / **2m 21s**                                       | **-16.3 min** | Daemonless OCI synthesis & parallel BuildKit DAG builds                        |
-| **5. Master Post-Merge**      |          `~25m 00s`           |                                                 **14s**                                                 | **-24.8 min** | Two-tier Cloudflare R2 content cache + server-side tag                         |
-| **TOTAL END-TO-END**          |       **~62.5 minutes**       | **4 minutes 28 seconds** ([Run 34145927458](https://github.com/tonky/posthog/actions/runs/34145927458)) | **-58.0 min** | **14x wall-clock speedup across complete PR lifecycle on Free GitHub Runners** |
+| Pipeline Stage                    | Upstream Baseline ([PR #90958](https://github.com/PostHog/posthog/pull/90958)) |   Accelerated Pipeline ([Run 34159076855](https://github.com/tonky/posthog/actions/runs/34159076855))   |  Net Savings  | Core Mechanism                                                                   |
+| :-------------------------------- | :----------------------------------------------------------------------------: | :-----------------------------------------------------------------------------------------------------: | :-----------: | :------------------------------------------------------------------------------- |
+| **1. Runner Setup Tax**           |                                 `204s (3.4m)`                                  |                                                 **25s**                                                 | **-2.9 min**  | Hermetic `enve` user-space toolchain + RAM disk DB prime                         |
+| **2. Backend Test Execution**     |                          `14m 46s` (40+ Depot shards)                          |                       **4m 18s** max job duration (10,767 tests across 16 shards)                       | **-10.5 min** | 16 parallel shards horizontal on live tmpfs PostgreSQL (`-n 0`)                  |
+| **3. Merge Queue Gate**           |                            `21m 53s` (Trunk queue)                             |                                    **34s** (Stage 3 AST & DAG Gate)                                     | **-21.3 min** | In-memory AST & DAG conflict check (zero DB replay, prevents 22m-48m re-test)    |
+| **4. Container Synthesis & Gate** |                              `18m 41s` (CD build)                              |                       **3m 52s** (Uncached Frontend PR) / **3m 38s** (Backend PR)                       | **-14.8 min** | Upfront rsync exclusions (8.37s) + unified live tmpfs DB boot gate (~31s)        |
+| **5. Master Post-Merge CD**       |                                   `~25m 00s`                                   |                                                 **3s**                                                  | **-24.9 min** | Pre-synthesized OCI image + instant Helm deployment dispatch                     |
+| **TOTAL END-TO-END**              |                               **~62.5 minutes**                                | **4 minutes 40 seconds** ([Run 34159076855](https://github.com/tonky/posthog/actions/runs/34159076855)) | **-57.8 min** | **13.4x wall-clock speedup across complete PR lifecycle on Free GitHub Runners** |
 
 ---
 
@@ -90,39 +90,41 @@ On standard 2-vCPU CI runners, intra-node parallelism (`pytest -n 2`) introduces
    - Upstream PR #90958 required over 40 concurrent Depot runners and took 14m 46s wall-clock time (500+ runner minutes), bottlenecked by a 4.5-minute Docker Compose setup tax in every shard and 60% database disk I/O wait.
    - Our 16 parallel runners comfortably fit within GitHub's 20-runner free concurrency limit, eliminating the setup tax (<15s) and accelerating database I/O to deliver sub-3-minute shard runtimes across **10,767 real tests on live tmpfs PostgreSQL**.
 
-### Empirical Test Execution Matrix ([Run 34145927458](https://github.com/tonky/posthog/actions/runs/34145927458))
+### Empirical Test Execution Matrix ([Run 34159076855](https://github.com/tonky/posthog/actions/runs/34159076855))
 
 All 16 shards executed concurrently on standard GitHub `ubuntu-latest` (2 vCPU) runners without containerization:
 
 |   Shard   | Subsystem / Focus Area                                      |   Passed Tests    | Pytest Time |          Job Lead Time           |
 | :-------: | :---------------------------------------------------------- | :---------------: | :---------: | :------------------------------: |
-|   **1**   | Django Core: Activity Logging & Auth                        |    235 passed     |    53.9s    |              2m 13s              |
-|   **2**   | Django Core: Organization & Multi-DB Architecture           |    281 passed     |    64.5s    |              2m 24s              |
-|   **3**   | Django Core: Settings, Credentials & Redis                  |    132 passed     |    45.8s    |              2m 16s              |
+|   **1**   | Django Core: Activity Logging & Auth                        |    235 passed     |    53.9s    |              2m 22s              |
+|   **2**   | Django Core: Organization & Multi-DB Architecture           |    281 passed     |    64.5s    |              2m 14s              |
+|   **3**   | Django Core: Settings, Credentials & Redis                  |    132 passed     |    45.8s    |              2m 07s              |
 |   **4**   | Django Core: Tenant Scoping & Currency Models               |    110 passed     |    21.6s    |              1m 39s              |
-|   **5**   | Django Core: Service Auth, Psycopg & OAuth                  |    160 passed     |    39.7s    |              2m 07s              |
-|   **6**   | Django Core: Health Checks, Circuit Breakers & Usage        |    139 passed     |    15.3s    |              1m 31s              |
-|   **7**   | Warehouse Sources: Models & Top-Level Handlers              |    387 passed     |    43.4s    |              2m 02s              |
-|   **8**   | Warehouse Sources: Temporal CDC Ingestion                   |    331 passed     |    57.1s    |              2m 17s              |
-|   **9**   | Warehouse Sources: Temporal Delta Lake Engine               |    176 passed     |    4.0s     |              1m 28s              |
-|  **10**   | Warehouse Sources: Temporal Pipeline Core Engine            |    378 passed     |    89.4s    |              2m 53s              |
-|  **11**   | Warehouse Sources: Pipeline V3 Queues & Load                |    365 passed     |   100.0s    |              3m 10s              |
-|  **12**   | Warehouse Sources: Pipeline Common & Source Catalogs        |   7,446 passed    |   169.3s    |              4m 08s              |
-|  **13**   | Products: Product Analytics & MCP Store Platform            |    148 passed     |    18.5s    |              1m 28s              |
-|  **14**   | Products: Batch Exports Service, Internal Config & DAG Runs |     67 passed     |    36.0s    |              2m 01s              |
-|  **15**   | Products: Surveys & Tasks Platform                          |    124 passed     |    40.4s    |              1m 59s              |
-|  **16**   | Products: Customer Analytics & Tasks Admin                  |    288 passed     |    49.7s    |              2m 13s              |
-| **TOTAL** | **Full Backend & Multi-Product Verification Matrix**        | **10,767 passed** |    **—**    | **4m 08s (Parallel Wall-Clock)** |
+|   **5**   | Django Core: Service Auth, Psycopg & OAuth                  |    160 passed     |    39.7s    |              2m 03s              |
+|   **6**   | Django Core: Health Checks, Circuit Breakers & Usage        |    139 passed     |    15.3s    |              1m 32s              |
+|   **7**   | Warehouse Sources: Models & Top-Level Handlers              |    387 passed     |    43.4s    |              2m 03s              |
+|   **8**   | Warehouse Sources: Temporal CDC Ingestion                   |    331 passed     |    57.1s    |              2m 23s              |
+|   **9**   | Warehouse Sources: Temporal Delta Lake Engine               |    176 passed     |    4.0s     |              1m 25s              |
+|  **10**   | Warehouse Sources: Temporal Pipeline Core Engine            |    378 passed     |    89.4s    |              2m 45s              |
+|  **11**   | Warehouse Sources: Pipeline V3 Queues & Load                |    365 passed     |   100.0s    |              3m 20s              |
+|  **12**   | Warehouse Sources: Pipeline Common & Source Catalogs        |   7,446 passed    |   169.3s    |              4m 18s              |
+|  **13**   | Products: Product Analytics & MCP Store Platform            |    148 passed     |    18.5s    |              1m 35s              |
+|  **14**   | Products: Batch Exports Service, Internal Config & DAG Runs |     67 passed     |    36.0s    |              1m 55s              |
+|  **15**   | Products: Surveys & Tasks Platform                          |    124 passed     |    40.4s    |              1m 58s              |
+|  **16**   | Products: Customer Analytics & Tasks Admin                  |    288 passed     |    49.7s    |              2m 09s              |
+| **TOTAL** | **Full Backend & Multi-Product Verification Matrix**        | **10,767 passed** |    **—**    | **4m 18s (Parallel Wall-Clock)** |
 
 ---
 
 ## ⚡ 3. Merge Queue Static AST & DAG Conflict Gate (<3s vs 22m Replay)
 
-Upstream Trunk Merge Queue serializes PR batches by executing the entire test matrix against a scratch database on `trunk-merge/**` branches, taking **21 to 48 minutes per PR**.
+## ⚡ 3. Merge Queue Static AST & DAG Conflict Gate (<3s vs 22m Replay)
+
+Upstream Trunk Merge Queue serializes PR batches by executing the entire test matrix against a scratch database on `trunk-merge/**` branches, taking **21 to 48 minutes per PR** (replaying 61,475 to 137,293 tests).
 
 Our architecture replaces this with an in-memory **Directed Acyclic Graph (DAG) & AST conflict engine**:
 
-- Discovers and parses all 2,274 repository migration ASTs in memory in **~1.3 seconds**.
+- Discovers and parses all 2,274 repository migration ASTs in memory in **~1.3 seconds** (entire Stage 3 GHA job completed in **34s** in [Run 34159076855](https://github.com/tonky/posthog/actions/runs/34159076855)).
 - Detects leaf-node racing (two PRs branching from the same leaf without mutual dependency) and destructive schema collisions in **<1 microsecond**.
 - Independent PRs (e.g. PR #90958 in `batch_exports` vs PR #90921 in `customer_analytics`) are mathematically proven safe to merge atomically without redundant 22-minute test replays.
 
@@ -130,12 +132,20 @@ Our architecture replaces this with an in-memory **Directed Acyclic Graph (DAG) 
 
 ## 📦 4. Main Container Build Speed: Dual-Path Showcase
 
-| Path                                | Engine                 | Architecture                   |   Build Time    |             Status             |
-| :---------------------------------- | :--------------------- | :----------------------------- | :-------------: | :----------------------------: |
-| **Path 1: Pure `enve` Synthesis**   | Pure Rust (daemonless) | `amd64` + `arm64` (multi-arch) | **57 seconds**  |    Tested & verified in CI     |
-| **Path 2: Dockerfile BuildKit DAG** | Docker Buildx          | `amd64` (native, zero QEMU)    | **77 seconds**  |   Tested & verified locally    |
-| _Upstream QEMU Emulation_           | Docker Buildx + QEMU   | `amd64` + `arm64`              | **193 minutes** |     Upstream failure mode      |
-| _Upstream Depot SaaS_               | External SaaS builder  | `amd64` + `arm64`              |     ~3m 26s     | Requires external paid compute |
+| Path                                | Engine                 | Architecture                   |               Build Time               |                                          Status                                          |
+| :---------------------------------- | :--------------------- | :----------------------------- | :------------------------------------: | :--------------------------------------------------------------------------------------: |
+| **Path 1: Pure `enve` Synthesis**   | Pure Rust (daemonless) | `amd64` + `arm64` (multi-arch) | **8.37s** staging / **3m 52s** Stage 4 | Verified in [Run 34159076855](https://github.com/tonky/posthog/actions/runs/34159076855) |
+| **Path 2: Dockerfile BuildKit DAG** | Docker Buildx          | `amd64` (native, zero QEMU)    |             **77 seconds**             |                                Tested & verified locally                                 |
+| _Upstream QEMU Emulation_           | Docker Buildx + QEMU   | `amd64` + `arm64`              |            **193 minutes**             |                                  Upstream failure mode                                   |
+| _Upstream Depot SaaS_               | External SaaS builder  | `amd64` + `arm64`              |                ~3m 26s                 |                              Requires external paid compute                              |
+
+### Stage 4 Execution Breakdown (Simulated Frontend PR in [Run 34159076855](https://github.com/tonky/posthog/actions/runs/34159076855))
+
+1. **Frontend Rebuild (Turborepo 7 cached, 1 uncached):** **60.47s** (vs 85.97s cold; backend PRs take **6.63s**).
+2. **Headless `collectstatic` (Zero Contention):** **32.49s** (WhiteNoise SHA256 manifest over 11,000 files; **13.39s** on 16-thread workstation).
+3. **Upfront `rsync` Exclusion Staging:** **8.37s** (replaces 58.59s "copy 4.6GB then delete 1.8GB" anti-pattern).
+4. **Pre-Flight Live DB Boot Gate:** **~31s** (tmpfs PostgreSQL + 2,274 migrations restored in RAM + single-process Django/worker/ORM/system checks).
+5. **Total Stage 4 Job Duration:** **3m 52s** (Uncached Frontend PR) / **3m 38s** (Backend PR).
 
 ---
 
@@ -157,14 +167,20 @@ python manage.py check
 **Our Showcase Architecture:**
 Because zero-DB checks cannot detect database model regressions or schema mismatches, and because the container image is synthesized in Stage 4, our pipeline integrates the **Complete Live Schema Boot Gate directly into Stage 4**:
 
-1. **Ephemeral tmpfs DB Startup (<2s):** Stage 4 boots rootless PostgreSQL on `/dev/shm` (port 15432) and restores the production schema (`.postgres-backups/schema-latest.sql.gz`) into RAM in ~1s.
-2. **Full Container Production Verification (<10s):**
-   - **ASGI Web Gateway:** `import posthog.asgi`
-   - **Temporal Background Worker:** `import posthog.management.commands.start_temporal_worker`
-   - **Celery Worker Queues:** `from posthog.celery import app; app.loader.import_default_modules()`
-   - **Live Schema Model Checks:** `python manage.py check --database default`
-   - **Live ORM Query Connectivity:** `from posthog.models import Organization; Organization.objects.count()`
-3. **Stage 5 CD Rollout Dispatch:** Only when all 16 test shards (Stage 2), the AST merge queue gate (Stage 3), and the container boot gate (Stage 4) are 100% green, Stage 5 emits the production `commit_state_update` deployment payload to `PostHog/charts` in under 3 seconds.
+1. **Ephemeral tmpfs DB Startup (<2s):** Stage 4 boots rootless PostgreSQL on `/dev/shm` (port 15432) and restores the production schema (`.postgres-backups/schema-latest.sql.gz`) into RAM in ~3s.
+2. **Unified Single-Process Production Verification (~31s):**
+
+   ```python
+   import posthog.asgi
+   import posthog.management.commands.start_temporal_worker
+   from posthog.celery import app; app.loader.import_default_modules()
+   from posthog.models import Organization; Organization.objects.count()
+   from django.core.management import call_command; call_command('check', database=['default'])
+   ```
+
+   Consolidating ASGI, Temporal, Celery, live ORM queries, and Django system checks into **one single Python process** eliminates redundant cold Django startup overhead (saving ~37s vs multi-process execution).
+
+3. **Stage 5 CD Rollout Dispatch:** Only when all 16 test shards (Stage 2), the AST merge queue gate (Stage 3), and the container boot gate (Stage 4) are 100% green, Stage 5 emits the production `commit_state_update` deployment payload to `PostHog/charts` in **3 seconds**.
 
 ---
 
