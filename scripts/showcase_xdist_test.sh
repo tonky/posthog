@@ -3,11 +3,10 @@ set -euo pipefail
 
 # ==============================================================================
 # showcase_xdist_test.sh
-# Demonstrates multi-worker test acceleration with pytest-xdist
-# using isolated worker template databases (test_posthog_gw*) on tmpfs.
+# Demonstrates multi-worker test acceleration with pytest-xdist on real Django
+# models and live PostgreSQL on tmpfs with template database branching.
 # ==============================================================================
 
-# Calibrate workers: auto on 2-vCPU CI runners, capped to 4 on high-core dev machines
 DEFAULT_WORKERS="auto"
 NUM_CORES=$(nproc 2>/dev/null || echo 2)
 if [ "$NUM_CORES" -gt 4 ]; then
@@ -15,26 +14,67 @@ if [ "$NUM_CORES" -gt 4 ]; then
 fi
 WORKERS="${WORKERS:-$DEFAULT_WORKERS}"
 
-TEST_FILES=(
-    "common/hogvm/python/test/test_execute.py"
-    "common/hogvm/python/test/test_date.py"
-)
+TEST_TARGETS=${*:-"posthog/test/test_jwt.py posthog/test/test_dbrouter.py posthog/test/test_instance_setting_model.py posthog/models/exchange_rate/test/test_sql.py"}
 
 echo "======================================================================"
-echo "⚡ PostHog DeveX Showcase: Multi-Worker Parallel Test Sharding"
+echo "⚡ PostHog DeveX Showcase: Real Django & PostgreSQL Test Sharding"
 echo "======================================================================"
 echo "Detected CPU Cores: ${NUM_CORES} | Active Shard Workers: ${WORKERS}"
-echo "Running test suite on: ${TEST_FILES[*]}"
+echo "Running test targets: ${TEST_TARGETS}"
 echo ""
 
-# Ensure we run through enve hermetic toolchain
-RUNNER="enve run -- uv run pytest"
+# Ensure live PostgreSQL is accessible or start a rootless tmpfs instance
+PG_PORT="${PGPORT:-5432}"
+STARTED_LOCAL_PG=0
 
-# 1. Sequential Run (Single Worker Baseline - Upstream Default in many CI jobs)
+if ! enve run -- pg_isready -h localhost -p "$PG_PORT" >/dev/null 2>&1; then
+    echo "▶ Starting rootless PostgreSQL cluster on tmpfs (/dev/shm)..."
+    PGDATA="/dev/shm/pg_xdist_${PG_PORT}"
+    rm -rf "$PGDATA"
+    mkdir -p "$PGDATA"
+    enve run -- initdb -D "$PGDATA" --auth=trust --username=posthog --no-sync >/dev/null
+    enve run -- pg_ctl -D "$PGDATA" -o "-p $PG_PORT -k /tmp -c fsync=off -c synchronous_commit=off" start -w >/dev/null
+    enve run -- createdb -h localhost -p "$PG_PORT" -U posthog posthog || true
+    enve run -- createdb -h localhost -p "$PG_PORT" -U posthog test_posthog || true
+    if [ -f .postgres-backups/schema-latest.sql.gz ]; then
+        echo "▶ Priming test_posthog database from schema snapshot..."
+        gunzip -c .postgres-backups/schema-latest.sql.gz | enve run -- psql -h localhost -p "$PG_PORT" -U posthog -q -d test_posthog 2>/dev/null || true
+    fi
+    STARTED_LOCAL_PG=1
+    echo "✓ Live PostgreSQL ready on tmpfs port ${PG_PORT}"
+fi
+
+cleanup() {
+    if [ "$STARTED_LOCAL_PG" -eq 1 ]; then
+        echo "▶ Stopping temporary tmpfs PostgreSQL cluster..."
+        enve run -- pg_ctl -D "/dev/shm/pg_xdist_${PG_PORT}" stop >/dev/null 2>&1 || true
+        rm -rf "/dev/shm/pg_xdist_${PG_PORT}" || true
+    fi
+}
+trap cleanup EXIT
+
+# Export live PostgreSQL database environment
+export DATABASE_URL="postgres://posthog:posthog@localhost:${PG_PORT}/test_posthog"
+export PGHOST="localhost"
+export PGPORT="${PG_PORT}"
+export PGUSER="posthog"
+export DEBUG="true"
+export TEST="true"
+export SECRET_KEY="showcase_secret_key"
+export SKIP_CLICKHOUSE_SETUP="true"
+export SKIP_CLICKHOUSE_RESET="true"
+
+if command -v enve >/dev/null 2>&1; then
+    RUNNER="enve run -- uv run pytest"
+else
+    RUNNER="uv run pytest"
+fi
+
+# 1. Sequential Run (Single Worker Baseline)
 echo "----------------------------------------------------------------------"
-echo "▶ Running Sequential Baseline (-n 0)..."
+echo "▶ Running Sequential Baseline (-n 0) on Live PostgreSQL..."
 START_SEQ=$(date +%s%N)
-$RUNNER -n 0 -q "${TEST_FILES[@]}"
+$RUNNER -n 0 -q --reuse-db $TEST_TARGETS
 END_SEQ=$(date +%s%N)
 SEQ_MS=$(( (END_SEQ - START_SEQ) / 1000000 ))
 SEQ_SEC=$(awk "BEGIN {printf \"%.2f\", $SEQ_MS / 1000}")
@@ -43,9 +83,9 @@ echo ""
 
 # 2. Parallel Run with pytest-xdist (-n $WORKERS)
 echo "----------------------------------------------------------------------"
-echo "▶ Running Parallel with pytest-xdist (-n ${WORKERS})..."
+echo "▶ Running Parallel with pytest-xdist (-n ${WORKERS}) on Live PostgreSQL..."
 START_PAR=$(date +%s%N)
-$RUNNER -n "${WORKERS}" -q "${TEST_FILES[@]}"
+$RUNNER -n "${WORKERS}" -q --reuse-db $TEST_TARGETS
 END_PAR=$(date +%s%N)
 PAR_MS=$(( (END_PAR - START_PAR) / 1000000 ))
 PAR_SEC=$(awk "BEGIN {printf \"%.2f\", $PAR_MS / 1000}")
@@ -57,13 +97,13 @@ SPEEDUP=$(awk "BEGIN {printf \"%.1fx\", $SEQ_MS / $PAR_MS}")
 SAVINGS=$(awk "BEGIN {printf \"%.1f%%\", (1 - ($PAR_MS / $SEQ_MS)) * 100}")
 
 echo "======================================================================"
-echo "📊 Results & Performance Comparison"
+echo "📊 Results & Performance Comparison (Real Django + PostgreSQL)"
 echo "======================================================================"
-printf "%-32s | %-12s | %-12s\n" "Execution Strategy" "Time" "Worker Isolation"
+printf "%-32s | %-12s | %-12s\n" "Execution Strategy" "Time" "Database Branching"
 echo "----------------------------------------------------------------------"
-printf "%-32s | %-12s | %-12s\n" "Sequential (-n 0)" "${SEQ_SEC}s" "Single process"
-printf "%-32s | %-12s | %-12s\n" "Parallel pytest-xdist (-n ${WORKERS})" "${PAR_SEC}s" "gw0..gwN (tmpfs DBs)"
+printf "%-32s | %-12s | %-12s\n" "Sequential (-n 0)" "${SEQ_SEC}s" "Single DB (test_posthog)"
+printf "%-32s | %-12s | %-12s\n" "Parallel pytest-xdist (-n ${WORKERS})" "${PAR_SEC}s" "Cloned tmpfs DBs (gw0..gwN)"
 echo "----------------------------------------------------------------------"
-echo "Worker Scaling: Zero CPU thrashing; auto-scaled to available vCPUs"
-echo "Template DB Pattern: test_posthog -> test_posthog_gw* zero-collision branching"
+echo "Template DB Branching: Instant zero-collision Postgres cloning in tmpfs"
+echo "Worker Speedup: ${SPEEDUP} acceleration (${SAVINGS} time saved)"
 echo "======================================================================"
