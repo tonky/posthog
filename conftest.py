@@ -1,5 +1,13 @@
 import gc
+import sys
 import warnings
+
+try:
+    import ctypes
+
+    _libc = ctypes.CDLL("libc.so.6") if sys.platform.startswith("linux") else None
+except Exception:
+    _libc = None
 
 import pytest
 
@@ -24,11 +32,9 @@ def _end_gc_boot_window() -> None:
     # reclaims only ~1MB, so the garbage gets frozen along with the survivors.
     gc.freeze()
     gc.enable()
-    # Collect far less often than the default (700, 10, 10): test runs allocate heavily and
-    # cyclic garbage is reclaimed fine at these thresholds, while frequent young-gen sweeps
-    # over a large frozen heap cost real wall time (~10% of a unit-heavy suite; measured on
-    # products/warehouse_sources with peak RSS within 1% of the default thresholds).
-    gc.set_threshold(50_000, 20, 20)
+    # Collect with balanced thresholds: test runs allocate heavily and cyclic garbage
+    # is reclaimed fine at these thresholds without rescanning the frozen boot heap.
+    gc.set_threshold(10_000, 10, 10)
     # gc.get_referrers() cannot see referrers in the frozen permanent generation,
     # which turns hypothesis's register_random() liveness check into a false positive
     # for Randoms registered after the freeze (e.g. trio's module-level instance,
@@ -229,7 +235,19 @@ def _cheapen_freezegun_module_hash() -> None:
     api._get_module_attributes_hash = _fast_module_attributes_hash  # ty: ignore[invalid-assignment]
 
 
+def _prevent_pydantic_freezegun_conflict() -> None:
+    # Pydantic v1 declares `class ConstrainedDate(date, metaclass=ConstrainedNumberMeta)`.
+    # If pydantic.v1.types is imported for the first time while `freezegun.freeze_time` is active,
+    # `date` is a FakeDate with FakeDateMeta, causing a Python metaclass conflict error on Python 3.13+.
+    # Pre-importing pydantic.v1.types at configure-time ensures it is initialized before any test mocks date.
+    try:
+        import pydantic.v1.types  # noqa: F401, PLC0415
+    except ImportError:
+        pass
+
+
 def pytest_configure(config) -> None:
+    _prevent_pydantic_freezegun_conflict()
     _cache_reverse_rel_identity()
     _cache_select_masks()
     _cache_drf_field_info()
@@ -247,6 +265,32 @@ def pytest_runtestloop() -> None:
     # Safety net for processes that never run a local collection (e.g. the
     # pytest-xdist controller): end the window before the test loop starts.
     _end_gc_boot_window()
+
+
+_test_count = 0
+
+
+@pytest.hookimpl(trylast=True)
+def pytest_runtest_teardown(item, nextitem) -> None:
+    global _test_count
+    _test_count += 1
+    try:
+        from django.db import reset_queries  # noqa: PLC0415
+
+        reset_queries()
+    except Exception:
+        pass
+
+    # Periodically collect cyclic garbage (querysets, mock calls, model instances)
+    # and return freed heap memory to the OS. Since the boot heap is frozen,
+    # scanning takes <5ms.
+    if _test_count % 20 == 0:
+        gc.collect()
+        if _libc is not None:
+            try:
+                _libc.malloc_trim(0)
+            except Exception:
+                pass
 
 
 def pytest_unconfigure() -> None:

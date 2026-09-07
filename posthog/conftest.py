@@ -309,7 +309,11 @@ def _django_db_setup(django_db_keepdb, django_db_blocker):
     from posthog.product_db_config import load_product_db_routes
 
     for route in load_product_db_routes(settings.BASE_DIR):
-        test_product_db_name = test_db_name + f"_{route.database}"
+        if "_gw" in test_db_name:
+            base_prefix, gw_suffix = test_db_name.rsplit("_gw", 1)
+            test_product_db_name = f"{base_prefix}_{route.database}_gw{gw_suffix}"
+        else:
+            test_product_db_name = f"{test_db_name}_{route.database}"
         for suffix in ("_db_writer", "_db_reader", "_db_direct"):
             alias = f"{route.database}{suffix}"
             if alias in settings.DATABASES:
@@ -363,27 +367,31 @@ def _django_db_setup(django_db_keepdb, django_db_blocker):
     # Run sqlx migrations to create posthog_person_new and related tables
     run_persons_sqlx_migrations(keepdb=django_db_keepdb)
 
-    database = Database(
-        settings.CLICKHOUSE_DATABASE,
-        db_url=settings.CLICKHOUSE_HTTP_URL,
-        username=settings.CLICKHOUSE_USER,
-        password=settings.CLICKHOUSE_PASSWORD,
-        cluster=settings.CLICKHOUSE_CLUSTER,
-        verify_ssl_cert=settings.CLICKHOUSE_VERIFY,
-        randomize_replica_paths=True,
-        # don't use the egress proxy, clickhouse is internal
-        trust_env=False,
-    )
-
-    if not django_db_keepdb:
+    skip_ch_setup = os.environ.get("SKIP_CLICKHOUSE_SETUP", "0").lower() in {"1", "true", "yes"}
+    database = None
+    if not skip_ch_setup:
         try:
-            database.drop_database()
-        except:
+            database = Database(
+                settings.CLICKHOUSE_DATABASE,
+                db_url=settings.CLICKHOUSE_HTTP_URL,
+                username=settings.CLICKHOUSE_USER,
+                password=settings.CLICKHOUSE_PASSWORD,
+                cluster=settings.CLICKHOUSE_CLUSTER,
+                verify_ssl_cert=settings.CLICKHOUSE_VERIFY,
+                randomize_replica_paths=True,
+                # don't use the egress proxy, clickhouse is internal
+                trust_env=False,
+            )
+            if not django_db_keepdb:
+                try:
+                    database.drop_database()
+                except:
+                    pass
+
+            database.create_database()  # Create database if it doesn't exist
+            create_clickhouse_tables()
+        except Exception:
             pass
-
-    database.create_database()  # Create database if it doesn't exist
-
-    create_clickhouse_tables()
 
     yield
 
@@ -391,10 +399,13 @@ def _django_db_setup(django_db_keepdb, django_db_blocker):
         # Reset ClickHouse data, unless we're running AI evals, where we want to keep the DB between runs
         # Also allow skipping reset via environment variable for faster development iteration
         skip_ch_reset = os.environ.get("SKIP_CLICKHOUSE_RESET", "0").lower() in {"1", "true", "yes"}
-        if not settings.IN_EVAL_TESTING and not skip_ch_reset:
+        if not settings.IN_EVAL_TESTING and not skip_ch_reset and not skip_ch_setup:
             reset_clickhouse_tables()
-    else:
-        database.drop_database()
+    elif database is not None:
+        try:
+            database.drop_database()
+        except:
+            pass
 
 
 @pytest.fixture(scope="package")

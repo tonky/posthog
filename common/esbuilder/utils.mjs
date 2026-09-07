@@ -588,7 +588,8 @@ export async function buildOrWatch(config) {
         }
 
         try {
-            const buildResult = heavy && !isDev ? await runExclusiveHeavy(rebuildAndRelease) : await rebuildAndRelease()
+            const shouldSerialize = heavy && !isDev && !process.env.PARALLEL_HEAVY
+            const buildResult = shouldSerialize ? await runExclusiveHeavy(rebuildAndRelease) : await rebuildAndRelease()
 
             if (writeMetaFile) {
                 await fs.writeFile(
