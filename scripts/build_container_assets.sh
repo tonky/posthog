@@ -12,10 +12,19 @@ mkdir -p "$STAGING_DIR/code/share"
 mkdir -p "$STAGING_DIR/code/.tiktoken_cache"
 mkdir -p "$STAGING_DIR/docker-entrypoint.d"
 
-# 1. Copy Application Code & Schemas (1:1 with Upstream)
-echo "• 1. Staging core application modules..."
-cp -r posthog ee products common "$STAGING_DIR/code/"
-cp manage.py "$STAGING_DIR/code/"
+# 1. Copy Application Code & Schemas (ignoring tests, snapshots, and dev artifacts upfront)
+echo "• 1. Staging core application modules (ignoring tests, snapshots, and dev artifacts upfront)..."
+rsync -a \
+    --exclude='__pycache__' \
+    --exclude='*.pyc' \
+    --exclude='test_*.py' \
+    --exclude='*_test.py' \
+    --exclude='tests' \
+    --exclude='__tests__' \
+    --exclude='__snapshots__' \
+    --exclude='*.stories.*' \
+    --exclude='products/*/frontend' \
+    posthog ee products common manage.py "$STAGING_DIR/code/"
 
 # 2. Persons SQL Migrations, MCP Schemas & Stamphog Owners
 echo "• 2. Staging migrations, schemas, and tooling..."
@@ -47,19 +56,24 @@ cp unit.json.tpl "$STAGING_DIR/docker-entrypoint.d/unit.json.tpl"
 cp unit.json.tpl "$STAGING_DIR/code/unit.json.tpl"
 
 # 5. Frontend Bundle & Product Catalog
-echo "• 5. Staging compiled frontend assets & catalog schema..."
-mkdir -p "$STAGING_DIR/code/frontend"
-# Check standard location or prebuilt staging location
+echo "• 5. Staging compiled frontend templates & catalog schema (ignoring non-HTML static assets)..."
+mkdir -p "$STAGING_DIR/code/frontend/dist"
+SOURCE_FE_DIST=""
 if [ -d "dist/prebuilt-frontend/code/frontend/dist" ] && [ -s "dist/prebuilt-frontend/code/frontend/dist/index.html" ]; then
-    cp -r dist/prebuilt-frontend/code/frontend/dist "$STAGING_DIR/code/frontend/"
+    SOURCE_FE_DIST="dist/prebuilt-frontend/code/frontend/dist"
 elif [ -d "frontend/dist" ] && [ -s "frontend/dist/index.html" ]; then
-    cp -r frontend/dist "$STAGING_DIR/code/frontend/"
+    SOURCE_FE_DIST="frontend/dist"
 elif [ "${STRICT_PARITY:-0}" = "1" ] || [ "${CI:-}" = "true" ]; then
     echo "❌ STRICT PARITY FAILURE: Compiled frontend bundle not found in frontend/dist or dist/prebuilt-frontend!" >&2
     exit 1
+fi
+
+if [ -n "$SOURCE_FE_DIST" ]; then
+    # Stage ONLY HTML templates and array.js (staticfiles serves the rest under /static)
+    cp "$SOURCE_FE_DIST"/*.html "$STAGING_DIR/code/frontend/dist/" 2>/dev/null || true
+    [ -f "$SOURCE_FE_DIST/array.js" ] && cp "$SOURCE_FE_DIST/array.js" "$STAGING_DIR/code/frontend/dist/"
 else
     echo "⚠️ frontend/dist not found — creating structural layout (dev fallback only)"
-    mkdir -p "$STAGING_DIR/code/frontend/dist"
     touch "$STAGING_DIR/code/frontend/dist/index.html"
     touch "$STAGING_DIR/code/frontend/dist/layout.html"
     touch "$STAGING_DIR/code/frontend/dist/exporter.html"
@@ -85,11 +99,16 @@ if [ "${STRICT_PARITY:-0}" = "1" ] || [ "${CI:-}" = "true" ]; then
 fi
 
 # 6. Django Static Assets (staticfiles)
-echo "• 6. Staging collected staticfiles..."
+echo "• 6. Staging collected staticfiles (ignoring sourcemaps upfront)..."
+STATIC_EXCLUDES=()
+if [ "${KEEP_SOURCEMAPS:-0}" != "1" ]; then
+    STATIC_EXCLUDES=(--exclude='*.map' --exclude='*.map.gz' --exclude='*.map.br')
+fi
+
 if [ -d "dist/staticfiles" ] && [ "$(ls -A dist/staticfiles 2>/dev/null)" ]; then
-    cp -r dist/staticfiles/* "$STAGING_DIR/code/staticfiles/"
+    rsync -a "${STATIC_EXCLUDES[@]}" dist/staticfiles/ "$STAGING_DIR/code/staticfiles/"
 elif [ -d "staticfiles" ] && [ "$(ls -A staticfiles 2>/dev/null)" ]; then
-    cp -r staticfiles/* "$STAGING_DIR/code/staticfiles/"
+    rsync -a "${STATIC_EXCLUDES[@]}" staticfiles/ "$STAGING_DIR/code/staticfiles/"
 elif [ "${STRICT_PARITY:-0}" = "1" ] || [ "${CI:-}" = "true" ]; then
     echo "❌ STRICT PARITY FAILURE: Collected staticfiles not found in staticfiles/ or dist/staticfiles/!" >&2
     exit 1
@@ -161,10 +180,19 @@ fi
 if ! command -v uv >/dev/null 2>&1; then
     echo "   ⚠️ 'uv' command not found in PATH; skipping /python-runtime staging (host toolchain mode)."
 else
-    if [ -d ".venv" ] && [ -f ".venv/pyvenv.cfg" ]; then
-        echo "   -> Staging pre-warmed production virtual environment from .venv (< 2s)..."
+    if [ "${SKIP_ARCHIVE:-0}" = "1" ] && [ -d ".venv" ] && [ -f ".venv/pyvenv.cfg" ]; then
+        echo "   -> [PR Fast-Path] Linking host virtual environment directly (< 0.01s)..."
         rm -rf "$STAGING_DIR/python-runtime"
-        cp -a .venv "$STAGING_DIR/python-runtime"
+        ln -sf "$(pwd)/.venv" "$STAGING_DIR/python-runtime"
+    elif [ -d ".venv" ] && [ -f ".venv/pyvenv.cfg" ]; then
+        echo "   -> Staging production virtual environment (ignoring CUDA libs, tests, and bytecode upfront)..."
+        rm -rf "$STAGING_DIR/python-runtime"
+        mkdir -p "$STAGING_DIR/python-runtime"
+        rsync -a \
+            --exclude='nvidia*' \
+            --exclude='__pycache__' \
+            --exclude='tests' \
+            .venv/ "$STAGING_DIR/python-runtime/"
     else
         if [ ! -f "$STAGING_DIR/python-runtime/pyvenv.cfg" ]; then
             echo "   -> Initializing Python 3.13 virtual environment..."
@@ -193,7 +221,7 @@ else
     fi
 
 # Stage in-tree workspace packages (tools/owners/posthog_owners) into site-packages
-if [ -d "tools/owners/posthog_owners" ] && [ -d "$STAGING_DIR/python-runtime/lib/python3.13/site-packages" ]; then
+if [ "${SKIP_ARCHIVE:-0}" != "1" ] && [ -d "tools/owners/posthog_owners" ] && [ -d "$STAGING_DIR/python-runtime/lib/python3.13/site-packages" ]; then
     echo "   -> Staging in-tree workspace package (posthog_owners) into site-packages..."
     cp -r tools/owners/posthog_owners "$STAGING_DIR/python-runtime/lib/python3.13/site-packages/"
 fi
@@ -210,47 +238,10 @@ if [ -f "$STAGING_DIR/python-runtime/bin/celery" ]; then
 fi
 fi
 
-# 11. Prune Host Python Bytecode & Pycache (mirrors .dockerignore, keeps layers lean)
-echo "• 11. Pruning bytecode caches (__pycache__ / .pyc)..."
-find "$STAGING_DIR" -type d -name "__pycache__" -prune -exec rm -rf {} + 2>/dev/null || true
-find "$STAGING_DIR" -type f -name "*.pyc" -delete 2>/dev/null || true
-
-# 12. Purge Unused CUDA / NCCL Libraries (xgboost uses CPU inference only)
-echo "• 12. Purging unused CUDA / NCCL libraries (saves ~410MB)..."
-rm -rf "$STAGING_DIR"/python-runtime/lib/python*/site-packages/nvidia* 2>/dev/null || true
-
-# 13. Strip Unneeded Debug Symbols from Native C Extensions & Rust Binaries (excluding OpenBLAS)
-echo "• 13. Stripping unneeded symbols from native extensions (saves ~300MB, exempting OpenBLAS)..."
-if command -v strip >/dev/null 2>&1; then
+# 11. Optional Binary Strip (Only when packaging actual physical image archive)
+if [ "${SKIP_ARCHIVE:-0}" != "1" ] && command -v strip >/dev/null 2>&1 && [ -d "$STAGING_DIR/python-runtime/lib" ]; then
+    echo "• 11. Stripping unneeded symbols from native extensions (saves ~300MB, exempting OpenBLAS)..."
     find "$STAGING_DIR/python-runtime/lib" -type f -name "*.so*" ! -name "*openblas*" -exec strip --strip-unneeded {} + 2>/dev/null || true
-fi
-
-# 14. Strip Sourcemap Files unless explicitly preserved (KEEP_SOURCEMAPS=1)
-if [ "${KEEP_SOURCEMAPS:-0}" != "1" ]; then
-    echo "• 14. Stripping uncompressed sourcemap files (*.map, saves ~1.1GB+)..."
-    find "$STAGING_DIR/code/frontend" "$STAGING_DIR/code/staticfiles" -type f -name "*.map*" -delete 2>/dev/null || true
-fi
-
-# 15. Prune Raw Products Frontend Source Code (already compiled into frontend/dist)
-echo "• 15. Pruning unneeded raw frontend source code in products (saves ~50MB)..."
-rm -rf "$STAGING_DIR"/code/products/*/frontend 2>/dev/null || true
-
-# 16. Prune Non-Runtime Test Suites and Fixtures
-echo "• 16. Pruning non-runtime test files and fixtures in posthog & ee (saves ~91MB)..."
-find "$STAGING_DIR/code/posthog" "$STAGING_DIR/code/ee" -type f -name "test_*.py" ! -name "test_cases_discovery.py" -delete 2>/dev/null || true
-find "$STAGING_DIR/code/posthog" "$STAGING_DIR/code/ee" -type f -name "*_test.py" -delete 2>/dev/null || true
-find "$STAGING_DIR/code/posthog" "$STAGING_DIR/code/ee" -type d -name "tests" -exec rm -rf {} + 2>/dev/null || true
-find "$STAGING_DIR/code/posthog" "$STAGING_DIR/code/ee" -type d -name "__tests__" -exec rm -rf {} + 2>/dev/null || true
-find "$STAGING_DIR/code/posthog" "$STAGING_DIR/code/ee" -type d -name "__snapshots__" -exec rm -rf {} + 2>/dev/null || true
-
-# 17. Prune Third-Party Test Suites from Site-Packages (safely preserving django & rest_framework)
-echo "• 17. Pruning bundled third-party test suites from site-packages (saves ~65MB)..."
-find "$STAGING_DIR/python-runtime/lib/python3.13/site-packages" -type d -name "tests" ! -path "*/django/*" ! -path "*/rest_framework/*" -exec rm -rf {} + 2>/dev/null || true
-
-# 18. Deduplicate Static Assets (keep only HTML templates and array.js in frontend/dist)
-echo "• 18. Deduplicating static assets in frontend/dist (saves ~100MB duplicate assets)..."
-if [ -d "$STAGING_DIR/code/staticfiles" ] && [ -d "$STAGING_DIR/code/frontend/dist" ]; then
-    find "$STAGING_DIR/code/frontend/dist" -type f ! -name "*.html" ! -name "array.js" -delete 2>/dev/null || true
 fi
 
 TOTAL_FILES=$(find "$STAGING_DIR" -type f | wc -l)

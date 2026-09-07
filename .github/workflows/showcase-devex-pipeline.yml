@@ -427,7 +427,7 @@ jobs:
                   echo "✓ Both parallel streams completed successfully!"
 
             - name: Save Turborepo Task Cache
-              if: steps.cache-turbo.outputs.cache-hit != 'true'
+              if: steps.cache-turbo.outputs.cache-hit != 'true' && github.ref == 'refs/heads/master'
               uses: actions/cache/save@v4
               with:
                   path: |

@@ -80,10 +80,10 @@ TABLE
     START_GATE=$(date +%s%N)
 
     if command -v enve >/dev/null 2>&1; then
-        enve run -- uv run python -c "import posthog; print('  ✓ Core Module: posthog namespace OK')"
-        enve run -- uv run python -c "from posthog.celery import app; print('  ✓ Celery Worker: task queues & brokers OK')"
-        enve run -- bash -c "DATABASE_URL='postgres:///' STATIC_COLLECTION=1 REDIS_URL=redis:/// SKIP_SERVICE_VERSION_REQUIREMENTS=1 INTERNAL_API_SECRET=ci-boot-test-dummy-secret DJANGO_SECRET_KEY=showcase_test_secret_key uv run python -c 'import posthog.asgi; print(\"  ✓ Web Gateway: ASGI application & routers OK\")'"
-        enve run -- bash -c "DATABASE_URL='postgres:///' STATIC_COLLECTION=1 REDIS_URL=redis:/// SKIP_SERVICE_VERSION_REQUIREMENTS=1 INTERNAL_API_SECRET=ci-boot-test-dummy-secret DJANGO_SECRET_KEY=showcase_test_secret_key uv run python -c 'import posthog.asgi; import posthog.management.commands.start_temporal_worker; print(\"  ✓ Temporal Worker: background worker OK\")'"
+        enve run -- uv run --no-dev python -c "import posthog; print('  ✓ Core Module: posthog namespace OK')"
+        enve run -- uv run --no-dev python -c "from posthog.celery import app; print('  ✓ Celery Worker: task queues & brokers OK')"
+        enve run -- bash -c "DATABASE_URL='postgres:///' STATIC_COLLECTION=1 REDIS_URL=redis:/// SKIP_SERVICE_VERSION_REQUIREMENTS=1 INTERNAL_API_SECRET=ci-boot-test-dummy-secret DJANGO_SECRET_KEY=showcase_test_secret_key uv run --no-dev python -c 'import posthog.asgi; print(\"  ✓ Web Gateway: ASGI application & routers OK\")'"
+        enve run -- bash -c "DATABASE_URL='postgres:///' STATIC_COLLECTION=1 REDIS_URL=redis:/// SKIP_SERVICE_VERSION_REQUIREMENTS=1 INTERNAL_API_SECRET=ci-boot-test-dummy-secret DJANGO_SECRET_KEY=showcase_test_secret_key uv run --no-dev python -c 'import posthog.asgi; import posthog.management.commands.start_temporal_worker; print(\"  ✓ Temporal Worker: background worker OK\")'"
     else
         echo "  ✓ Core Module: posthog namespace OK"
         echo "  ✓ Celery Worker: task queues & brokers OK"
