@@ -34,15 +34,22 @@ jobs:
             - name: Checkout Code
               uses: actions/checkout@v4
 
+            - name: Prepare nix store directory for rootless enve
+              shell: bash
+              run: |
+                  sudo mkdir -p /nix/store && sudo chown -R $USER:$USER /nix
+
             - name: Restore enve Store & Binary Cache (GHA Cache Tier)
+              id: cache-enve
               uses: actions/cache/restore@v4
               with:
                   path: |
                       /usr/local/bin/enve
                       ~/.cache/enve
-                  key: enve-bin-${{ runner.os }}-${{ hashFiles('enve.cue') }}
+                      /nix/store
+                  key: enve-store-${{ runner.os }}-${{ hashFiles('enve.cue') }}
                   restore-keys: |
-                      enve-bin-${{ runner.os }}-
+                      enve-store-${{ runner.os }}-
 
             - name: Install Hermetic enve Binary (CDN & Cloudflare R2 Tier Fallback)
               shell: bash
@@ -63,10 +70,26 @@ jobs:
                   fi
                   enve --version
 
-            - name: Validate Monorepo Specification (enve.cue)
+            - name: Verify Declarative Environment Definition (enve.cue)
               shell: bash
               run: |
                   enve check enve.cue
+
+            - name: Pre-materialize all declared enve toolchains into /nix/store
+              shell: bash
+              run: |
+                  echo "▶ Pre-materializing all 11 toolchains declared in enve.cue..."
+                  enve run -- true
+
+            - name: Save enve Store & Binary Cache to GHA Cache
+              if: steps.cache-enve.outputs.cache-hit != 'true'
+              uses: actions/cache/save@v4
+              with:
+                  path: |
+                      /usr/local/bin/enve
+                      ~/.cache/enve
+                      /nix/store
+                  key: enve-store-${{ runner.os }}-${{ hashFiles('enve.cue') }}
 
             - name: 'Measure Setup Tax: Upstream Docker Compose Baseline vs Live tmpfs PostgreSQL'
               id: measure
@@ -144,6 +167,7 @@ jobs:
         name: 'Stage 2: Shard ${{ matrix.shard }}/20 (${{ matrix.name }})'
         runs-on: ubuntu-latest
         timeout-minutes: 10
+        needs: [stage1-setup-tax-benchmark]
         strategy:
             fail-fast: false
             matrix:
@@ -192,15 +216,21 @@ jobs:
             - name: Checkout Code
               uses: actions/checkout@v4
 
+            - name: Prepare nix store directory for rootless enve
+              shell: bash
+              run: |
+                  sudo mkdir -p /nix/store && sudo chown -R $USER:$USER /nix
+
             - name: Restore enve Store & Binary Cache (GHA Cache Tier)
               uses: actions/cache/restore@v4
               with:
                   path: |
                       /usr/local/bin/enve
                       ~/.cache/enve
-                  key: enve-bin-${{ runner.os }}-${{ hashFiles('enve.cue') }}
+                      /nix/store
+                  key: enve-store-${{ runner.os }}-${{ hashFiles('enve.cue') }}
                   restore-keys: |
-                      enve-bin-${{ runner.os }}-
+                      enve-store-${{ runner.os }}-
 
             - name: Install Hermetic enve Binary (CDN & Cloudflare R2 Tier Fallback)
               shell: bash
@@ -304,11 +334,17 @@ jobs:
         name: 'Stage 4: Parallel Frontend/Static & Pure enve Container Build (Daemonless OCI)'
         runs-on: ubuntu-latest
         timeout-minutes: 15
+        needs: [stage1-setup-tax-benchmark]
         env:
             FORCE_FRONTEND_BUILD: '1'
         steps:
             - name: Checkout Code
               uses: actions/checkout@v4
+
+            - name: Prepare nix store directory for rootless enve
+              shell: bash
+              run: |
+                  sudo mkdir -p /nix/store && sudo chown -R $USER:$USER /nix
 
             - name: Restore enve Store & Binary Cache (GHA Cache Tier)
               uses: actions/cache/restore@v4
@@ -316,9 +352,10 @@ jobs:
                   path: |
                       /usr/local/bin/enve
                       ~/.cache/enve
-                  key: enve-bin-${{ runner.os }}-${{ hashFiles('enve.cue') }}
+                      /nix/store
+                  key: enve-store-${{ runner.os }}-${{ hashFiles('enve.cue') }}
                   restore-keys: |
-                      enve-bin-${{ runner.os }}-
+                      enve-store-${{ runner.os }}-
 
             - name: Install Hermetic enve Binary (CDN & Cloudflare R2 Tier Fallback)
               shell: bash

@@ -19,6 +19,10 @@ EXCLUDE_DIRS = {
     "staticfiles",
     ".pytest_cache",
     ".ruff_cache",
+    "user_scripts",
+    "rust_integration",
+    "desktop",
+    "packages",
 }
 
 
