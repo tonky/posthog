@@ -32,7 +32,7 @@ for p in /usr/lib/postgresql/*/bin; do
 done
 
 # Ensure live PostgreSQL is accessible or start a rootless tmpfs instance
-PG_PORT="${PGPORT:-5432}"
+PG_PORT="${PGPORT:-15432}"
 STARTED_LOCAL_PG=0
 
 # If port 5432 is occupied by an external host daemon, attempt to stop system service if running
@@ -76,7 +76,7 @@ cleanup() {
 trap cleanup EXIT
 
 # Export live PostgreSQL database environment
-export DATABASE_URL="postgres://posthog:posthog@localhost:${PG_PORT}/test_posthog"
+export DATABASE_URL="postgres://posthog:posthog@localhost:${PG_PORT}/posthog"
 export PGHOST="localhost"
 export PGPORT="${PG_PORT}"
 export PGUSER="posthog"
@@ -87,9 +87,9 @@ export SKIP_CLICKHOUSE_SETUP="true"
 export SKIP_CLICKHOUSE_RESET="true"
 
 if command -v enve >/dev/null 2>&1; then
-    RUNNER="enve run -- uv run pytest"
+    RUNNER="enve run -- env DATABASE_URL=postgres://posthog:posthog@127.0.0.1:${PG_PORT}/posthog PGHOST=127.0.0.1 PGPORT=${PG_PORT} PGUSER=posthog DEBUG=true TEST=true SKIP_CLICKHOUSE_SETUP=true SKIP_CLICKHOUSE_RESET=true uv run pytest"
 else
-    RUNNER="uv run pytest"
+    RUNNER="env DATABASE_URL=postgres://posthog:posthog@127.0.0.1:${PG_PORT}/posthog PGHOST=127.0.0.1 PGPORT=${PG_PORT} PGUSER=posthog DEBUG=true TEST=true SKIP_CLICKHOUSE_SETUP=true SKIP_CLICKHOUSE_RESET=true uv run pytest"
 fi
 
 # 1. Sequential Run (Single Worker Baseline)

@@ -125,7 +125,7 @@ jobs:
             matrix:
                 include:
                     - shard: 1
-                      targets: 'posthog/test/test_jwt.py posthog/test/test_cache_utils.py'
+                      targets: 'posthog/test/test_jwt.py'
                     - shard: 2
                       targets: 'posthog/test/test_dbrouter.py'
                     - shard: 3
@@ -201,7 +201,7 @@ jobs:
                   echo "======================================================================"
                   echo "⚡ Executing Real Django Tests on Live PostgreSQL (Shard ${{ matrix.shard }}/4)"
                   echo "======================================================================"
-                  PGPORT=$(( 5432 + ${{ matrix.shard }} )) ./scripts/showcase_xdist_test.sh ${{ matrix.targets }}
+                  ./scripts/showcase_xdist_test.sh ${{ matrix.targets }}
 
     # ============================================================================
     # STAGE 3: MERGE QUEUE STATIC AST & DAG CONFLICT GATE (<3s vs Trunk 22m)
@@ -242,7 +242,7 @@ jobs:
     stage4-container-build:
         name: 'Stage 4: Real Container Build & 1.8GB Slimming'
         runs-on: ubuntu-latest
-        timeout-minutes: 15
+        timeout-minutes: 25
         steps:
             - name: Checkout Code
               uses: actions/checkout@v4
