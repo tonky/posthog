@@ -12,7 +12,7 @@ echo "⚡ Building PostHog Frontend & Collecting Static Assets"
 echo "======================================================================"
 
 # 1. Check if already restored from Tier-1 cache
-if [ -s "dist/prebuilt-frontend/code/frontend/dist/index.html" ] && [ -d "dist/staticfiles" ] && [ "$(ls -A dist/staticfiles 2>/dev/null)" ]; then
+if [ "${FORCE_FRONTEND_BUILD:-0}" != "1" ] && [ -s "dist/prebuilt-frontend/code/frontend/dist/index.html" ] && [ -d "dist/staticfiles" ] && [ "$(ls -A dist/staticfiles 2>/dev/null)" ]; then
     echo "✓ Prebuilt frontend assets and staticfiles already restored from Tier-1 cache (< 2s)"
     exit 0
 fi

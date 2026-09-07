@@ -306,6 +306,8 @@ jobs:
         name: 'Stage 4: Parallel Frontend/Static & Pure enve Container Build (Daemonless OCI)'
         runs-on: ubuntu-latest
         timeout-minutes: 15
+        env:
+            FORCE_FRONTEND_BUILD: '1'
         steps:
             - name: Checkout Code
               uses: actions/checkout@v4
@@ -348,6 +350,7 @@ jobs:
                   echo "frontend=$FE_HASH" >> "$GITHUB_OUTPUT"
 
             - name: Restore Pre-Built Frontend & Static Assets (< 3s Tier 1 Cache)
+              if: env.FORCE_FRONTEND_BUILD != '1'
               id: cache-frontend-static
               uses: actions/cache/restore@v4
               with:
@@ -358,8 +361,24 @@ jobs:
                   restore-keys: |
                       frontend-static-${{ runner.os }}-v1-
 
-            - name: Restore Canonical pnpm Store & Link Dependencies (Tier 2 Fallback)
-              if: steps.cache-frontend-static.outputs.cache-hit != 'true'
+            - name: Set up pnpm and Node
+              uses: ./.github/actions/setup-pnpm
+
+            - name: Restore node_modules (< 5s Cache)
+              id: cache-node-modules
+              uses: actions/cache/restore@v4
+              with:
+                  path: |
+                      node_modules
+                      frontend/node_modules
+                      packages/*/node_modules
+                      common/*/node_modules
+                  key: node-modules-${{ runner.os }}-v1-${{ hashFiles('pnpm-lock.yaml') }}
+                  restore-keys: |
+                      node-modules-${{ runner.os }}-v1-
+
+            - name: Restore Canonical pnpm Store & Link Dependencies (Fallback)
+              if: steps.cache-node-modules.outputs.cache-hit != 'true'
               uses: ./.github/actions/pnpm-install
               env:
                   NPM_CONFIG_AUDIT: 'false'
@@ -391,14 +410,10 @@ jobs:
                   echo "⚡ Launching Parallel Processing Streams in Single Checkout"
                   echo "======================================================================"
 
-                  # Stream A: Frontend & Static Collection
+                  # Stream A: Frontend Rebuild & Static Collection (Simulating PR frontend modification)
                   (
-                    if [ "${{ steps.cache-frontend-static.outputs.cache-hit }}" = "true" ]; then
-                      echo "✓ [Stream A] Tier 1 Cache hit: Using restored frontend & static assets (< 2s)"
-                    else
-                      echo "🔨 [Stream A] Tier 1 Cache miss: Compiling frontend & collecting static..."
-                      ./scripts/build_frontend_and_static_cached.sh
-                    fi
+                    echo "🔨 [Stream A] Compiling frontend (PARALLEL_HEAVY=1) & collecting static..."
+                    FORCE_FRONTEND_BUILD=1 ./scripts/build_frontend_and_static_cached.sh
                   ) &
                   PID_FRONTEND=$!
 
@@ -412,6 +427,17 @@ jobs:
                   wait $PID_FRONTEND
                   wait $PID_BACKEND
                   echo "✓ Both parallel streams completed successfully!"
+
+            - name: Save node_modules to GHA Cache
+              if: steps.cache-node-modules.outputs.cache-hit != 'true'
+              uses: actions/cache/save@v4
+              with:
+                  path: |
+                      node_modules
+                      frontend/node_modules
+                      packages/*/node_modules
+                      common/*/node_modules
+                  key: node-modules-${{ runner.os }}-v1-${{ hashFiles('pnpm-lock.yaml') }}
 
             - name: Save Pre-Built Frontend & Static Assets to GHA Cache
               if: steps.cache-frontend-static.outputs.cache-hit != 'true' && github.ref == 'refs/heads/master'
