@@ -171,8 +171,8 @@ jobs:
                       name: 'Product Analytics: Insights & Activity'
                       targets: 'products/product_analytics/backend/tests/test_facade.py products/product_analytics/backend/tests/test_insight_activity_logging.py'
                     - shard: 13
-                      name: 'Platform Tasks: Async Task Models'
-                      targets: 'products/tasks/backend/tests/test_models.py'
+                      name: 'Platform Tasks: Admin & Facades'
+                      targets: 'products/tasks/backend/tests/test_facade.py products/tasks/backend/tests/test_admin.py'
                     - shard: 14
                       name: 'Temporal & Batch Exports: Stage Storage'
                       targets: 'posthog/temporal/tests/data_modeling/test_utils.py products/batch_exports/backend/tests/test_internal_stage_storage_config.py'
@@ -180,8 +180,8 @@ jobs:
                       name: 'Surveys & Batch Exports: Debuggers & Utils'
                       targets: 'products/surveys/backend/test_survey_util.py products/batch_exports/backend/tests/test_debugger.py'
                     - shard: 16
-                      name: 'Customer Analytics & Feature Requests'
-                      targets: 'products/early_access_features/backend/test/test_early_access_feature.py products/customer_analytics/backend/test/test_feature_requests.py'
+                      name: 'Customer Analytics: Facades & Feature Requests'
+                      targets: 'products/customer_analytics/backend/test/test_facade.py products/customer_analytics/backend/test/test_feature_requests.py'
         steps:
             - name: Checkout Code
               uses: actions/checkout@v4
