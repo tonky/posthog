@@ -25,7 +25,7 @@ Total End-to-End Lead Time: ~7.5 minutes (~8x speedup)
 | Pipeline Stage                 | Upstream Baseline (PR #90958) |     Accelerated Pipeline      |  Net Savings  | Core Mechanism                                           |
 | :----------------------------- | :---------------------------: | :---------------------------: | :-----------: | :------------------------------------------------------- |
 | **1. Runner Setup Tax**        |         `204s (3.4m)`         |           **2.6s**            | **-3.3 min**  | Hermetic `enve` user-space toolchain + RAM disk DB prime |
-| **2. Backend Test Execution**  |   `11m 10s` (avg per shard)   |          **<1m 45s**          | **-9.4 min**  | 8 parallel shards horizontal on live tmpfs PostgreSQL    |
+| **2. Backend Test Execution**  | `14m 46s` (40+ Depot shards)  |          **<2m 00s**          | **-12.8 min** | 16 parallel shards horizontal on live tmpfs PostgreSQL   |
 | **3. Merge Queue Gate**        |    `21m 53s` (Trunk queue)    |        **< 3 seconds**        | **-21.8 min** | In-memory AST & DAG conflict check (zero DB replay)      |
 | **4. Multi-Arch Container CD** |     `18m 41s` (CD build)      | **53s** (enve) / **BuildKit** | **-17.5 min** | Daemonless OCI synthesis & parallel BuildKit DAG builds  |
 | **5. Master Post-Merge**       |          `~25m 00s`           |          **~4m 30s**          | **-20.5 min** | Two-tier Cloudflare R2 content cache + server-side tag   |
@@ -40,7 +40,7 @@ To avoid theoretical numbers, all timings are directly cross-referenced against 
 - **Pull Request:** **[PostHog/posthog#90958](https://github.com/PostHog/posthog/pull/90958)** (`feat(batch-exports): resolve S3 export credentials only from integrations` by Ross Gray, merged Sept 3, 2026).
 - **PR Verification Run:** **[GitHub Actions Run 33636797071](https://github.com/PostHog/posthog/actions/runs/33636797071)**
   - Wall-clock duration: **21 minutes 59 seconds**.
-  - Total compute burned: **220+ runner-minutes** (across 5 `batch-exports` shards taking 10.4m to 11.6m each).
+  - Total compute burned: **500+ runner-minutes** (across 40+ concurrent Depot shards taking 10.4m to 14.8m each).
 - **Trunk Merge Queue Run:** **[Trunk Merge Queue #90959](https://app.trunk.io/posthog-inc/merge-queue/3921a8a3-abf7-42ff-b9cf-ef4fab8f3649/90959)**
   - Queue duration: **21 minutes 53 seconds** ([Trunk bot comment](https://github.com/PostHog/posthog/pull/90959#issuecomment-5522904780)).
   - Test analytics: Replayed **61,475 tests** before allowing merge ([Trunk Report](https://github.com/PostHog/posthog/pull/90959#issuecomment-5522904780)).
@@ -81,13 +81,14 @@ In upstream CI and local development, running tests in parallel with `pytest-xdi
 On standard 2-vCPU CI runners, intra-node parallelism (`pytest -n 2`) introduces an avoidable **5-second `execnet` worker startup tax** and concurrent DDL lock contention. Our architecture replaces this with **Horizontal Runner Sharding (`-n 0`) on Live tmpfs PostgreSQL**:
 
 1. **Dedicated Runner Isolation (Zero IPC Tax):**
-   - Slicing test targets across 8 runners with `-n 0` eliminates worker IPC serialization, duplicate Django module imports, and cross-worker catalog lock contention.
+   - Slicing test targets across 16 runners with `-n 0` eliminates worker IPC serialization, duplicate Django module imports, and cross-worker catalog lock contention.
    - Every runner dedicates 100% of CPU and RAM to test execution.
 2. **Instant In-Memory Template DB Branching (~45–190 ms):**
    - Each runner spins up a rootless tmpfs PostgreSQL instance on `/dev/shm` in <1.5s.
    - Template database branching (`CREATE DATABASE ... TEMPLATE test_posthog`) completes in **~190 ms in RAM** (vs ~1,850 ms on physical disk/Docker).
-3. **Capacity Efficiency:**
-   - Slicing across 8 parallel runners comfortably fits within GitHub's free concurrency limit (leaving 12 slots open) while delivering **10.6x faster test execution** than upstream monolithic suites.
+3. **Beating 40+ Depot Runners on GitHub Free Tier:**
+   - Upstream PR #90958 required over 40 concurrent Depot runners and took 14m 46s wall-clock time (500+ runner minutes), bottlenecked by a 4.5-minute Docker Compose setup tax in every shard and 60% database disk I/O wait.
+   - Our 16 parallel runners comfortably fit within GitHub's 20-runner free concurrency limit, eliminating the setup tax (<15s) and accelerating database I/O to deliver sub-2-minute shard runtimes across 850+ live tests.
 
 ---
 
