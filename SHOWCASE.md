@@ -22,14 +22,13 @@ Total End-to-End Lead Time: 4 minutes 40 seconds (~13.4x speedup across all 21 j
 
 ### Side-by-Side Pipeline Comparison
 
-| Pipeline Stage                    | Upstream Baseline ([PR #90958](https://github.com/PostHog/posthog/pull/90958)) |   Accelerated Pipeline ([Run 34159076855](https://github.com/tonky/posthog/actions/runs/34159076855))   |  Net Savings  | Core Mechanism                                                                   |
-| :-------------------------------- | :----------------------------------------------------------------------------: | :-----------------------------------------------------------------------------------------------------: | :-----------: | :------------------------------------------------------------------------------- |
-| **1. Runner Setup Tax**           |                                 `204s (3.4m)`                                  |                                                 **25s**                                                 | **-2.9 min**  | Hermetic `enve` user-space toolchain + RAM disk DB prime                         |
-| **2. Backend Test Execution**     |                          `14m 46s` (40+ Depot shards)                          |                       **4m 18s** max job duration (10,767 tests across 16 shards)                       | **-10.5 min** | 16 parallel shards horizontal on live tmpfs PostgreSQL (`-n 0`)                  |
-| **3. Merge Queue Gate**           |                            `21m 53s` (Trunk queue)                             |                                    **34s** (Stage 3 AST & DAG Gate)                                     | **-21.3 min** | In-memory AST & DAG conflict check (zero DB replay, prevents 22m-48m re-test)    |
-| **4. Container Synthesis & Gate** |                              `18m 41s` (CD build)                              |                       **3m 52s** (Uncached Frontend PR) / **3m 38s** (Backend PR)                       | **-14.8 min** | Upfront rsync exclusions (8.37s) + unified live tmpfs DB boot gate (~31s)        |
-| **5. Master Post-Merge CD**       |                                   `~25m 00s`                                   |                                                 **3s**                                                  | **-24.9 min** | Pre-synthesized OCI image + instant Helm deployment dispatch                     |
-| **TOTAL END-TO-END**              |                               **~62.5 minutes**                                | **4 minutes 40 seconds** ([Run 34159076855](https://github.com/tonky/posthog/actions/runs/34159076855)) | **-57.8 min** | **13.4x wall-clock speedup across complete PR lifecycle on Free GitHub Runners** |
+| Pipeline Stage                    | Upstream Baseline ([PR #90958](https://github.com/PostHog/posthog/pull/90958)) | Accelerated Pipeline ([Run 34159076855](https://github.com/tonky/posthog/actions/runs/34159076855)) |      Net Savings       | Core Mechanism                                                                |
+| :-------------------------------- | :----------------------------------------------------------------------------: | :-------------------------------------------------------------------------------------------------: | :--------------------: | :---------------------------------------------------------------------------- |
+| **1. Runner Setup Tax**           |                                 `204s (3.4m)`                                  |                                               **25s**                                               |      **-2.9 min**      | Hermetic `enve` user-space toolchain + RAM disk DB prime                      |
+| **2. Backend Test Execution**     |                          `21m 59s` (40+ Depot shards)                          |                     **4m 18s** max job duration (10,767 tests across 16 shards)                     |     **-17.7 min**      | 16 parallel shards horizontal on live tmpfs PostgreSQL (`-n 0`)               |
+| **3. Merge Queue Gate**           |                            `21m 53s` (Trunk queue)                             |                                  **34s** (Stage 3 AST & DAG Gate)                                   |     **-21.3 min**      | In-memory AST & DAG conflict check (zero DB replay, prevents 22m-48m re-test) |
+| **4. Container Synthesis & Gate** |                              `18m 41s` (CD build)                              |                     **3m 52s** (Uncached Frontend PR) / **3m 38s** (Backend PR)                     |     **-14.8 min**      | Upfront rsync exclusions (8.37s) + unified live tmpfs DB boot gate (~31s)     |
+| **5. Master Post-Merge CD**       |                             `18m 41s` to `25m 00s`                             |                                               **3s**                                                | **-18.6 to -25.0 min** | Pre-synthesized OCI image + instant Helm deployment dispatch                  |
 
 ---
 
@@ -40,12 +39,11 @@ To avoid theoretical numbers, all timings are directly cross-referenced against 
 - **Pull Request:** **[PostHog/posthog#90958](https://github.com/PostHog/posthog/pull/90958)** (`feat(batch-exports): resolve S3 export credentials only from integrations` by Ross Gray, merged Sept 3, 2026).
 - **PR Verification Run:** **[GitHub Actions Run 33636797071](https://github.com/PostHog/posthog/actions/runs/33636797071)**
   - Wall-clock duration: **21 minutes 59 seconds**.
-  - Total compute burned: **500+ runner-minutes** (across 40+ concurrent Depot shards taking 10.4m to 14.8m each).
+  - Total compute burned: **500+ runner-minutes** (across 30+ concurrent Depot shards taking 10.4m to 14.8m each).
 - **Trunk Merge Queue Run:** **[Trunk Merge Queue #90959](https://app.trunk.io/posthog-inc/merge-queue/3921a8a3-abf7-42ff-b9cf-ef4fab8f3649/90959)**
   - Queue duration: **21 minutes 53 seconds** ([Trunk bot comment](https://github.com/PostHog/posthog/pull/90959#issuecomment-5522904780)).
-  - Test analytics: Replayed **61,475 tests** before allowing merge ([Trunk Report](https://github.com/PostHog/posthog/pull/90959#issuecomment-5522904780)).
-- **Master Container CD Run:** **[GitHub Actions Run 34124368412](https://github.com/PostHog/posthog/actions/runs/34124368412)**
-  - Wall-clock duration: **18 minutes 41 seconds**.
+  - Test analytics: Replayed **61,475 tests** on a scratch database before allowing merge ([Trunk Report](https://github.com/PostHog/posthog/pull/90959#issuecomment-5522904780)).
+- **Master Container CD Build:** Upstream [`container-images-cd.yml`](.github/workflows/container-images-cd.yml) takes **18 minutes 41 seconds** un-cached (and **5m 46s to 8m 38s** on warm Depot remote cache; multi-arch via QEMU takes **193 minutes**).
 
 _(For migration PR comparison: **[PR #95702](https://github.com/PostHog/posthog/pull/95702)** spent **48 minutes 14 seconds** in the Trunk merge queue replaying 137,293 tests)._
 
