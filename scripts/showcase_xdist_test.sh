@@ -161,7 +161,7 @@ echo ""
     echo "▶ 2. Executing Shard Tests (-n 0) on Dedicated tmpfs PostgreSQL..."
     echo "----------------------------------------------------------------------"
     START_RUN=$(date +%s%N)
-    $RUNNER -n 0 -q --reuse-db $TEST_TARGETS
+    $RUNNER -n 0 -q --reuse-db --snapshot-warn-unused $TEST_TARGETS
     END_RUN=$(date +%s%N)
     RUN_MS=$(( (END_RUN - START_RUN) / 1000000 ))
     RUN_SEC=$(awk "BEGIN {printf \"%.2f\", $RUN_MS / 1000}")
