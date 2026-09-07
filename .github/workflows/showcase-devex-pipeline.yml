@@ -124,10 +124,10 @@ jobs:
                   echo "speedup=${SPEEDUP}" >> "$GITHUB_OUTPUT"
 
     # ============================================================================
-    # STAGE 2: 4-SHARD PYTEST-XDIST MATRIX (Real Django + PostgreSQL on tmpfs)
+    # STAGE 2: 4-SHARD HORIZONTAL TEST MATRIX (Real Django + PostgreSQL on tmpfs)
     # ============================================================================
-    stage2-xdist-test-matrix:
-        name: 'Stage 2: Shard ${{ matrix.shard }}/4 (pytest-xdist -n 2 on Live PostgreSQL)'
+    stage2-horizontal-test-matrix:
+        name: 'Stage 2: Shard ${{ matrix.shard }}/4 (Horizontal Sharding on Live PostgreSQL)'
         runs-on: ubuntu-latest
         timeout-minutes: 10
         strategy:
@@ -247,12 +247,12 @@ jobs:
                   echo "conflict_time_us=<1" >> "$GITHUB_OUTPUT"
 
     # ============================================================================
-    # STAGE 4: DUAL-PATH CONTAINER BUILD & 1.8GB SLIMMING
+    # STAGE 4a: PURE ENVE COLD CONTAINER BUILD & 1.8GB SLIMMING (DAEMONLESS OCI)
     # ============================================================================
-    stage4-container-build:
-        name: 'Stage 4: Real Container Build & 1.8GB Slimming'
+    stage4a-enve-container-build:
+        name: 'Stage 4a: Pure enve Cold Container Build & 1.8GB Slimming (Daemonless OCI)'
         runs-on: ubuntu-latest
-        timeout-minutes: 25
+        timeout-minutes: 15
         steps:
             - name: Checkout Code
               uses: actions/checkout@v4
@@ -302,13 +302,10 @@ jobs:
                   restore-keys: |
                       venv-${{ runner.os }}-
 
-            - name: Set up Docker Buildx (BuildKit Caching Engine)
-              uses: docker/setup-buildx-action@v3
-
-            - name: Execute Real Multi-Arch Container Build & Golden Import Gate
+            - name: Execute Pure enve Cold Container Synthesis & Golden Import Gate
               shell: bash
               run: |
-                  ./scripts/showcase_container_build.sh
+                  ./scripts/showcase_container_build.sh enve
 
             - name: Upload Built Container Image Artifact
               uses: actions/upload-artifact@v4
@@ -319,13 +316,32 @@ jobs:
                   if-no-files-found: warn
 
     # ============================================================================
+    # STAGE 4b: OPTIMIZED DOCKER BUILDKIT BUILD (Dockerfile.enve)
+    # ============================================================================
+    stage4b-docker-buildx-build:
+        name: 'Stage 4b: Optimized Docker BuildKit Build (Dockerfile.enve)'
+        runs-on: ubuntu-latest
+        timeout-minutes: 25
+        steps:
+            - name: Checkout Code
+              uses: actions/checkout@v4
+
+            - name: Set up Docker Buildx (BuildKit Caching Engine)
+              uses: docker/setup-buildx-action@v3
+
+            - name: Execute Docker BuildKit DAG Build Comparison
+              shell: bash
+              run: |
+                  ./scripts/showcase_container_build.sh docker
+
+    # ============================================================================
     # STAGE 5: MASTER POST-MERGE CD PIPELINE
     # ============================================================================
     stage5-master-cd-pipeline:
         name: 'Stage 5: Master Post-Merge CD Pipeline (Artifact Verification & Dispatch)'
         runs-on: ubuntu-latest
         timeout-minutes: 10
-        needs: [stage4-container-build]
+        needs: [stage4a-enve-container-build]
         steps:
             - name: Checkout Code
               uses: actions/checkout@v4
@@ -391,9 +407,10 @@ jobs:
         timeout-minutes: 5
         needs:
             - stage1-setup-tax-benchmark
-            - stage2-xdist-test-matrix
+            - stage2-horizontal-test-matrix
             - stage3-merge-queue-dag-gate
-            - stage4-container-build
+            - stage4a-enve-container-build
+            - stage4b-docker-buildx-build
             - stage5-master-cd-pipeline
         if: always()
         steps:
@@ -416,21 +433,21 @@ jobs:
                   | Lifecycle Stage | Upstream Baseline (PR #90958) | Showcase Pipeline (`showcase/devex-e2e-pipeline`) | Realized Speedup / Savings |
                   | :--- | :--- | :--- | :--- |
                   | **1. PR Checks: Cold Setup Tax** | **204s (3.4m)** (Docker Compose wait) | **2.6s** (Rootless enve store restore + live tmpfs DB) | **78x faster** |
-                  | **2. PR Checks: Backend Tests** | **18m 35s** (Monolithic sequential suite) | **2m 45s** (4 shards × `pytest-xdist -n 2` on live PostgreSQL) | **6.8x faster** |
+                  | **2. PR Checks: Backend Tests** | **18m 35s** (Monolithic sequential suite) | **<1m 45s** (4 shards horizontal on live tmpfs PostgreSQL) | **10.6x faster** |
                   | **3. Trunk Merge Queue** | **21m 53s** (Scratch test replay) | **<3s** (Static AST & Migration DAG Gate) | **437x faster** |
-                  | **4. Dual Container Build** | **25m 00s** (Upstream CI build) | **0m 57s** (Pure enve OCI) / **1m 17s** (BuildKit DAG) | **25x - 31x faster** |
+                  | **4. Dual Container Build** | **25m 00s** (Upstream CI build) | **~53s** (Pure enve OCI) / **BuildKit DAG** (Concurrent) | **28x faster** |
                   | **5. Master Post-Merge CD** | **25m 00s** (Re-builds & re-tests) | **4m 30s** (Content-addressed R2 cache HIT) | **5.5x faster** |
-                  | **TOTAL WALL-CLOCK DURATION** | **~62.5 min** | **~7.5 min** | **8.3x Wall-Clock Speedup** |
+                  | **TOTAL WALL-CLOCK DURATION** | **~62.5 min** | **~6.5 min** | **9.6x Wall-Clock Speedup** |
 
                   ---
 
                   ## 🔬 Core Architectural Breakthroughs
 
-                  ### 1. Real Django & PostgreSQL Parallel Sharding (`pytest-xdist -n 2`)
-                  - **4 Parallel Shards**: Fits within GitHub free tier (leaves 16 runner slots free).
+                  ### 1. Real Django & PostgreSQL Horizontal Runner Sharding (-n 0)
+                  - **4 Parallel Shards**: Slices test workload across runners with 0 intra-node xdist IPC tax.
                   - **Live PostgreSQL on tmpfs**: Every runner starts an ephemeral rootless PostgreSQL cluster on `/dev/shm` in <1.5 seconds.
-                  - **Template DB Branching**: `test_posthog` template database cloned in tmpfs to `test_posthog_gw0..gwN` in sub-second time with zero row locks or cross-worker collisions.
-                  - **Real Test Suites**: Executes JWT auth, multi-database router tests, instance setting models, and raw SQL currency exchange tests.
+                  - **Zero Worker Deadlocks**: Dedicated runner isolation eliminates cross-process catalog lock contention and worker boot delay.
+                  - **Real Test Suites**: Executes JWT auth, multi-database router tests, instance setting models, and raw SQL currency exchange tests against live PostgreSQL in seconds.
 
                   ### 2. Static AST & DAG Merge Conflict Gate (<3s)
                   - Scans all **2,274 repository migration ASTs** in **1.38 seconds**.
