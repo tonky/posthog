@@ -139,16 +139,36 @@ Our architecture replaces this with an in-memory **Directed Acyclic Graph (DAG) 
 
 ---
 
-## 🌐 5. Two-Tier Content-Addressed Caching (Bypassing GHA Isolation)
+## 🌐 5. Two-Tier Content-Addressed Caching & Master CD Reality
 
-GitHub Actions strictly forbids PR branches from writing into `master`'s cache. In upstream, this forces `master` to rebuild the database schema dump and container layers from scratch on every merge (**25 minutes**).
+GitHub Actions strictly isolates PR caches from `master`. In upstream CI, this forces `master` to rebuild the database schema dump, Python wheels, and multi-arch container layers from scratch on every merge (**18m 41s to 25 minutes**).
 
-Our **Two-Tier Cache Hierarchy** bypasses this limitation:
+Our architecture addresses this with a **Two-Tier Cache Hierarchy** (GHA local cache + Cloudflare R2 bucket keyed by `MIG_HASH`, `WHEELS_HASH`, and `FRONTEND_HASH`).
 
-1. **Tier 1 (GHA Local Cache):** 3-second rapid restores within the same branch.
-2. **Tier 2 (Cloudflare R2 Bucket Cache):** A global, content-addressed binary store keyed by cryptographic hashes (`MIG_HASH`, `WHEELS_HASH`, `FRONTEND_HASH`).
-   - Populated during PR checks or merge queue runs.
-   - Master post-merge computes `MIG_HASH` in <100ms, gets an instant **3.8s cache hit**, and dispatches deployment without rebuilding.
+### What Actually Happens on Master CD for Real Changes?
+
+Depending on the team's release strategy, Master CD operates in one of two modes:
+
+#### Path A: Immutable Artifact Promotion ("Build Once in Queue, Promote to Master")
+
+\*In modern GitOps and Trunk merge queues, the container image is built and verified before the merge gate completes.\_
+
+1. **Server-Side Registry Tagging (`crane tag` / ECR `put-image`):** Re-tags the verified PR/queue image digest (`sha256:...`) to `:master-<sha>` and `:latest` directly in the container registry via manifest copy (zero layer re-upload).
+2. **Kubernetes Dispatch:** Emits `commit_state_update` to `PostHog/charts`.
+
+- **Lead Time:** **~10 to 15 seconds** (no compilation, zero rebuild, zero re-test).
+
+#### Path B: Incremental Container Synthesis on Master (When Rebuilding from Cache)
+
+\*If `master` synthesizes the container freshly upon merge rather than promoting an existing artifact:\_
+
+| Change Type                                                           | What Rebuilds?                                     | Cache Hits                                                                                    |                                Real Synthesis Time                                | Upstream Baseline  |
+| :-------------------------------------------------------------------- | :------------------------------------------------- | :-------------------------------------------------------------------------------------------- | :-------------------------------------------------------------------------------: | :----------------: |
+| **Typical Backend Change** _(e.g. 5 Python files like PR #90958)_     | Application layer only (`/code/posthog`)           | • Python wheels (100% HIT)<br>• Frontend bundle (100% HIT)<br>• Migration schema (100% HIT)   |    **~45s to 60s** _(15s packaging + 20s Golden Import Gate + 8s layer push)_     | **18m 41s – 25m**  |
+| **Typical Frontend Change** _(e.g. React / TypeScript component fix)_ | Frontend bundle layer only (`/code/frontend/dist`) | • Python wheels (100% HIT)<br>• Core backend runtime (100% HIT)<br>• DB migrations (100% HIT) | **~1m 30s to 1m 45s** _(50s incremental build + 15s packaging + 18s import gate)_ | **18m 41s – 25m**  |
+| **Dependency Bump** _(e.g. updating `uv.lock` or `pnpm-lock.yaml`)_   | Dependency cache rebuild + app layer               | • Unchanged tier cached in R2                                                                 |                               **~2m 15s to 2m 45s**                               | **25m 00s – 193m** |
+
+Even without artifact promotion, incremental userspace OCI synthesis reduces Master CD from **~25 minutes down to ~1 minute for backend changes** and **~1.5 minutes for frontend changes**.
 
 ---
 
