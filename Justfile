@@ -16,6 +16,10 @@ test-affected BASE="origin/master" EXTRA_ARGS="":
 list-affected BASE="origin/master":
     @just --justfile {{SHOWCASE_JUSTFILE}} list-affected "{{BASE}}"
 
+# Evaluate any PostHog PR URL or number (fetch diff, scope backend & frontend tests, run in enve, compare vs CI)
+eval-pr PR="98893" EXTRA_ARGS="":
+    @just --justfile {{SHOWCASE_JUSTFILE}} eval-pr "{{PR}}" "{{EXTRA_ARGS}}"
+
 # Demonstrate end-to-end PR test acceleration vs upstream CI (98893, 99634, 99520)
 demo-pr PR="98893":
     @just --justfile {{SHOWCASE_JUSTFILE}} demo-pr "{{PR}}"

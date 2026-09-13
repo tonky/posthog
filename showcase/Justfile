@@ -153,6 +153,13 @@ list-affected BASE="origin/master":
     cd "{{REPO_ROOT}}"
     uv run tools/snob_backend_test_selection_shadow.py --base-ref "{{BASE}}" --pretty
 
+# Evaluate any PostHog PR URL or number (fetch diff, scope backend & frontend tests, run in enve, compare vs CI)
+eval-pr PR="98893" EXTRA_ARGS="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd "{{REPO_ROOT}}"
+    python3 "{{SHOWCASE_DIR}}/scripts/evaluate_pr.py" "{{PR}}" {{EXTRA_ARGS}}
+
 # Demonstrate end-to-end PR test execution (reverts diff, applies diff, runs tests in enve, prints CI comparison)
 # Options: 98893 (Signals REST API), 99634 (Business Knowledge Temporal), 99520 (Warehouse Source)
 demo-pr PR="98893":

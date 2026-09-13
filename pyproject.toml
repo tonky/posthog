@@ -397,6 +397,8 @@ select = [
 # Django settings aggregator: star imports are how settings modules merge into one namespace.
 # Not portable to explicit re-exports without losing the settings-loading semantics.
 "posthog/settings/**" = ["F403", "F405"]
+# Showcase DevEx acceleration scripts are interactive CLI utilities that print console scorecards
+"showcase/**" = ["T201"]
 
 # PLC0415 exemptions. products/ and services/llm-gateway/ have their own ruff configs.
 # Run `ruff check <path> --select PLC0415 --statistics` before removing an entry.
