@@ -7,19 +7,36 @@ import (
 
 // PostHog Analytics Polyglot Monorepo
 // Zero-Daemon Rootless Developer Environment & Microservice Topology
+// Functional Parity with Flox + Docker Compose + mprocs
 devEnv: schema.#DevEnvironment & {
 	name:        "posthog-monorepo"
-	description: "PostHog Polyglot Monorepo (Django + Rust Capture + ClickHouse + Kafka + Temporal + SeaweedFS)"
+	description: "PostHog Polyglot Monorepo (Django + Vite + Node Ingestion + Rust Services + Go AI Gateway + ClickHouse + Kafka + Temporal + SeaweedFS)"
 
 	tools: [
+		// Core Databases & Infrastructure
 		pkgs.postgres,
 		"redis",
 		"clickhouse",
 		pkgs.temporal,
 		pkgs.seaweedfs,
 		pkgs.tansu,
-		"python311",
+
+		// Runtimes & Compilers
+		"python",
 		"uv",
+		"nodejs",
+		"rustc",
+		"cargo",
+		"clippy",
+		"rustfmt",
+		"go",
+		"golangci-lint",
+
+		// Developer CLI Tools
+		"ripgrep",
+		"jq",
+		"just",
+		"watchexec",
 	]
 
 	hosts: {
@@ -32,12 +49,17 @@ devEnv: schema.#DevEnvironment & {
 	}
 
 	environment: {
+		DEBUG:                             "1"
 		DATABASE_URL:                      "postgres://posthog:posthog@127.0.0.1:15432/posthog"
+		PERSONS_DATABASE_URL:              "postgres://posthog:posthog@127.0.0.1:15432/posthog"
 		DAGSTER_TEST_POSTGRES_URL:         "postgresql://posthog:posthog@127.0.0.1:15432/test_dagster"
 		PGPORT:                            "15432"
+		PGHOST:                            "127.0.0.1"
 		REDIS_URL:                         "redis://127.0.0.1:16379"
+		FLAGS_REDIS_URL:                   "redis://127.0.0.1:16379/1"
 		REDIS_PORT:                        "16379"
 		CLICKHOUSE_HOST:                   "127.0.0.1"
+		CLICKHOUSE_DATABASE:               "posthog"
 		CLICKHOUSE_HTTP_PORT:              "8123"
 		CLICKHOUSE_TCP_PORT:               "9000"
 		CLICKHOUSE_POSTGRES_HOST:          "127.0.0.1"
@@ -57,6 +79,10 @@ devEnv: schema.#DevEnvironment & {
 	}
 
 	services: {
+		// ====================================================================
+		// INFRASTRUCTURE SERVICES (Rootless, zero-Docker)
+		// ====================================================================
+
 		// 1. PostgreSQL Relational Database (Port 15432)
 		postgres: pkgs.#PostgresService & {
 			port:      15432
@@ -222,12 +248,12 @@ devEnv: schema.#DevEnvironment & {
 			dataDir:   ".enve/data/seaweedfs"
 			timeoutMs: 6000
 
-			command: "weed mini -ip=127.0.0.1 -ip.bind=127.0.0.1 -dir=.enve/data/seaweedfs -s3.port=19000 -bucket=posthog,test-posthog,posthog-recordings,test-recordings"
+			command: "weed mini -ip=127.0.0.1 -ip.bind=127.0.0.1 -dir=.enve/data/seaweedfs -s3.port=19000 -bucket=posthog,test-posthog,posthog-recordings,test-recordings,ai-blobs"
 
 			environment: {
 				AWS_ACCESS_KEY_ID:     "object_storage_root_user"
 				AWS_SECRET_ACCESS_KEY: "object_storage_root_password"
-				S3_BUCKET:             "posthog,test-posthog,posthog-recordings,test-recordings"
+				S3_BUCKET:             "posthog,test-posthog,posthog-recordings,test-recordings,ai-blobs"
 			}
 
 			lifecycle: init: [
@@ -248,9 +274,13 @@ devEnv: schema.#DevEnvironment & {
 			}
 		}
 
-		// 7. Central Service: PostHog Backend (Django ASGI on Port 8000)
+		// ====================================================================
+		// APPLICATION & PRODUCT SERVICES (Full Parity with mprocs / Flox)
+		// ====================================================================
+
+		// 7. PostHog Backend (Django ASGI via Granian on Port 8000)
 		backend: schema.#Service & {
-			command: ".venv/bin/python -m granian --interface asgi posthog.asgi:application --host 127.0.0.1 --port 8000"
+			command: ".venv/bin/python -m granian --interface asgi posthog.asgi:application --host 127.0.0.1 --port 8000 --reload --reload-paths ./posthog --reload-paths ./ee --reload-paths ./products"
 			port:    8000
 			dependsOn: ["postgres", "redis", "clickhouse"]
 			timeoutMs: 30000
@@ -281,7 +311,126 @@ devEnv: schema.#DevEnvironment & {
 			}
 		}
 
-		// 8. Central Service: PostHog Capture Gateway (Rust on Port 3000)
+		// 8. Frontend Dev Server (Vite on Port 8234)
+		frontend: schema.#Service & {
+			command: "./bin/start-frontend"
+			port:    8234
+			dependsOn: ["backend"]
+			timeoutMs: 60000
+
+			environment: {
+				DEBUG: "0"
+			}
+
+			restartPolicy: schema.#RestartPolicy.OnFailure
+
+			healthCheck: {
+				port:      8234
+				timeoutMs: 60000
+			}
+
+			readinessProbe: {
+				port:      8234
+				timeoutMs: 60000
+			}
+		}
+
+		// 9. Celery Background Worker
+		"celery-worker": schema.#Service & {
+			command: "./bin/start-celery worker"
+			dependsOn: ["postgres", "redis", "clickhouse"]
+			timeoutMs: 30000
+
+			environment: {
+				DEBUG:        "1"
+				DATABASE_URL: "postgres://posthog:posthog@127.0.0.1:15432/posthog"
+				REDIS_URL:    "redis://127.0.0.1:16379"
+			}
+
+			restartPolicy: schema.#RestartPolicy.OnFailure
+		}
+
+		// 10. Celery Beat Periodic Scheduler
+		"celery-beat": schema.#Service & {
+			command: "./bin/start-celery beat"
+			dependsOn: ["postgres", "redis", "celery-worker"]
+			timeoutMs: 30000
+
+			environment: {
+				DEBUG:        "1"
+				DATABASE_URL: "postgres://posthog:posthog@127.0.0.1:15432/posthog"
+				REDIS_URL:    "redis://127.0.0.1:16379"
+			}
+
+			restartPolicy: schema.#RestartPolicy.OnFailure
+		}
+
+		// 11. Temporal Worker (Workflow & Activities Execution)
+		"temporal-worker": schema.#Service & {
+			command: "python manage.py start_temporal_worker --task-queue development-task-queue"
+			dependsOn: ["temporal", "postgres", "redis"]
+			timeoutMs: 45000
+
+			environment: {
+				TEMPORAL_HOST: "127.0.0.1"
+				TEMPORAL_PORT: "7233"
+				DATABASE_URL:  "postgres://posthog:posthog@127.0.0.1:15432/posthog"
+				REDIS_URL:     "redis://127.0.0.1:16379"
+			}
+
+			restartPolicy: schema.#RestartPolicy.OnFailure
+		}
+
+		// 12. PostHog Node Ingestion Server (Plugin Server - Combined Ingestion v2)
+		ingestion: schema.#Service & {
+			command: "PLUGIN_SERVER_MODE=ingestion-v2-combined HTTP_SERVER_PORT=6739 ./bin/posthog-node"
+			port:    6739
+			dependsOn: ["kafka", "postgres", "redis", "seaweedfs"]
+			timeoutMs: 60000
+
+			environment: {
+				DATABASE_URL:                 "postgres://posthog:posthog@127.0.0.1:15432/posthog"
+				PERSONS_DATABASE_URL:         "postgres://posthog:posthog@127.0.0.1:15432/posthog"
+				REDIS_URL:                    "redis://127.0.0.1:16379"
+				KAFKA_HOSTS:                  "127.0.0.1:19092"
+				CLICKHOUSE_HOST:              "127.0.0.1"
+				CLICKHOUSE_PORT:              "8123"
+				AI_BLOB_S3_BUCKET:            "ai-blobs"
+				AI_BLOB_S3_ENDPOINT:          "http://127.0.0.1:19000"
+				AI_BLOB_S3_ACCESS_KEY_ID:     "object_storage_root_user"
+				AI_BLOB_S3_SECRET_ACCESS_KEY: "object_storage_root_password"
+			}
+
+			restartPolicy: schema.#RestartPolicy.OnFailure
+
+			healthCheck: {
+				port:      6739
+				timeoutMs: 60000
+			}
+
+			readinessProbe: {
+				port:      6739
+				timeoutMs: 60000
+			}
+		}
+
+		// 13. Session Replay Ingestion (Blob Ingestion v2)
+		"ingestion-sessionreplay": schema.#Service & {
+			command: "PLUGIN_SERVER_MODE=recordings-blob-ingestion-v2 HTTP_SERVER_PORT=6740 ./bin/posthog-node"
+			port:    6740
+			dependsOn: ["kafka", "seaweedfs", "postgres", "redis"]
+			timeoutMs: 60000
+
+			environment: {
+				DATABASE_URL: "postgres://posthog:posthog@127.0.0.1:15432/posthog"
+				REDIS_URL:    "redis://127.0.0.1:16379"
+				KAFKA_HOSTS:  "127.0.0.1:19092"
+			}
+
+			restartPolicy: schema.#RestartPolicy.OnFailure
+		}
+
+		// 14. PostHog Capture Gateway (Rust on Port 3000)
 		capture: schema.#Service & {
 			command: "cargo run --manifest-path rust/capture/Cargo.toml"
 			port:    3000
@@ -309,11 +458,29 @@ devEnv: schema.#DevEnvironment & {
 				timeoutMs: 60000
 			}
 		}
+
+		// 15. Rust Feature Flags Service (Port 3001)
+		"feature-flags": schema.#Service & {
+			command: "bin/start-rust-service feature-flags"
+			port:    3001
+			dependsOn: ["redis", "postgres"]
+			timeoutMs: 60000
+
+			environment: {
+				BIND_PORT:    "3001"
+				DATABASE_URL: "postgres://posthog:posthog@127.0.0.1:15432/posthog"
+				REDIS_URL:    "redis://127.0.0.1:16379"
+			}
+
+			restartPolicy: schema.#RestartPolicy.OnFailure
+		}
 	}
 
 	shellHook: """
 		echo "🦔 Welcome to PostHog Monorepo (Zero-Daemon enve environment)"
-		echo "Run 'enve up' to start background microservices in <1.2s"
-		echo "Run 'enve up postgres redis' for minimal web API hacking"
+		echo "• Fast test impact runs: just test-affected"
+		echo "• Start core infra     : enve up postgres redis clickhouse kafka seaweedfs temporal"
+		echo "• Start app stack      : enve up backend frontend capture ingestion"
+		echo "• Start full monorepo  : enve up"
 		"""
 }

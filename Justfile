@@ -38,6 +38,14 @@ test-shard SHARD="1" WORKERS="6" FAIL_FAST="true":
 services-up:
     @just --justfile {{SHOWCASE_JUSTFILE}} services-up
 
+# Start the web development stack (backend Django + frontend Vite)
+web-up:
+    enve up postgres redis clickhouse backend frontend
+
+# Start the full polyglot monorepo stack
+stack-up:
+    enve up
+
 # Stop running rootless microservices
 services-down:
     @just --justfile {{SHOWCASE_JUSTFILE}} services-down
