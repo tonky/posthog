@@ -82,3 +82,43 @@ This document captures architectural discoveries, testing subtleties, scoping me
 
 - Compiling Rust services (`capture`, `personhog`, `hook-janitor`) locally or in rapid feedback loops takes several minutes and spikes system resources.
 - **Rule**: Unless actively debugging the Rust ingestion binary, skip Rust compilation during PR evaluation and test scoping.
+
+---
+
+## 4. Git Hooks & Hermetic Tool Invocation
+
+### Prioritizing `enve` in Git Hooks (`.husky/pre-commit`)
+
+- Upstream hook scripts frequently check for `flox` or assume global npm/pnpm installations.
+- When working in hermetic environments, hooks must check for `enve` and `enve.cue` first:
+
+  ```bash
+  if command -v enve > /dev/null 2>&1 && [ -f "enve.cue" ] && [ -z "$ENVE_ENV" ]; then
+      exec enve run -- env POSTHOG_TELEMETRY_OPT_OUT=1 NODE_OPTIONS='--max-old-space-size=8192' corepack pnpm lint-staged
+  ```
+
+- **The Corepack Subtlety**: In sealed/Nix-backed Node environments, `corepack enable` cannot symlink to read-only store directories (`/nix/store/...`). Invoking `corepack pnpm <cmd>` directly bypasses the need for global write permissions and executes the exact pinned pnpm version hermetically.
+
+---
+
+## 5. Local Test Database Lifecycles & State Management
+
+### Test Database Isolation on Port 15432
+
+- Django creates dedicated test databases prefixed with `test_` (e.g. `test_posthog`, `test_posthog_persons`).
+- Under `pytest-django`:
+  - `--reuse-db` dramatically reduces test startup latency by skipping schema migrations across runs.
+  - To prevent migration drift between branches, add `--create-db` or recreate `.enve/data/postgres` when testing schema/migration PRs.
+- ClickHouse runs in-process on `:8123` with ephemeral table engines (`posthog_test`), avoiding cross-test contamination without needing container teardowns.
+
+---
+
+## 6. PR Verification & CI Parity Insights
+
+### Automated Diff Fetching & Shadow Evaluation
+
+- PR diffs can be directly piped via `gh pr diff <id>` or fallback raw patch URLs (`https://patch-diff.githubusercontent.com/raw/PostHog/posthog/pull/<id>.diff`).
+- Applying PR diffs in temporary shadow working states allows testing remote pull requests locally without switching branches, rebasing, or stashing current work.
+- **Coverage Confidence**:
+  - Printing **provenance** (`source_file -> impacted_tests`) is critical for developer trust. Seeing that an added helper in a product module was only imported by one test explains why the local runner executed 1 test instead of 350.
+  - Comparing local execution time against the GitHub Status Rollup (`statusCheckRollup`) immediately quantifies exact developer time saved per run.
