@@ -55,14 +55,11 @@ This document captures architectural discoveries, testing subtleties, scoping me
 - **Hermetic Runtimes & Dependencies**:
   - Rather than relying on disparate host package managers, non-deterministic nvm/pyenv/rustup versions, or global paths, `enve` provides a fully sealed hermetic developer environment.
   - All compilers (Python, Node.js, Go, Rust), developer tools (`just`, `watchexec`, `ripgrep`, `jq`), and database packages are declared in `enve.cue` and pinned by cryptographic hashes in `enve.lock`.
-- **The Python 3.13.13 vs 3.11.16 Divergence**:
+- **Python Runtime Authority: Dedicated to `uv`**:
   - `pyproject.toml` pins: `requires-python = "==3.13.13"`.
-  - In `enve.lock`, the global CUE tool `pkgs.python` resolves to `python3-3.11.16` from Nixpkgs store closures (`/nix/store/kzyci1v1alqk343ibnz1g7a2aa51f8j7-python3-3.11.16`).
-  - **How the codebase stays on Python 3.13**:
-    - `uv` is invoked for all Python executions (`uv run pytest`, `uv run python`).
-    - `uv` respects `pyproject.toml` and `.venv/pyvenv.cfg` (`version_info = 3.13.13`), automatically isolating and executing under CPython 3.13.13 (`uv run python --version` -> `3.13.13`).
-    - Running bare `python` inside `enve run -- python` invokes the ambient Nixpkgs 3.11.16 fallback.
-  - **Rule**: Always invoke Python tools through `uv run` (`uv run pytest`, `uv run python ...`) inside `enve` so that the hermetic Python 3.13.13 runtime pinned in `pyproject.toml` is strictly guaranteed.
+  - Upstream CUE/Nixpkgs package hub previously pinned a generic `python3-3.11.16` fallback closure in `enve.lock`.
+  - **Decision**: Dropped the generic `"python"` tool declaration from `enve.cue` and its closures from `enve.lock`.
+  - **Single Source of Truth**: `enve` delivers `uv` deterministically, and `uv` manages the hermetic CPython 3.13.13 runtime, virtualenv (`.venv`), and all Python dependencies (`uv run python`, `uv run pytest`). This removes version ambiguity and guarantees exact Python 3.13.13 execution everywhere.
 - **Rootless Microservices vs. Heavy Docker Compose**:
   - Running Docker Compose locally consumes 4,000–8,000 MB RSS, takes 60–90 seconds to boot, and suffers severe volume translation overhead on macOS.
   - `enve.cue` runs real native binaries directly against tmpfs / RAM disks on localhost (<450 MB RSS total), providing sub-second restarts, instant test database wiping, and clean hermetic isolation.

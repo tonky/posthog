@@ -6,17 +6,17 @@ This document details the tools, frameworks, and utilities used to run, build, s
 
 ## 1. Tool Index
 
-| Tool                 | Purpose                                            | Primary Use Case                                                                                                                                                                                                          |
-| :------------------- | :------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **`enve`**           | **Universal Hermetic Environment & Orchestration** | Declares and delivers all hermetic toolchains (Python, Node, Go, Rust, developer CLIs) and runs all microservices (Postgres, Redis, ClickHouse, Tansu, Temporal, SeaweedFS) rootlessly on localhost/tmpfs without Docker. |
-| **`just`**           | Modern Command Runner                              | Replacement for complex Makefiles; orchestrates service lifecycles, test scoping, and dev tasks.                                                                                                                          |
-| **`snob_lib`**       | Python AST Dependency Tracer                       | Scans Python codebase AST to find all tests transitively importing a given file.                                                                                                                                          |
-| **`jest`**           | Frontend Test Runner                               | Executes TypeScript / React / Kea unit and component tests with `--findRelatedTests`.                                                                                                                                     |
-| **`pytest`**         | Python Backend Test Runner                         | Executes Django and product backend tests with database fixtures.                                                                                                                                                         |
-| **`uv`**             | Fast Python Package & Tool Runner                  | Ultra-fast virtualenv management, dependency resolution, and script execution.                                                                                                                                            |
-| **`pnpm`**           | Fast Node Package Manager                          | Strict dependency management and workspace filtering (`pnpm --filter=@posthog/frontend ...`).                                                                                                                             |
-| **`ruff`**           | Python Linter & Formatter                          | Sub-100ms Python formatting and linting (`ruff check . --fix`).                                                                                                                                                           |
-| **`evaluate_pr.py`** | Multi-level PR Scoping Tool                        | Fetches remote PR diffs, determines affected components/tests, runs them, and compares with CI.                                                                                                                           |
+| Tool                 | Purpose                                            | Primary Use Case                                                                                                                                                                                                      |
+| :------------------- | :------------------------------------------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **`enve`**           | **Universal Hermetic Environment & Orchestration** | Declares and delivers all hermetic toolchains (Node, Go, Rust, uv, developer CLIs) and runs all microservices (Postgres, Redis, ClickHouse, Tansu, Temporal, SeaweedFS) rootlessly on localhost/tmpfs without Docker. |
+| **`just`**           | Modern Command Runner                              | Replacement for complex Makefiles; orchestrates service lifecycles, test scoping, and dev tasks.                                                                                                                      |
+| **`snob_lib`**       | Python AST Dependency Tracer                       | Scans Python codebase AST to find all tests transitively importing a given file.                                                                                                                                      |
+| **`jest`**           | Frontend Test Runner                               | Executes TypeScript / React / Kea unit and component tests with `--findRelatedTests`.                                                                                                                                 |
+| **`pytest`**         | Python Backend Test Runner                         | Executes Django and product backend tests with database fixtures.                                                                                                                                                     |
+| **`uv`**             | **Python Runtime & Tool Authority**                | Fast hermetic Python runtime (CPython 3.13.13), virtualenv management, dependency resolution, and script execution.                                                                                                   |
+| **`pnpm`**           | Fast Node Package Manager                          | Strict dependency management and workspace filtering (`pnpm --filter=@posthog/frontend ...`).                                                                                                                         |
+| **`ruff`**           | Python Linter & Formatter                          | Sub-100ms Python formatting and linting (`ruff check . --fix`).                                                                                                                                                       |
+| **`evaluate_pr.py`** | Multi-level PR Scoping Tool                        | Fetches remote PR diffs, determines affected components/tests, runs them, and compares with CI.                                                                                                                       |
 
 ---
 
@@ -26,7 +26,7 @@ This document details the tools, frameworks, and utilities used to run, build, s
 
 We use `enve` as the single unifying foundation for everything:
 
-- **Hermetic Toolchains**: Compilers and runtimes (Python, Node, Rust, Go) and developer tools (`just`, `watchexec`, `ripgrep`, `jq`) are managed and pinned via `enve.cue` and `enve.lock`.
+- **Hermetic Toolchains**: Compilers and runtimes (Node, Rust, Go), Python package & runtime manager (`uv`), and developer tools (`just`, `watchexec`, `ripgrep`, `jq`) are managed and pinned via `enve.cue` and `enve.lock`.
 - **Zero-Daemon Microservices**: All datastores and services run in-process on localhost against tmpfs/RAM without Docker.
 
 - Configuration: `enve.cue` (pinned by `enve.lock`)

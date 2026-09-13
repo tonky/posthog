@@ -22,7 +22,6 @@ devEnv: schema.#DevEnvironment & {
 		pkgs.tansu,
 
 		// Runtimes & Compilers
-		"python",
 		"uv",
 		"nodejs",
 		"rustc",

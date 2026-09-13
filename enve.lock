@@ -430,31 +430,6 @@
       ]
     },
     {
-      "hash_name": "kzyci1v1alqk343ibnz1g7a2aa51f8j7-python3-3.11.16",
-      "nar_hash": "sha256:1dv52khwn1izsycmh7488mnix9f3mpih4j0i869jmwrn9ldj8kf8",
-      "nar_size": 114205544,
-      "references": [
-        "2yfrcmkvspsrjhj283gdawqp37aghxva-clang-wrapper-21.1.8",
-        "3zabp5isaw3n6b95k2v5mr1iza1nw7ms-libffi-40",
-        "4bzmkpw54rl9v1hkp19f4bm7a50gn2ym-expat-2.8.4",
-        "54gk8c07c9gadvs98cmwnvkj0xn3nbzw-xz-5.8.3",
-        "91jd0wghljpdgy7j85zd8v7jd90g40y7-mpdecimal-4.0.1",
-        "c8dd0nngf5k1cd5x8d8085g2fjkrc6ng-ncurses-6.6",
-        "fd67lc7y7q9pvb8i4aghy8slyr45dz1g-bzip2-1.0.8",
-        "j95qzsr48jmqam640sbj5c4qxha1197j-tzdata-2026c",
-        "kzyci1v1alqk343ibnz1g7a2aa51f8j7-python3-3.11.16",
-        "lb6nd0iyy9x0bm7yfx2fkw0wbjllg4ic-bash-5.3p15",
-        "mc2fh87sg8s44nhdwxmbrgj618x6yspa-sqlite-3.53.3",
-        "pi73sr4l9abvin33jbbnsai23ja669f1-gdbm-1.26-lib",
-        "q6q3vjc8zxqsc4nm90qwzjswzfmpr6z6-libxcrypt-4.5.2",
-        "rq88pmfxfl98jhzfhb46jvl0rl8nyd6g-apple-sdk-14.4",
-        "s0y18hp1bzr1vwrasdcrmvkj6py2izpi-zlib-1.3.2",
-        "vl5kl468f2xblxz9dfbfwflhls9iibx8-mailcap-2.1.54",
-        "vq3xscndbj5ys388jnq2iylk8ybrflqg-readline-8.3p3",
-        "w2nw8isfr6vaqw8yyg5kznpx1npd35ps-openssl-3.6.4"
-      ]
-    },
-    {
       "hash_name": "lb6nd0iyy9x0bm7yfx2fkw0wbjllg4ic-bash-5.3p15",
       "nar_hash": "sha256:0pfh9r91pd02s043bxh637pz2g3xb9ci7ki7zar8cqcdjsasr2bx",
       "nar_size": 2978184,
@@ -1302,31 +1277,6 @@
           ]
         },
         {
-          "hash_name": "kzyci1v1alqk343ibnz1g7a2aa51f8j7-python3-3.11.16",
-          "nar_hash": "sha256:1dv52khwn1izsycmh7488mnix9f3mpih4j0i869jmwrn9ldj8kf8",
-          "nar_size": 114205544,
-          "references": [
-            "2yfrcmkvspsrjhj283gdawqp37aghxva-clang-wrapper-21.1.8",
-            "3zabp5isaw3n6b95k2v5mr1iza1nw7ms-libffi-40",
-            "4bzmkpw54rl9v1hkp19f4bm7a50gn2ym-expat-2.8.4",
-            "54gk8c07c9gadvs98cmwnvkj0xn3nbzw-xz-5.8.3",
-            "91jd0wghljpdgy7j85zd8v7jd90g40y7-mpdecimal-4.0.1",
-            "c8dd0nngf5k1cd5x8d8085g2fjkrc6ng-ncurses-6.6",
-            "fd67lc7y7q9pvb8i4aghy8slyr45dz1g-bzip2-1.0.8",
-            "j95qzsr48jmqam640sbj5c4qxha1197j-tzdata-2026c",
-            "kzyci1v1alqk343ibnz1g7a2aa51f8j7-python3-3.11.16",
-            "lb6nd0iyy9x0bm7yfx2fkw0wbjllg4ic-bash-5.3p15",
-            "mc2fh87sg8s44nhdwxmbrgj618x6yspa-sqlite-3.53.3",
-            "pi73sr4l9abvin33jbbnsai23ja669f1-gdbm-1.26-lib",
-            "q6q3vjc8zxqsc4nm90qwzjswzfmpr6z6-libxcrypt-4.5.2",
-            "rq88pmfxfl98jhzfhb46jvl0rl8nyd6g-apple-sdk-14.4",
-            "s0y18hp1bzr1vwrasdcrmvkj6py2izpi-zlib-1.3.2",
-            "vl5kl468f2xblxz9dfbfwflhls9iibx8-mailcap-2.1.54",
-            "vq3xscndbj5ys388jnq2iylk8ybrflqg-readline-8.3p3",
-            "w2nw8isfr6vaqw8yyg5kznpx1npd35ps-openssl-3.6.4"
-          ]
-        },
-        {
           "hash_name": "lb6nd0iyy9x0bm7yfx2fkw0wbjllg4ic-bash-5.3p15",
           "nar_hash": "sha256:0pfh9r91pd02s043bxh637pz2g3xb9ci7ki7zar8cqcdjsasr2bx",
           "nar_size": 2978184,
@@ -1741,7 +1691,7 @@
         "TEMPORAL_PORT": "7233",
         "TEMPORAL_URL": "http://127.0.0.1:7233"
       },
-      "shellHook": "\n\t\techo \"🦔 Welcome to PostHog Monorepo (Zero-Daemon enve environment)\"\n\t\techo \"Run 'enve up' to start background microservices in <1.2s\"\n\t\techo \"Run 'enve up postgres redis' for minimal web API hacking\"\n\t\t",
+      "shellHook": "\n\t\techo \"\ud83e\udd94 Welcome to PostHog Monorepo (Zero-Daemon enve environment)\"\n\t\techo \"Run 'enve up' to start background microservices in <1.2s\"\n\t\techo \"Run 'enve up postgres redis' for minimal web API hacking\"\n\t\t",
       "tools": {
         "cctools-binutils-darwin": {
           "bin": "bin",
@@ -1766,11 +1716,6 @@
           "bin": "bin",
           "closure": "9p6vh3k81xpyqmrj6qp8yh1q1nw30hib-postgresql-18.6",
           "version": "18.6"
-        },
-        "python3": {
-          "bin": "bin/python3",
-          "closure": "kzyci1v1alqk343ibnz1g7a2aa51f8j7-python3-3.11.16",
-          "version": "3.11.16"
         },
         "redis": {
           "bin": "bin",
@@ -1800,7 +1745,7 @@
       }
     }
   },
-  "shellHook": "\n\t\techo \"🦔 Welcome to PostHog Monorepo (Zero-Daemon enve environment)\"\n\t\techo \"Run 'enve up' to start background microservices in <1.2s\"\n\t\techo \"Run 'enve up postgres redis' for minimal web API hacking\"\n\t\t",
+  "shellHook": "\n\t\techo \"\ud83e\udd94 Welcome to PostHog Monorepo (Zero-Daemon enve environment)\"\n\t\techo \"Run 'enve up' to start background microservices in <1.2s\"\n\t\techo \"Run 'enve up postgres redis' for minimal web API hacking\"\n\t\t",
   "target": "enve.cue",
   "tools": {
     "cctools-binutils-darwin": {
@@ -1826,11 +1771,6 @@
       "bin": "bin",
       "closure": "9p6vh3k81xpyqmrj6qp8yh1q1nw30hib-postgresql-18.6",
       "version": "18.6"
-    },
-    "python3": {
-      "bin": "bin/python3",
-      "closure": "kzyci1v1alqk343ibnz1g7a2aa51f8j7-python3-3.11.16",
-      "version": "3.11.16"
     },
     "redis": {
       "bin": "bin",
