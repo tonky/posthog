@@ -60,9 +60,10 @@ This document captures architectural discoveries, testing subtleties, scoping me
   - Upstream CUE/Nixpkgs package hub previously pinned a generic `python3-3.11.16` fallback closure in `enve.lock`.
   - **Decision**: Dropped the generic `"python"` tool declaration from `enve.cue` and its closures from `enve.lock`.
   - **Single Source of Truth**: `enve` delivers `uv` deterministically, and `uv` manages the hermetic CPython 3.13.13 runtime, virtualenv (`.venv`), and all Python dependencies (`uv run python`, `uv run pytest`). This removes version ambiguity and guarantees exact Python 3.13.13 execution everywhere.
-- **Rootless Microservices vs. Heavy Docker Compose**:
-  - Running Docker Compose locally consumes 4,000–8,000 MB RSS, takes 60–90 seconds to boot, and suffers severe volume translation overhead on macOS.
-  - `enve.cue` runs real native binaries directly against tmpfs / RAM disks on localhost (<450 MB RSS total), providing sub-second restarts, instant test database wiping, and clean hermetic isolation.
+- **Microservices Topology & Engine Comparison (Docker Desktop vs. OrbStack vs. enve)**:
+  - **Docker Desktop**: Consumes 4,000–8,000 MB RSS, takes 60–90 seconds to boot, and suffers severe virtualization/virtiofs filesystem translation overhead on macOS.
+  - **OrbStack**: A lightweight alternative to Docker Desktop with near-native CPU/memory footprint (~100–200 MB base VM RSS), sub-second container startup, and optimized Rosetta/virtiofs translation.
+  - **Native `enve.cue`**: Runs real native Mach-O/Linux binaries directly on localhost (<450 MB RSS total for all 5 services), avoiding container virtualization entirely, enabling sub-second restarts, instant test database wiping, and clean hermetic isolation.
 
 ### The Django Test Hostname Trap (`posthog/settings/data_stores.py`)
 
@@ -127,3 +128,9 @@ This document captures architectural discoveries, testing subtleties, scoping me
 - **Coverage Confidence**:
   - Printing **provenance** (`source_file -> impacted_tests`) is critical for developer trust. Seeing that an added helper in a product module was only imported by one test explains why the local runner executed 1 test instead of 350.
   - Comparing local execution time against the GitHub Status Rollup (`statusCheckRollup`) immediately quantifies exact developer time saved per run.
+
+### Frontend Test Service Independence
+
+- **Zero Microservices Required**: PostHog frontend unit tests run inside Jest simulating a DOM in memory (`jsdom`).
+- All network calls, endpoints, and data stores (Postgres, ClickHouse, Redis, Kafka, Temporal, SeaweedFS) are intercepted and mocked at the client runtime via **MSW (Mock Service Worker)** and Kea test mocks.
+- Running background microservices (`enve up`) during frontend-only PR evaluation is unnecessary and wastes ~200–450 MB RAM. `evaluate_pr.py` scopes service monitoring exclusively to PRs containing backend/Python changes.

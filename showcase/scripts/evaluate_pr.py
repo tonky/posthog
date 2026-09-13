@@ -470,8 +470,11 @@ def main() -> int:
     except Exception as e:
         print(f"Notice: {e}")
 
-    services_sampler = ServicesResourceSampler(interval=0.15)
-    services_sampler.start()
+    # Microservices are only required when evaluating backend/Python tests.
+    # Frontend tests run in jsdom with MSW network interception and require zero background services.
+    services_sampler = ServicesResourceSampler(interval=0.15) if backend_files else None
+    if services_sampler:
+        services_sampler.start()
 
     try:
         local_backend_results: dict[str, Any] = {}
@@ -643,8 +646,10 @@ def main() -> int:
                     )
 
     finally:
-        services_sampler.stop()
-        services_stats = services_sampler.stats()
+        services_stats = {}
+        if services_sampler:
+            services_sampler.stop()
+            services_stats = services_sampler.stats()
         # Restore git tree if we applied temporary diff
         if diff_applied and not args.no_restore:
             run_command(["git", "apply", "-R", str(tmp_diff)])
@@ -730,6 +735,10 @@ def main() -> int:
             print(
                 f"  Total Enabled Services  | {tot.get('mem_peak', 0):>9.1f}MB | {tot.get('mem_avg', 0):>9.1f}MB | {tot.get('cpu_peak', 0):>8.1f}% |         N/A"
             )
+        elif not backend_files and (frontend_files or frontend_test_files):
+            print("  - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -")
+            print("  Required Services       |       0.0MB |       0.0MB |      0.0% |         N/A")
+            print("  ↳ Note: Frontend Jest runs in-memory (jsdom + MSW mocks); 0 backend services needed.")
 
     print("=" * 72)
     print("Human Verification Note: Local scoping targeted the exact blast radius of the PR")
