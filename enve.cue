@@ -101,6 +101,8 @@ devEnv: schema.#DevEnvironment & {
 					"psql -h 127.0.0.1 -p 15432 -U posthog -d postgres -c 'CREATE DATABASE posthog;' || true",
 					"psql -h 127.0.0.1 -p 15432 -U posthog -d postgres -c 'CREATE DATABASE test_posthog;' || true",
 					"psql -h 127.0.0.1 -p 15432 -U posthog -d postgres -c 'CREATE DATABASE test_posthog_persons;' || true",
+					"sh -c 'if [ -f showcase/snapshots/test_posthog.sql.gz ]; then count=$(psql -h 127.0.0.1 -p 15432 -U posthog -d test_posthog -tAc \"SELECT count(*) FROM django_migrations\" 2>/dev/null || echo 0); if [ \"$count\" -lt 2000 ]; then gunzip -c showcase/snapshots/test_posthog.sql.gz | psql -h 127.0.0.1 -p 15432 -U posthog -q -d test_posthog || true; fi; fi'",
+					"sh -c 'if [ -f showcase/snapshots/test_posthog_persons.sql.gz ]; then count=$(psql -h 127.0.0.1 -p 15432 -U posthog -d test_posthog_persons -tAc \"SELECT count(*) FROM information_schema.tables WHERE table_schema=\\\"public\\\"\" 2>/dev/null || echo 0); if [ \"$count\" -lt 5 ]; then gunzip -c showcase/snapshots/test_posthog_persons.sql.gz | psql -h 127.0.0.1 -p 15432 -U posthog -q -d test_posthog_persons || true; fi; fi'",
 				]
 			}
 

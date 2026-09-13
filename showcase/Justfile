@@ -219,6 +219,24 @@ services-status:
     source "{{SHOWCASE_DIR}}/scripts/common_env.sh"
     "{{SHOWCASE_DIR}}/scripts/manage_services.sh" status
 
+# Dump and compress a fresh schema snapshot of test_posthog & test_posthog_persons
+snapshot-db:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd "{{REPO_ROOT}}"
+    echo "📸 Generating compressed schema snapshot of test databases..."
+    mkdir -p showcase/snapshots showcase/data
+    enve run -- pg_dump -h 127.0.0.1 -p 15432 -U posthog -s -O -x test_posthog > /tmp/test_posthog.sql
+    enve run -- pg_dump -h 127.0.0.1 -p 15432 -U posthog -t django_migrations --data-only test_posthog >> /tmp/test_posthog.sql
+    gzip -9 -c /tmp/test_posthog.sql > showcase/snapshots/test_posthog.sql.gz
+    cp showcase/snapshots/test_posthog.sql.gz showcase/data/schema-latest.sql.gz
+    enve run -- pg_dump -h 127.0.0.1 -p 15432 -U posthog -s -O -x test_posthog_persons > /tmp/test_posthog_persons.sql
+    gzip -9 -c /tmp/test_posthog_persons.sql > showcase/snapshots/test_posthog_persons.sql.gz
+    rm -f /tmp/test_posthog.sql /tmp/test_posthog_persons.sql
+    echo "✓ Created showcase/snapshots/test_posthog.sql.gz ($(du -h showcase/snapshots/test_posthog.sql.gz | cut -f1))"
+    echo "✓ Created showcase/snapshots/test_posthog_persons.sql.gz ($(du -h showcase/snapshots/test_posthog_persons.sql.gz | cut -f1))"
+
+
 # ------------------------------------------------------------------------------
 # EXECUTIVE SUITE: RUN ALL 3 RUNNABLES
 # ------------------------------------------------------------------------------

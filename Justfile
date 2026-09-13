@@ -65,3 +65,7 @@ services-down:
 # Inspect running microservices status & RSS memory
 services-status:
     @just --justfile {{SHOWCASE_JUSTFILE}} services-status
+
+# Dump and compress a fresh schema snapshot of test_posthog & test_posthog_persons
+snapshot-db:
+    @just --justfile {{SHOWCASE_JUSTFILE}} snapshot-db

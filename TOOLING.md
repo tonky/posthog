@@ -98,5 +98,9 @@ We use `enve` as the single unifying foundation for everything:
    - Leverage `uv` for ultra-fast virtualenv creation and package installation within the hermetic workspace.
 3. **Zero Docker Overhead for Unit & Integration Tests**:
    - Run `enve` microservices on RAM disks/tmpfs whenever testing backend or frontend changes.
-4. **Always Inspect Scoped Attribution**:
+4. **Instant Database Hydration via Schema Snapshots (`just snapshot-db`)**:
+   - Rather than waiting 3+ minutes for Django to apply 2,690+ migrations on fresh databases, `showcase/snapshots/test_posthog.sql.gz` hydrates the full schema + migration state in **1.18 seconds**.
+   - `enve.cue` automatically hydrates empty databases on first startup.
+   - Run `just snapshot-db` to refresh the committed snapshot whenever upstream squashes or lands major schema changes.
+5. **Always Inspect Scoped Attribution**:
    - If `snob_lib` or `jest` identifies an unexpectedly large number of tests, check for imports of root barrel files (`urls.ts`, `settings.py`).
