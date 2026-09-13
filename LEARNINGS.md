@@ -60,10 +60,26 @@ This document captures architectural discoveries, testing subtleties, scoping me
   - Upstream CUE/Nixpkgs package hub previously pinned a generic `python3-3.11.16` fallback closure in `enve.lock`.
   - **Decision**: Dropped the generic `"python"` tool declaration from `enve.cue` and its closures from `enve.lock`.
   - **Single Source of Truth**: `enve` delivers `uv` deterministically, and `uv` manages the hermetic CPython 3.13.13 runtime, virtualenv (`.venv`), and all Python dependencies (`uv run python`, `uv run pytest`). This removes version ambiguity and guarantees exact Python 3.13.13 execution everywhere.
-- **Microservices Topology & Engine Comparison (Docker Desktop vs. OrbStack vs. enve)**:
-  - **Docker Desktop**: Consumes 4,000–8,000 MB RSS, takes 60–90 seconds to boot, and suffers severe virtualization/virtiofs filesystem translation overhead on macOS.
-  - **OrbStack**: A lightweight alternative to Docker Desktop with near-native CPU/memory footprint (~100–200 MB base VM RSS), sub-second container startup, and optimized Rosetta/virtiofs translation.
-  - **Native `enve.cue`**: Runs real native Mach-O/Linux binaries directly on localhost (<450 MB RSS total for all 5 services), avoiding container virtualization entirely, enabling sub-second restarts, instant test database wiping, and clean hermetic isolation.
+- **Microservices Topology Benchmark: Native `enve.cue` vs. OrbStack Containers**:
+  - We ran a head-to-head empirical benchmark on macOS (Apple Silicon) measuring cold start, memory footprint, test execution (`posthog/api/test/test_team.py`), and teardown:
+
+    | Benchmark Metric                  | Native `enve.cue` (Mach-O)    | OrbStack Docker Compose            | Analysis & Difference                                                               |
+    | :-------------------------------- | :---------------------------- | :--------------------------------- | :---------------------------------------------------------------------------------- |
+    | **Cold Start to Ready**           | **2.68s**                     | **1.85s** (Compose launch)         | OrbStack launches pre-pulled containers fast, but `enve` requires zero daemon boot. |
+    | **Microservices Idle RSS**        | **172.3 MB** (all 4 services) | **1,498 MB** (container processes) | `enve` uses **8.7× less memory**; no Linux guest kernel or Docker daemon overhead.  |
+    | **Host OS Footprint**             | **172.3 MB**                  | **3,588 MB** (OrbStack Helper VM)  | OrbStack Helper allocates ~3.6 GB host RAM for the VM hypervisor.                   |
+    | **Test Execution (`--reuse-db`)** | **22.91s** (pytest: 13.71s)   | **22.47s** (pytest: 14.23s)        | Identical test execution throughput once schema exists.                             |
+    | **Fresh Database Penalty**        | None (pre-seeded)             | **+3m 12s** (2,690 migrations)     | Fresh container databases must apply all historical migrations unless snapshotted.  |
+    | **Teardown Speed**                | **0.78s** (`enve down`)       | **2.14s** (`compose down`)         | `enve` terminates native processes instantly.                                       |
+
+### The Schema Snapshot / Fresh Container Trap
+
+- **Does PostHog have a committed SQL schema snapshot?**
+  - **No committed `.sql` snapshot exists in git** for PostgreSQL or ClickHouse.
+  - In CI and cloud dev sandboxes (`docs/internal/cloud-task-sandbox.md`), PostHog avoids running all 2,690+ migrations from scratch by using **pre-baked AMI / VM disk snapshots** (`test_posthog` already migrated on disk).
+  - When starting a **fresh** Docker container (OrbStack or Docker Desktop), pytest detects an empty database and applies every single migration from Django's inception (`ai_observability`, `visual_review`, `warehouse_sources`, etc.), which takes **>3 minutes** of 100% CPU.
+  - **With `enve`**: Persistent local directory `.enve/data/postgres/` preserves the pre-migrated schema locally across runs with `--reuse-db`, completely bypassing the 3-minute migration penalty without needing VM images.
+  - **Missing Test DBs in Containers**: Postgres container initialization scripts (`docker/postgres-init-scripts/`) only create production/dev databases (`posthog`, `posthog_persons`), but omit `test_posthog_persons` required by personhog sqlx test fixtures. It must be created manually (`CREATE DATABASE test_posthog_persons;`).
 
 ### The Django Test Hostname Trap (`posthog/settings/data_stores.py`)
 
