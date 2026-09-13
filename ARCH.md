@@ -39,8 +39,9 @@ posthog/
 ├── services/                  # Auxiliary Microservices
 │   ├── llm-gateway/           # Python LLM proxy & attribution (transitioning to ai-gateway)
 │   └── mcp/                   # Model Context Protocol servers & catalog
+├── enve.cue                   # Rootless hermetic environment, runtimes, tools & microservice spec
+├── enve.lock                  # Deterministic toolchain & package lockfile
 ├── showcase/                  # Developer Experience (DevEx) & Benchmarking
-│   ├── enve.cue               # Rootless microservice orchestration spec
 │   ├── scripts/               # PR evaluation, test scoping, CI parity comparison
 │   └── Justfile               # Showcase-specific developer automation tasks
 └── Justfile                   # Root developer workflow & test orchestration
@@ -111,3 +112,14 @@ graph TD
 
 - Identity resolution and person mutations do not query raw tables directly.
 - The `personhog` client provides point lookups by distinct ID/UUID, while aggregate properties and search run through ClickHouse queries.
+
+---
+
+## 4. Unified Hermetic Foundation (`enve`)
+
+Rather than fragmenting the development experience across disparate system packages, Docker daemons, or machine-dependent paths, PostHog utilizes **`enve`** (`enve.cue` & `enve.lock`) as its single source of truth for:
+
+1. **Hermetic Toolchains & Compilers**: Python, Node.js, Go, Rust (`rustc`, `cargo`, `clippy`), and developer CLIs (`just`, `watchexec`, `ripgrep`, `jq`).
+2. **Deterministic Binary Resolution**: Eliminates "works on my machine" issues by pinning exact package hashes in `enve.lock`.
+3. **In-Process Microservice Topology**: Replaces heavy, memory-intensive Docker Compose setups with native, rootless services running against localhost on fast tmpfs/RAM storage.
+4. **Environment Unification**: Bridges local development environments with headless CI workflows under one uniform declarative specification.

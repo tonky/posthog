@@ -50,10 +50,14 @@ This document captures architectural discoveries, testing subtleties, scoping me
 
 ## 3. Microservice Environment Traps & Quirks
 
-### Rootless `enve` vs. Heavy Docker Compose
+### Universal Hermeticity: `enve` for All Binaries, Dependencies, & Services
 
-- Running Docker Compose locally consumes significant memory and CPU overhead (multiple heavy containers, volume translation latency on macOS).
-- `enve.cue` runs real native binaries directly against tmpfs / RAM disks on localhost, providing sub-second restarts and clean state isolation.
+- **Hermetic Runtimes & Dependencies**:
+  - Rather than relying on disparate host package managers, non-deterministic nvm/pyenv/rustup versions, or global paths, `enve` provides a fully sealed hermetic developer environment.
+  - All compilers (Python, Node.js, Go, Rust), developer tools (`just`, `watchexec`, `ripgrep`, `jq`), and database packages are declared in `enve.cue` and pinned by cryptographic hashes in `enve.lock`.
+- **Rootless Microservices vs. Heavy Docker Compose**:
+  - Running Docker Compose locally consumes 4,000–8,000 MB RSS, takes 60–90 seconds to boot, and suffers severe volume translation overhead on macOS.
+  - `enve.cue` runs real native binaries directly against tmpfs / RAM disks on localhost (<450 MB RSS total), providing sub-second restarts, instant test database wiping, and clean hermetic isolation.
 
 ### The Django Test Hostname Trap (`posthog/settings/data_stores.py`)
 
