@@ -15,6 +15,8 @@ import sys
 import json
 import time
 import argparse
+import resource
+import threading
 import subprocess
 import urllib.request
 from pathlib import Path
@@ -22,6 +24,180 @@ from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 SHOWCASE_DIR = REPO_ROOT / "showcase"
+
+
+class ProcessResourceSampler:
+    """Samples CPU and memory (RSS) metrics across a process tree during execution."""
+
+    def __init__(self, root_pid: int, interval: float = 0.05) -> None:
+        self.root_pid = root_pid
+        self.interval = interval
+        self.stop_event = threading.Event()
+        self.samples: list[tuple[float, float]] = []
+        self.thread = threading.Thread(target=self._run, daemon=True)
+
+    def start(self) -> None:
+        self.thread.start()
+
+    def stop(self) -> None:
+        self.stop_event.set()
+        self.thread.join(timeout=1.0)
+
+    def _get_descendant_pids(self, pid: int) -> list[int]:
+        pids = [pid]
+        try:
+            res = subprocess.run(["pgrep", "-P", str(pid)], capture_output=True, text=True)
+            if res.returncode == 0:
+                for line in res.stdout.splitlines():
+                    line = line.strip()
+                    if line.isdigit():
+                        pids.extend(self._get_descendant_pids(int(line)))
+        except Exception:
+            pass
+        return pids
+
+    def _run(self) -> None:
+        while not self.stop_event.is_set():
+            try:
+                pids = self._get_descendant_pids(self.root_pid)
+                if pids:
+                    pid_str = ",".join(str(p) for p in pids)
+                    res = subprocess.run(["ps", "-o", "%cpu,rss", "-p", pid_str], capture_output=True, text=True)
+                    cpu_total = 0.0
+                    rss_total = 0.0
+                    lines = res.stdout.strip().splitlines()
+                    for line in lines[1:]:
+                        parts = line.split()
+                        if len(parts) >= 2:
+                            try:
+                                cpu_total += float(parts[0])
+                                rss_total += float(parts[1]) / 1024.0  # KB to MB
+                            except ValueError:
+                                pass
+                    if rss_total > 0:
+                        self.samples.append((cpu_total, rss_total))
+            except Exception:
+                pass
+            time.sleep(self.interval)
+
+    def stats(self, fallback_rss_mb: float = 0.0, fallback_cpu_sec: float = 0.0) -> dict[str, float]:
+        if not self.samples:
+            return {
+                "mem_peak": fallback_rss_mb,
+                "mem_avg": fallback_rss_mb,
+                "cpu_peak": 0.0,
+                "cpu_avg": 0.0,
+                "cpu_total_sec": fallback_cpu_sec,
+            }
+        cpus, mems = zip(*self.samples)
+        peak_mem = max(max(mems), fallback_rss_mb)
+        avg_mem = sum(mems) / len(mems)
+        return {
+            "mem_peak": peak_mem,
+            "mem_avg": avg_mem,
+            "cpu_peak": max(cpus),
+            "cpu_avg": sum(cpus) / len(cpus),
+            "cpu_total_sec": fallback_cpu_sec,
+        }
+
+
+class ServicesResourceSampler:
+    """Samples CPU and memory metrics for running enve microservices during test runs."""
+
+    def __init__(self, interval: float = 0.2) -> None:
+        self.interval = interval
+        self.stop_event = threading.Event()
+        self.service_samples: dict[str, list[tuple[float, float]]] = {}
+        self.services_info: dict[str, int] = {}
+        self.thread = threading.Thread(target=self._run, daemon=True)
+        self._load_services()
+
+    def _load_services(self) -> None:
+        services_json = REPO_ROOT / ".enve" / "run" / "services.json"
+        if services_json.exists():
+            try:
+                data = json.loads(services_json.read_text())
+                for s in data.get("services", []):
+                    name = s.get("name")
+                    pid = s.get("pid")
+                    if name and pid:
+                        self.services_info[name] = pid
+                        self.service_samples[name] = []
+            except Exception:
+                pass
+
+    def start(self) -> None:
+        if self.services_info:
+            self.thread.start()
+
+    def stop(self) -> None:
+        self.stop_event.set()
+        if self.services_info:
+            self.thread.join(timeout=1.0)
+
+    def _run(self) -> None:
+        while not self.stop_event.is_set():
+            for name, pid in self.services_info.items():
+                try:
+                    res = subprocess.run(["ps", "-o", "%cpu,rss", "-p", str(pid)], capture_output=True, text=True)
+                    lines = res.stdout.strip().splitlines()
+                    if len(lines) > 1:
+                        parts = lines[1].split()
+                        if len(parts) >= 2:
+                            cpu = float(parts[0])
+                            rss = float(parts[1]) / 1024.0  # MB
+                            self.service_samples[name].append((cpu, rss))
+                except Exception:
+                    pass
+            time.sleep(self.interval)
+
+    def stats(self) -> dict[str, dict[str, float]]:
+        res: dict[str, dict[str, float]] = {}
+        total_peak_mem = 0.0
+        total_avg_mem = 0.0
+        total_peak_cpu = 0.0
+        total_avg_cpu = 0.0
+
+        for name, samples in self.service_samples.items():
+            if samples:
+                cpus, mems = zip(*samples)
+                peak_mem = max(mems)
+                avg_mem = sum(mems) / len(mems)
+                peak_cpu = max(cpus)
+                avg_cpu = sum(cpus) / len(cpus)
+                res[name] = {
+                    "mem_peak": peak_mem,
+                    "mem_avg": avg_mem,
+                    "cpu_peak": peak_cpu,
+                    "cpu_avg": avg_cpu,
+                }
+                total_peak_mem += peak_mem
+                total_avg_mem += avg_mem
+                total_peak_cpu += peak_cpu
+                total_avg_cpu += avg_cpu
+            else:
+                # One-shot sample if thread hasn't gathered samples
+                pid = self.services_info.get(name)
+                if pid:
+                    ps = subprocess.run(["ps", "-o", "%cpu,rss", "-p", str(pid)], capture_output=True, text=True)
+                    lines = ps.stdout.strip().splitlines()
+                    if len(lines) > 1:
+                        parts = lines[1].split()
+                        c = float(parts[0])
+                        m = float(parts[1]) / 1024.0
+                        res[name] = {"mem_peak": m, "mem_avg": m, "cpu_peak": c, "cpu_avg": c}
+                        total_peak_mem += m
+                        total_avg_mem += m
+                        total_peak_cpu += c
+                        total_avg_cpu += c
+
+        res["_total"] = {
+            "mem_peak": total_peak_mem,
+            "mem_avg": total_avg_mem,
+            "cpu_peak": total_peak_cpu,
+            "cpu_avg": total_avg_cpu,
+        }
+        return res
 
 
 def extract_pr_number(pr_input: str) -> int:
@@ -104,8 +280,13 @@ def parse_diff_files(diff_text: str) -> list[str]:
     return sorted(files)
 
 
-def run_command(cmd: list[str], cwd: Path = REPO_ROOT, env: dict[str, str] | None = None) -> tuple[int, str, float]:
-    """Run command with execution timing."""
+def run_command(
+    cmd: list[str],
+    cwd: Path = REPO_ROOT,
+    env: dict[str, str] | None = None,
+    track_resources: bool = False,
+) -> tuple[int, str, float, dict[str, float]]:
+    """Run command with execution timing and optional resource tracking (CPU/memory peak & avg)."""
     full_env = os.environ.copy()
     if env:
         full_env.update(env)
@@ -116,16 +297,41 @@ def run_command(cmd: list[str], cwd: Path = REPO_ROOT, env: dict[str, str] | Non
         full_env["PATH"] = f"{pnpm_nix}:{full_env.get('PATH', '')}"
 
     start = time.perf_counter()
-    proc = subprocess.run(
+    if not track_resources:
+        proc = subprocess.run(
+            cmd,
+            cwd=cwd,
+            env=full_env,
+            capture_output=True,
+            text=True,
+        )
+        duration = time.perf_counter() - start
+        output = proc.stdout + ("\n" + proc.stderr if proc.stderr else "")
+        return proc.returncode, output, duration, {}
+
+    # Track CPU & Memory with background sampler
+    ru_before = resource.getrusage(resource.RUSAGE_CHILDREN)
+    proc = subprocess.Popen(
         cmd,
         cwd=cwd,
         env=full_env,
-        capture_output=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         text=True,
     )
+    sampler = ProcessResourceSampler(proc.pid, interval=0.05)
+    sampler.start()
+    stdout, stderr = proc.communicate()
+    sampler.stop()
     duration = time.perf_counter() - start
-    output = proc.stdout + ("\n" + proc.stderr if proc.stderr else "")
-    return proc.returncode, output, duration
+
+    ru_after = resource.getrusage(resource.RUSAGE_CHILDREN)
+    fallback_cpu = (ru_after.ru_utime - ru_before.ru_utime) + (ru_after.ru_stime - ru_before.ru_stime)
+    fallback_rss = ru_after.ru_maxrss / (1024.0 * 1024.0)
+
+    stats = sampler.stats(fallback_rss_mb=fallback_rss, fallback_cpu_sec=fallback_cpu)
+    output = stdout + ("\n" + stderr if stderr else "")
+    return proc.returncode, output, duration, stats
 
 
 def get_backend_file_impact(backend_files: list[str]) -> tuple[dict[str, list[str]], list[str]]:
@@ -148,7 +354,7 @@ def get_backend_file_impact(backend_files: list[str]) -> tuple[dict[str, list[st
                 "-c",
                 f"import snob_lib, json; print(json.dumps([t.replace('{REPO_ROOT}/', '') for t in snob_lib.get_tests(['{f}'])]))",
             ]
-            ret, out, _ = run_command(cmd)
+            ret, out, _, _ = run_command(cmd)
             tests = []
             if ret == 0 and out.strip():
                 try:
@@ -183,7 +389,7 @@ def get_frontend_file_impact(fe_source_files: list[str]) -> tuple[dict[str, list
             "--findRelatedTests",
             arg,
         ]
-        ret, out, _ = run_command(cmd, cwd=REPO_ROOT / "frontend")
+        ret, out, _, _ = run_command(cmd, cwd=REPO_ROOT / "frontend")
         tests = []
         if ret == 0 and out.strip():
             for line in out.strip().splitlines():
@@ -249,20 +455,23 @@ def main() -> int:
     diff_applied = False
     try:
         # Check if diff can be applied cleanly
-        ret, _, _ = run_command(["git", "apply", "--check", str(tmp_diff)])
+        ret, _, _, _ = run_command(["git", "apply", "--check", str(tmp_diff)])
         if ret == 0:
             print("\n▶ Applying PR diff to local working tree for impact analysis...")
             run_command(["git", "apply", str(tmp_diff)])
             diff_applied = True
         else:
             # Check if diff is already present in working copy
-            ret_rev, _, _ = run_command(["git", "apply", "--check", "-R", str(tmp_diff)])
+            ret_rev, _, _, _ = run_command(["git", "apply", "--check", "-R", str(tmp_diff)])
             if ret_rev == 0:
                 print("\n▶ PR diff is already present in working tree (tested as-is).")
             else:
                 print("\n⚠️ Diff does not apply cleanly onto current branch; testing impacted files directly.")
     except Exception as e:
         print(f"Notice: {e}")
+
+    services_sampler = ServicesResourceSampler(interval=0.15)
+    services_sampler.start()
 
     try:
         local_backend_results: dict[str, Any] = {}
@@ -330,9 +539,10 @@ def main() -> int:
                     "OBJECT_STORAGE_ACCESS_KEY_ID": "posthog",
                     "OBJECT_STORAGE_SECRET_ACCESS_KEY": "posthog",
                 }
-                py_code, py_out, py_duration = run_command(
+                py_code, py_out, py_duration, py_stats = run_command(
                     ["uv", "run", "pytest", *selected_tests, "-q"],
                     env=test_env,
+                    track_resources=True,
                 )
                 passed_match = re.search(r"(\d+) passed", py_out)
                 failed_match = re.search(r"(\d+) failed", py_out)
@@ -347,10 +557,15 @@ def main() -> int:
                     "passed": num_passed,
                     "failed": num_failed + num_errors,
                     "success": is_success,
+                    "stats": py_stats,
                 }
                 print(
                     f"  Result: {'PASSED' if is_success else 'FAILED'} in {py_duration:.2f}s ({num_passed} passed, {num_failed + num_errors} failed)"
                 )
+                if py_stats:
+                    print(
+                        f"  Resources: Mem peak={py_stats.get('mem_peak', 0):.1f}MB, avg={py_stats.get('mem_avg', 0):.1f}MB | CPU peak={py_stats.get('cpu_peak', 0):.1f}%, total={py_stats.get('cpu_total_sec', 0):.2f}s"
+                    )
 
         # ----------------------------------------------------------------------
         # 2. Frontend TypeScript Impact Analysis & Execution
@@ -396,7 +611,7 @@ def main() -> int:
 
             if not args.dry_run:
                 print("\n🚀 Executing scoped frontend Jest tests...")
-                fe_code, fe_out, fe_duration = run_command(
+                fe_code, fe_out, fe_duration, fe_stats = run_command(
                     [
                         "pnpm",
                         "exec",
@@ -407,6 +622,7 @@ def main() -> int:
                         *all_fe_inputs,
                     ],
                     cwd=REPO_ROOT / "frontend",
+                    track_resources=True,
                 )
                 suites_match = re.search(r"Test Suites:\s+([^\n]+)", fe_out)
                 tests_match = re.search(r"Tests:\s+([^\n]+)", fe_out)
@@ -416,12 +632,19 @@ def main() -> int:
                     "suites": suites_match.group(1) if suites_match else "N/A",
                     "tests": tests_match.group(1) if tests_match else "N/A",
                     "success": fe_code == 0,
+                    "stats": fe_stats,
                 }
                 print(f"  Result: {'PASSED' if fe_code == 0 else 'FAILED'} in {fe_duration:.2f}s")
                 if suites_match:
                     print(f"  Suites: {suites_match.group(1)}")
+                if fe_stats:
+                    print(
+                        f"  Resources: Mem peak={fe_stats.get('mem_peak', 0):.1f}MB, avg={fe_stats.get('mem_avg', 0):.1f}MB | CPU peak={fe_stats.get('cpu_peak', 0):.1f}%, total={fe_stats.get('cpu_total_sec', 0):.2f}s"
+                    )
 
     finally:
+        services_sampler.stop()
+        services_stats = services_sampler.stats()
         # Restore git tree if we applied temporary diff
         if diff_applied and not args.no_restore:
             run_command(["git", "apply", "-R", str(tmp_diff)])
@@ -471,6 +694,42 @@ def main() -> int:
 
     if not backend_files and not frontend_files and not frontend_test_files:
         print("  Other     | Scoped directly  | Skipped in CI     | ✅ Verified")
+
+    # --------------------------------------------------------------------------
+    # 4. Resource Usage Statistics (Test Runners & enve Microservices)
+    # --------------------------------------------------------------------------
+    if not args.dry_run:
+        print("\n" + "=" * 72)
+        print("  ⚡ Resource Footprint: Test Runners & Enabled enve Microservices")
+        print("=" * 72)
+        print("  Component / Service     | Memory Peak | Memory Avg  | CPU Peak  | CPU Total")
+        print("  ------------------------+-------------+-------------+-----------+-----------")
+
+        if local_backend_results.get("stats"):
+            bs = local_backend_results["stats"]
+            print(
+                f"  Backend Runner (pytest) | {bs.get('mem_peak', 0):>9.1f}MB | {bs.get('mem_avg', 0):>9.1f}MB | {bs.get('cpu_peak', 0):>8.1f}% | {bs.get('cpu_total_sec', 0):>8.2f}s"
+            )
+
+        if local_frontend_results.get("stats"):
+            fs = local_frontend_results["stats"]
+            print(
+                f"  Frontend Runner (Jest)  | {fs.get('mem_peak', 0):>9.1f}MB | {fs.get('mem_avg', 0):>9.1f}MB | {fs.get('cpu_peak', 0):>8.1f}% | {fs.get('cpu_total_sec', 0):>8.2f}s"
+            )
+
+        if services_stats:
+            print("  - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -")
+            for sname, sstat in sorted(services_stats.items()):
+                if sname == "_total":
+                    continue
+                print(
+                    f"  Service: {sname:<15} | {sstat.get('mem_peak', 0):>9.1f}MB | {sstat.get('mem_avg', 0):>9.1f}MB | {sstat.get('cpu_peak', 0):>8.1f}% |         N/A"
+                )
+            tot = services_stats.get("_total", {})
+            print("  ------------------------+-------------+-------------+-----------+-----------")
+            print(
+                f"  Total Enabled Services  | {tot.get('mem_peak', 0):>9.1f}MB | {tot.get('mem_avg', 0):>9.1f}MB | {tot.get('cpu_peak', 0):>8.1f}% |         N/A"
+            )
 
     print("=" * 72)
     print("Human Verification Note: Local scoping targeted the exact blast radius of the PR")
