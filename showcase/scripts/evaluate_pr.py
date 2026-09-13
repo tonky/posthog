@@ -423,6 +423,34 @@ def get_backend_file_impact(backend_files: list[str], diff_text: str = "") -> tu
     return impact_map, sorted(all_selected)
 
 
+DB_MARKER_PATTERNS = [
+    r"@pytest\.mark\.django_db",
+    r"from posthog\.test\.base import",
+    r"from posthog\.test import",
+    r"\bAPIBaseTest\b",
+    r"\bBaseTest\b",
+    r"\bClickhouseTestMixin\b",
+    r"\bTransactionTestCase\b",
+    r"django\.test",
+    r"django\.db",
+    r"sync_execute",
+    r"kafka",
+    r"redis",
+]
+_COMPILED_DB_MARKERS = re.compile("|".join(DB_MARKER_PATTERNS))
+
+
+def tests_require_services(test_paths: list[str]) -> bool:
+    """Check if any of the selected test files require running databases/microservices."""
+    for tp in test_paths:
+        p = REPO_ROOT / tp
+        if p.exists():
+            content = p.read_text(errors="ignore")
+            if _COMPILED_DB_MARKERS.search(content):
+                return True
+    return False
+
+
 # High-fanout barrel files that artificially trigger the entire monorepo in Jest
 HIGH_FANOUT_BARRELS = {
     "frontend/src/types.ts",
@@ -672,11 +700,8 @@ def main() -> int:
     except Exception as e:
         print(f"Notice: {e}")
 
-    # Microservices are only required when evaluating backend/Python tests.
-    # Frontend tests run in jsdom with MSW network interception and require zero background services.
-    services_sampler = ServicesResourceSampler(interval=0.15) if backend_files else None
-    if services_sampler:
-        services_sampler.start()
+    services_sampler = None
+    needs_services = False
 
     try:
         local_backend_results: dict[str, Any] = {}
@@ -722,28 +747,36 @@ def main() -> int:
                 print(f"  ✓ {t}")
 
             if selected_tests and not args.dry_run:
-                print("\n🚀 Executing scoped backend tests against rootless enve microservices...")
-                test_env = {
-                    "PGHOST": "127.0.0.1",
-                    "PGPORT": "15432",
-                    "PGUSER": "posthog",
-                    "PGPASSWORD": "posthog",
-                    "DATABASE_URL": "postgres://posthog:posthog@127.0.0.1:15432/posthog",
-                    "CLICKHOUSE_HOST": "127.0.0.1",
-                    "CLICKHOUSE_LOGS_HOST": "127.0.0.1",
-                    "CLICKHOUSE_HTTP_PORT": "8123",
-                    "CLICKHOUSE_HTTP_URL": "http://127.0.0.1:8123",
-                    "REDIS_URL": "redis://127.0.0.1:16379/",
-                    "FLAGS_REDIS_URL": "redis://127.0.0.1:16379/1",
-                    "KAFKA_HOSTS": "127.0.0.1:19092",
-                    "KAFKA_URL": "127.0.0.1:19092",
-                    "TEMPORAL_HOST": "127.0.0.1",
-                    "TEMPORAL_PORT": "7233",
-                    "TEMPORAL_ADDRESS": "127.0.0.1:7233",
-                    "OBJECT_STORAGE_ENDPOINT": "http://127.0.0.1:19000",
-                    "OBJECT_STORAGE_ACCESS_KEY_ID": "posthog",
-                    "OBJECT_STORAGE_SECRET_ACCESS_KEY": "posthog",
-                }
+                needs_services = tests_require_services(selected_tests)
+                if needs_services:
+                    services_sampler = ServicesResourceSampler(interval=0.15)
+                    services_sampler.start()
+                    print("\n🚀 Executing scoped backend tests against rootless enve microservices (DB required)...")
+                    test_env = {
+                        "PGHOST": "127.0.0.1",
+                        "PGPORT": "15432",
+                        "PGUSER": "posthog",
+                        "PGPASSWORD": "posthog",
+                        "DATABASE_URL": "postgres://posthog:posthog@127.0.0.1:15432/posthog",
+                        "CLICKHOUSE_HOST": "127.0.0.1",
+                        "CLICKHOUSE_LOGS_HOST": "127.0.0.1",
+                        "CLICKHOUSE_HTTP_PORT": "8123",
+                        "CLICKHOUSE_HTTP_URL": "http://127.0.0.1:8123",
+                        "REDIS_URL": "redis://127.0.0.1:16379/",
+                        "FLAGS_REDIS_URL": "redis://127.0.0.1:16379/1",
+                        "KAFKA_HOSTS": "127.0.0.1:19092",
+                        "KAFKA_URL": "127.0.0.1:19092",
+                        "TEMPORAL_HOST": "127.0.0.1",
+                        "TEMPORAL_PORT": "7233",
+                        "TEMPORAL_ADDRESS": "127.0.0.1:7233",
+                        "OBJECT_STORAGE_ENDPOINT": "http://127.0.0.1:19000",
+                        "OBJECT_STORAGE_ACCESS_KEY_ID": "posthog",
+                        "OBJECT_STORAGE_SECRET_ACCESS_KEY": "posthog",
+                    }
+                else:
+                    print("\n🚀 Executing scoped backend unit tests in-memory (0 microservices required)...")
+                    test_env = None
+
                 py_code, py_out, py_duration, py_stats = run_command(
                     ["uv", "run", "pytest", *selected_tests, "-q"],
                     env=test_env,
@@ -956,6 +989,10 @@ def main() -> int:
             print(
                 f"  Total Enabled Services  | {tot.get('mem_peak', 0):>9.1f}MB | {tot.get('mem_avg', 0):>9.1f}MB | {tot.get('cpu_peak', 0):>8.1f}% |         N/A"
             )
+        elif backend_files and not needs_services:
+            print("  - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -")
+            print("  Required Services       |       0.0MB |       0.0MB |      0.0% |         N/A")
+            print("  ↳ Note: Scoped backend tests are pure unit/invariant tests; 0 DB services needed.")
         elif not backend_files and (frontend_files or frontend_test_files):
             print("  - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -")
             print("  Required Services       |       0.0MB |       0.0MB |      0.0% |         N/A")
