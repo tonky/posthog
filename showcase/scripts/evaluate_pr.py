@@ -374,33 +374,185 @@ def get_backend_file_impact(backend_files: list[str]) -> tuple[dict[str, list[st
     return impact_map, sorted(all_selected)
 
 
-def get_frontend_file_impact(fe_source_files: list[str]) -> tuple[dict[str, list[str]], list[str]]:
-    """Determine impacted frontend tests per source file using Jest reverse dependency graph."""
+# High-fanout barrel files that artificially trigger the entire monorepo in Jest
+HIGH_FANOUT_BARRELS = {
+    "frontend/src/types.ts",
+}
+
+# Root-level types that truly affect the entire product if modified
+UNIVERSAL_ROOT_TYPES = {
+    "TeamType",
+    "UserBasicType",
+    "OrganizationType",
+    "FilterType",
+    "AnyPropertyFilter",
+}
+
+
+def resolve_type_barrel_diff(file_path: str, diff_text: str) -> tuple[set[str], set[str], list[str]]:
+    """Extract modified symbols from a high-fanout barrel file diff and find consumers via ripgrep.
+
+    Returns (consumer_source_files, direct_matching_tests, impacted_symbols).
+    """
+    lines = diff_text.splitlines()
+    in_file = False
+    hunk_re = re.compile(r"@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
+    modified_ranges = []
+    for line in lines:
+        if line.startswith(f"diff --git a/{file_path}"):
+            in_file = True
+        elif line.startswith("diff --git") and in_file:
+            break
+        if in_file and line.startswith("@@"):
+            m = hunk_re.search(line)
+            if m:
+                start = int(m.group(3))
+                count = int(m.group(4)) if m.group(4) else 1
+                modified_ranges.append((start, start + count))
+
+    if not modified_ranges:
+        return set(), set(), []
+
+    full_path = REPO_ROOT / file_path
+    if not full_path.exists():
+        return set(), set(), []
+
+    full_text = full_path.read_text(errors="ignore")
+    pattern = re.compile(r"^(?:export\s+)?(type|interface|enum|const)\s+([A-Za-z0-9_]+)", re.MULTILINE)
+    declarations = []
+    for m in pattern.finditer(full_text):
+        line_no = full_text.count("\n", 0, m.start()) + 1
+        declarations.append((line_no, m.group(1), m.group(2)))
+
+    impacted_symbols = set()
+    for r_start, r_end in modified_ranges:
+        for i in range(len(declarations)):
+            decl_line, kind, name = declarations[i]
+            next_line = declarations[i + 1][0] if i + 1 < len(declarations) else float("inf")
+            if max(r_start, decl_line) < min(r_end, next_line):
+                impacted_symbols.add(name)
+
+    if not impacted_symbols:
+        return set(), set(), []
+
+    # If any modified symbol is truly universal, trigger full reachability
+    if any(s in UNIVERSAL_ROOT_TYPES for s in impacted_symbols):
+        return set(), set(), sorted(impacted_symbols)
+
+    # Use ripgrep to find consumer test files and consumer source files
+    regex_pattern = r"\b(" + "|".join(re.escape(s) for s in sorted(impacted_symbols)) + r")\b"
+    cmd_tests = [
+        "rg",
+        "-l",
+        "--glob",
+        "*.test.ts*",
+        "--glob",
+        "*.test.tsx*",
+        "-e",
+        regex_pattern,
+        "frontend/src",
+        "products",
+    ]
+    res_tests = subprocess.run(cmd_tests, cwd=REPO_ROOT, capture_output=True, text=True)
+    tests = {line.strip() for line in res_tests.stdout.splitlines() if line.strip()}
+
+    cmd_src = [
+        "rg",
+        "-l",
+        "--glob",
+        "*.ts",
+        "--glob",
+        "*.tsx",
+        "--glob",
+        "!*.test.*",
+        "--glob",
+        "!*types.ts",
+        "-e",
+        regex_pattern,
+        "frontend/src",
+        "products",
+    ]
+    res_src = subprocess.run(cmd_src, cwd=REPO_ROOT, capture_output=True, text=True)
+    sources = {line.strip() for line in res_src.stdout.splitlines() if line.strip()}
+
+    return sources, tests, sorted(impacted_symbols)
+
+
+def get_feature_domain_roots(file_path: str) -> list[str]:
+    """Compute local domain roots for a file to prevent Jest from traversing global barrel/scene hubs."""
+    roots = set()
+    parts = file_path.split("/")
+    if file_path.startswith("frontend/src/scenes/"):
+        # e.g. frontend/src/scenes/data-warehouse/...
+        roots.add("src/scenes/" + parts[3])
+    elif file_path.startswith("products/"):
+        # e.g. products/data_modeling/...
+        roots.add("../products/" + parts[1])
+    elif file_path.startswith("frontend/src/lib/"):
+        roots.add("src/lib")
+    elif file_path.startswith("frontend/src/"):
+        roots.add("src/" + parts[2])
+    return sorted(roots)
+
+
+def get_frontend_file_impact(fe_source_files: list[str], diff_text: str = "") -> tuple[dict[str, list[str]], list[str]]:
+    """Determine impacted frontend tests per source file using Jest reverse dependency graph with AST barrel pruning and fanout defense."""
     impact_map: dict[str, list[str]] = {}
     all_selected: set[str] = set()
 
-    for f in fe_source_files:
-        arg = f.removeprefix("frontend/") if f.startswith("frontend/") else f"../{f}"
+    barrel_files = [f for f in fe_source_files if f in HIGH_FANOUT_BARRELS]
+    regular_files = [f for f in fe_source_files if f not in HIGH_FANOUT_BARRELS]
+
+    # 1. AST symbol scoping for high-fanout barrels (e.g. types.ts)
+    for f in barrel_files:
+        if diff_text:
+            barrel_sources, barrel_tests, symbols = resolve_type_barrel_diff(f, diff_text)
+            if symbols:
+                tests = sorted(barrel_tests)
+                impact_map[f] = tests
+                all_selected.update(tests)
+                continue
+        # Fallback if no diff_text
+        impact_map[f] = []
+
+    # 2. Batched Jest reverse-dependency resolution for regular source files
+    if regular_files:
+        domain_roots = set()
+        for f in regular_files:
+            domain_roots.update(get_feature_domain_roots(f))
+
+        args = [f.removeprefix("frontend/") if f.startswith("frontend/") else f"../{f}" for f in regular_files]
+        root_args = []
+        for r in sorted(domain_roots):
+            root_args.extend(["--roots", r])
+
         cmd = [
             "pnpm",
             "exec",
             "jest",
             "--listTests",
             "--findRelatedTests",
-            arg,
+            *args,
+            *root_args,
         ]
         ret, out, _, _ = run_command(cmd, cwd=REPO_ROOT / "frontend")
-        tests = []
+        regular_tests = []
         if ret == 0 and out.strip():
             for line in out.strip().splitlines():
                 line = line.strip()
                 if line.startswith(str(REPO_ROOT)):
                     rel = str(Path(line).relative_to(REPO_ROOT))
-                    tests.append(rel)
+                    regular_tests.append(rel)
                 elif line:
-                    tests.append(line)
-        impact_map[f] = sorted(tests)
-        all_selected.update(tests)
+                    regular_tests.append(line)
+
+        all_selected.update(regular_tests)
+        # Map back to files for display
+        for f in regular_files:
+            # Associate tests that match the file's directory/basename
+            f_stem = Path(f).stem
+            matched = [t for t in regular_tests if f_stem in t or Path(f).parent.name in t]
+            impact_map[f] = sorted(matched) if matched else regular_tests[:3]
 
     return impact_map, sorted(all_selected)
 
@@ -569,6 +721,10 @@ def main() -> int:
                     print(
                         f"  Resources: Mem peak={py_stats.get('mem_peak', 0):.1f}MB, avg={py_stats.get('mem_avg', 0):.1f}MB | CPU peak={py_stats.get('cpu_peak', 0):.1f}%, total={py_stats.get('cpu_total_sec', 0):.2f}s"
                     )
+                if not is_success and py_out:
+                    print("\n--- [Backend Pytest Failures] ---")
+                    for line in py_out.splitlines()[-25:]:
+                        print(f"  {line}")
 
         # ----------------------------------------------------------------------
         # 2. Frontend TypeScript Impact Analysis & Execution
@@ -589,9 +745,9 @@ def main() -> int:
                 for f in frontend_test_files:
                     print(f"  - {f}")
 
-            fe_impact_map, fe_selected_tests = get_frontend_file_impact(frontend_files)
+            fe_impact_map, fe_selected_tests = get_frontend_file_impact(frontend_files, diff_text)
 
-            print("\n• Impact Dependency Graph (Reverse import reachability via Jest):")
+            print("\n• Impact Dependency Graph (Reverse import reachability via Jest + AST barrel scoping):")
             for src, targets in fe_impact_map.items():
                 if targets:
                     target_str = ", ".join(targets[:3])
@@ -601,36 +757,51 @@ def main() -> int:
                 else:
                     print(f"  - {src}\n    ↳ Impacted Tests: None directly linked")
 
-            all_fe_inputs = []
-            for f in frontend_files + frontend_test_files:
-                if f.startswith("frontend/"):
-                    all_fe_inputs.append(f.removeprefix("frontend/"))
-                else:
-                    all_fe_inputs.append(f"../{f}")
+            # If we resolved concrete test files (via AST symbol scoping and/or findRelatedTests),
+            # pass those concrete test paths directly to Jest.
+            # Otherwise fall back to --findRelatedTests with the input source files.
+            execution_targets = []
+            use_find_related = False
+            if fe_selected_tests:
+                for t in fe_selected_tests:
+                    if t.startswith("frontend/"):
+                        execution_targets.append(t.removeprefix("frontend/"))
+                    else:
+                        execution_targets.append(f"../{t}")
+            else:
+                use_find_related = True
+                for f in frontend_files + frontend_test_files:
+                    if f.startswith("frontend/"):
+                        execution_targets.append(f.removeprefix("frontend/"))
+                    else:
+                        execution_targets.append(f"../{f}")
 
-            print(f"\n• Total Scoped Frontend Test Suites to Execute : {len(fe_selected_tests) or len(all_fe_inputs)}")
-            for t in (fe_selected_tests or all_fe_inputs)[:5]:
+            print(f"\n• Total Scoped Frontend Test Suites to Execute : {len(execution_targets)}")
+            for t in execution_targets[:5]:
                 print(f"  ✓ {t}")
 
             if not args.dry_run:
                 print("\n🚀 Executing scoped frontend Jest tests...")
+                jest_cmd = [
+                    "pnpm",
+                    "exec",
+                    "jest",
+                    "--passWithNoTests",
+                    "--forceExit",
+                ]
+                if use_find_related:
+                    jest_cmd.append("--findRelatedTests")
+                jest_cmd.extend(execution_targets)
+
                 fe_code, fe_out, fe_duration, fe_stats = run_command(
-                    [
-                        "pnpm",
-                        "exec",
-                        "jest",
-                        "--passWithNoTests",
-                        "--forceExit",
-                        "--findRelatedTests",
-                        *all_fe_inputs,
-                    ],
+                    jest_cmd,
                     cwd=REPO_ROOT / "frontend",
                     track_resources=True,
                 )
                 suites_match = re.search(r"Test Suites:\s+([^\n]+)", fe_out)
                 tests_match = re.search(r"Tests:\s+([^\n]+)", fe_out)
                 local_frontend_results = {
-                    "count": len(all_fe_inputs),
+                    "count": len(execution_targets),
                     "duration": fe_duration,
                     "suites": suites_match.group(1) if suites_match else "N/A",
                     "tests": tests_match.group(1) if tests_match else "N/A",
@@ -690,7 +861,7 @@ def main() -> int:
         if args.dry_run:
             f_status = "🔎 Scoped (dry-run)"
             f_time = "Dry run"
-            f_count = f"{len(all_fe_inputs)} test files"
+            f_count = f"{len(execution_targets)} test files"
         else:
             f_time = f"{f_res.get('duration', 0):.1f}s" if f_res else "Skipped"
             f_count = f_res.get("tests", "Scoped")

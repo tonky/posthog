@@ -45,7 +45,9 @@ def build_function_call(postgres_table_name: str, context: Optional[HogQLContext
     table = add_param(postgres_table_name)
 
     if settings.DEBUG or settings.TEST:
-        address = add_param("db:5432")  # docker container for postgres from clickhouse
+        db_host = settings.DATABASES["default"].get("HOST") or "db"
+        db_port = str(settings.DATABASES["default"].get("PORT") or "5432")
+        address = add_param(f"{db_host}:{db_port}")  # postgres connection from clickhouse
 
         # Extract model name from postgres table name (e.g., "posthog_group" -> "group")
         model_name = postgres_table_name.replace("posthog_", "")
