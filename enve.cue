@@ -474,13 +474,157 @@ devEnv: schema.#DevEnvironment & {
 
 			restartPolicy: schema.#RestartPolicy.OnFailure
 		}
+
+		// 16. Rust Hypercache Server (Surveys & Remote Config Proxy on Port 3002)
+		"hypercache-server": schema.#Service & {
+			command: "bin/start-rust-service hypercache-server"
+			port:    3002
+			dependsOn: ["redis"]
+			timeoutMs: 30000
+
+			environment: {
+				REDIS_URL: "redis://127.0.0.1:16379"
+				ADDRESS:   "127.0.0.1:3002"
+			}
+
+			restartPolicy: schema.#RestartPolicy.OnFailure
+		}
+
+		// 17. Rust Capture for Replay (/s/ recordings on Port 3306)
+		"capture-replay": schema.#Service & {
+			command: "bin/start-rust-service capture-replay"
+			port:    3306
+			dependsOn: ["kafka", "redis", "postgres"]
+			timeoutMs: 60000
+
+			environment: {
+				ADDRESS:      "127.0.0.1:3306"
+				KAFKA_HOSTS:  "127.0.0.1:19092"
+				REDIS_URL:    "redis://127.0.0.1:16379"
+				DATABASE_URL: "postgres://posthog:posthog@127.0.0.1:15432/posthog"
+				CAPTURE_MODE: "recordings"
+			}
+
+			restartPolicy: schema.#RestartPolicy.OnFailure
+		}
+
+		// 18. Rust Capture for AI Analytics (/i/v0/ai on Port 3309)
+		"capture-ai": schema.#Service & {
+			command: "bin/start-rust-service capture-ai"
+			port:    3309
+			dependsOn: ["kafka", "redis", "postgres"]
+			timeoutMs: 60000
+
+			environment: {
+				ADDRESS:      "127.0.0.1:3309"
+				KAFKA_HOSTS:  "127.0.0.1:19092"
+				REDIS_URL:    "redis://127.0.0.1:16379"
+				DATABASE_URL: "postgres://posthog:posthog@127.0.0.1:15432/posthog"
+				CAPTURE_MODE: "ai"
+			}
+
+			restartPolicy: schema.#RestartPolicy.OnFailure
+		}
+
+		// 19. Rust Cymbal - Error Tracking Symbolication Engine (Port 3302)
+		cymbal: schema.#Service & {
+			command: "bin/start-rust-service cymbal"
+			port:    3302
+			dependsOn: ["postgres", "redis", "seaweedfs"]
+			timeoutMs: 60000
+
+			environment: {
+				BIND_PORT:                      "3302"
+				CYMBAL_MODE:                    "processing"
+				OBJECT_STORAGE_BUCKET:          "posthog"
+				PERSONS_URL:                    "postgres://posthog:posthog@127.0.0.1:15432/test_posthog_persons"
+				CYMBAL_REMOTE_RESOLUTION_HOST:  "127.0.0.1"
+				CYMBAL_REMOTE_RESOLUTION_PORT:  "50061"
+			}
+
+			restartPolicy: schema.#RestartPolicy.OnFailure
+		}
+
+		// 20. Rust Cymbal Resolution - gRPC Sourcemap & Debug Symbol Resolver (Port 50061)
+		"cymbal-resolution": schema.#Service & {
+			command: "bin/start-rust-service cymbal-resolution"
+			port:    50061
+			dependsOn: ["postgres", "seaweedfs"]
+			timeoutMs: 60000
+
+			environment: {
+				CYMBAL_MODE:            "resolution"
+				GRPC_ADDRESS:           "127.0.0.1:50061"
+				OBJECT_STORAGE_BUCKET:  "posthog"
+			}
+
+			restartPolicy: schema.#RestartPolicy.OnFailure
+		}
+
+		// 21. PersonHog Read Replica (Port 50051)
+		"personhog-replica": schema.#Service & {
+			command: "bin/start-rust-service personhog-replica"
+			port:    50051
+			dependsOn: ["postgres"]
+			timeoutMs: 60000
+
+			environment: {
+				GRPC_ADDRESS:         "127.0.0.1:50051"
+				PRIMARY_DATABASE_URL: "postgres://posthog:posthog@127.0.0.1:15432/test_posthog_persons"
+				METRICS_PORT:         "9100"
+			}
+
+			restartPolicy: schema.#RestartPolicy.OnFailure
+		}
+
+		// 22. PersonHog Router (Port 50052)
+		"personhog-router": schema.#Service & {
+			command: "bin/start-rust-service personhog-router"
+			port:    50052
+			dependsOn: ["personhog-replica"]
+			timeoutMs: 60000
+
+			environment: {
+				GRPC_ADDRESS: "127.0.0.1:50052"
+				REPLICA_URL:  "http://127.0.0.1:50051"
+				METRICS_PORT: "9101"
+			}
+
+			restartPolicy: schema.#RestartPolicy.OnFailure
+		}
+
+		// 23. Node.js Error Tracking Ingestion (Port 6742)
+		"ingestion-errortracking": schema.#Service & {
+			command: "PLUGIN_SERVER_MODE=ingestion-errortracking HTTP_SERVER_PORT=6742 ./bin/posthog-node"
+			port:    6742
+			dependsOn: ["kafka", "postgres", "redis"]
+			timeoutMs: 60000
+
+			environment: {
+				DATABASE_URL: "postgres://posthog:posthog@127.0.0.1:15432/posthog"
+				REDIS_URL:    "redis://127.0.0.1:16379"
+				KAFKA_HOSTS:  "127.0.0.1:19092"
+			}
+
+			restartPolicy: schema.#RestartPolicy.OnFailure
+		}
+
+		// 24. Stripe Mock Billing API Server (Port 8443)
+		"stripe-mock": schema.#Service & {
+			command: "bin/start-stripe-mock"
+			port:    8443
+			timeoutMs: 30000
+			restartPolicy: schema.#RestartPolicy.OnFailure
+		}
 	}
 
 	shellHook: """
 		echo "🦔 Welcome to PostHog Monorepo (Zero-Daemon enve environment)"
 		echo "• Fast test impact runs: just test-affected"
 		echo "• Start core infra     : enve up postgres redis clickhouse kafka seaweedfs temporal"
-		echo "• Start app stack      : enve up backend frontend capture ingestion"
-		echo "• Start full monorepo  : enve up"
+		echo "• Start web app stack  : just web-up"
+		echo "• Start error tracking : enve up cymbal cymbal-resolution ingestion-errortracking"
+		echo "• Start person identity: enve up personhog-replica personhog-router"
+		echo "• Start full monorepo  : just stack-up"
 		"""
 }
