@@ -128,6 +128,77 @@ def run_command(cmd: list[str], cwd: Path = REPO_ROOT, env: dict[str, str] | Non
     return proc.returncode, output, duration
 
 
+def get_backend_file_impact(backend_files: list[str]) -> tuple[dict[str, list[str]], list[str]]:
+    """Determine impacted backend tests per source file using snob_lib and heuristic fallbacks."""
+    impact_map: dict[str, list[str]] = {}
+    all_selected: set[str] = set()
+
+    for f in backend_files:
+        if "/test/" in f or "/tests/" in f or Path(f).name.startswith("test_"):
+            impact_map[f] = [f]
+            all_selected.add(f)
+        else:
+            # Query snob_lib via isolated python command
+            cmd = [
+                "uv",
+                "run",
+                "--with",
+                "pytest-snob>=0.1.14",
+                "python",
+                "-c",
+                f"import snob_lib, json; print(json.dumps([t.replace('{REPO_ROOT}/', '') for t in snob_lib.get_tests(['{f}'])]))",
+            ]
+            ret, out, _ = run_command(cmd)
+            tests = []
+            if ret == 0 and out.strip():
+                try:
+                    tests = json.loads(out.strip().splitlines()[-1])
+                except Exception:
+                    tests = []
+
+            # Fallback to direct heuristic if snob returns empty
+            if not tests:
+                cand = f.replace("backend/", "backend/tests/test_").replace("/views.py", "/test_api.py")
+                if (REPO_ROOT / cand).exists():
+                    tests = [cand]
+
+            impact_map[f] = tests
+            all_selected.update(tests)
+
+    return impact_map, sorted(all_selected)
+
+
+def get_frontend_file_impact(fe_source_files: list[str]) -> tuple[dict[str, list[str]], list[str]]:
+    """Determine impacted frontend tests per source file using Jest reverse dependency graph."""
+    impact_map: dict[str, list[str]] = {}
+    all_selected: set[str] = set()
+
+    for f in fe_source_files:
+        arg = f.removeprefix("frontend/") if f.startswith("frontend/") else f"../{f}"
+        cmd = [
+            "pnpm",
+            "exec",
+            "jest",
+            "--listTests",
+            "--findRelatedTests",
+            arg,
+        ]
+        ret, out, _ = run_command(cmd, cwd=REPO_ROOT / "frontend")
+        tests = []
+        if ret == 0 and out.strip():
+            for line in out.strip().splitlines():
+                line = line.strip()
+                if line.startswith(str(REPO_ROOT)):
+                    rel = str(Path(line).relative_to(REPO_ROOT))
+                    tests.append(rel)
+                elif line:
+                    tests.append(line)
+        impact_map[f] = sorted(tests)
+        all_selected.update(tests)
+
+    return impact_map, sorted(all_selected)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Evaluate PostHog PR with multi-level scoping vs CI")
     parser.add_argument("pr", help="PR number (e.g. 98893) or full PR URL")
@@ -205,33 +276,36 @@ def main() -> int:
             print("  🐍 1. Backend Impact Analysis (Snob AST + URL Route Matching)")
             print("=" * 72)
 
-            ret, snob_out, snob_time = run_command(
-                ["uv", "run", "tools/snob_backend_test_selection_shadow.py", "--base-ref", "HEAD"]
-            )
-            selected_tests = []
-            if ret == 0 and snob_out.strip():
-                try:
-                    snob_data = json.loads(snob_out)
-                    selected_tests = snob_data.get("combined", {}).get("tests", [])
-                except Exception:
-                    pass
+            backend_source_files = [
+                f for f in backend_files if not ("/test/" in f or "/tests/" in f or Path(f).name.startswith("test_"))
+            ]
+            backend_direct_test_files = [f for f in backend_files if f not in backend_source_files]
 
-            # If snob selected nothing against uncommitted or dirty tree, scope directly to changed backend tests
-            if not selected_tests:
-                for f in backend_files:
-                    if "/test/" in f or "/tests/" in f or f.startswith("test_"):
-                        selected_tests.append(f)
-                    else:
-                        # Infer test file path
-                        test_cand = f.replace("backend/", "backend/tests/test_").replace("/views.py", "/test_api.py")
-                        if (REPO_ROOT / test_cand).exists():
-                            selected_tests.append(test_cand)
+            print("• Directly Modified Source Files:")
+            for f in backend_source_files:
+                print(f"  - {f}")
+            if not backend_source_files:
+                print("  (None - only test files modified)")
 
-            print(f"• Impacted Backend Tests Identified : {len(selected_tests)}")
-            for t in selected_tests[:10]:
-                print(f"  - {t}")
-            if len(selected_tests) > 10:
-                print(f"  ... and {len(selected_tests) - 10} more")
+            if backend_direct_test_files:
+                print("• Directly Modified Test Files:")
+                for f in backend_direct_test_files:
+                    print(f"  - {f}")
+
+            # Calculate precise file-to-test impact map
+            backend_impact_map, selected_tests = get_backend_file_impact(backend_files)
+
+            print("\n• Impact Dependency Graph (Which source files trigger which tests):")
+            for src, targets in backend_impact_map.items():
+                if targets:
+                    target_str = ", ".join(targets)
+                    print(f"  - {src}\n    ↳ Impacted Tests: {target_str}")
+                else:
+                    print(f"  - {src}\n    ↳ Impacted Tests: None (leaf/standalone module)")
+
+            print(f"\n• Total Scoped Backend Tests to Execute : {len(selected_tests)}")
+            for t in selected_tests:
+                print(f"  ✓ {t}")
 
             if selected_tests and not args.dry_run:
                 print("\n🚀 Executing scoped backend tests against rootless enve microservices...")
@@ -286,6 +360,29 @@ def main() -> int:
             print("  ⚛️  2. Frontend Impact Analysis (Jest --findRelatedTests Graph)")
             print("=" * 72)
 
+            print("• Directly Modified Source Files:")
+            for f in frontend_files:
+                print(f"  - {f}")
+            if not frontend_files:
+                print("  (None - only test files modified)")
+
+            if frontend_test_files:
+                print("• Directly Modified Test Files:")
+                for f in frontend_test_files:
+                    print(f"  - {f}")
+
+            fe_impact_map, fe_selected_tests = get_frontend_file_impact(frontend_files)
+
+            print("\n• Impact Dependency Graph (Reverse import reachability via Jest):")
+            for src, targets in fe_impact_map.items():
+                if targets:
+                    target_str = ", ".join(targets[:3])
+                    extra_cnt = len(targets) - 3 if len(targets) > 3 else 0
+                    extra_str = f" (+ {extra_cnt} more)" if extra_cnt > 0 else ""
+                    print(f"  - {src}\n    ↳ Impacted Tests: {target_str}{extra_str}")
+                else:
+                    print(f"  - {src}\n    ↳ Impacted Tests: None directly linked")
+
             all_fe_inputs = []
             for f in frontend_files + frontend_test_files:
                 if f.startswith("frontend/"):
@@ -293,9 +390,9 @@ def main() -> int:
                 else:
                     all_fe_inputs.append(f"../{f}")
 
-            print(f"• Impacted Frontend Inputs Scoped : {len(all_fe_inputs)}")
-            for f in all_fe_inputs[:5]:
-                print(f"  - {f}")
+            print(f"\n• Total Scoped Frontend Test Suites to Execute : {len(fe_selected_tests) or len(all_fe_inputs)}")
+            for t in (fe_selected_tests or all_fe_inputs)[:5]:
+                print(f"  ✓ {t}")
 
             if not args.dry_run:
                 print("\n🚀 Executing scoped frontend Jest tests...")
