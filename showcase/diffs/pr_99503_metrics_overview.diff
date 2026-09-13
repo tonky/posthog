@@ -1,0 +1,50 @@
+diff --git a/products/metrics/frontend/components/metricsOverviewLogic.test.ts b/products/metrics/frontend/components/metricsOverviewLogic.test.ts
+index 033b6b408e..b1a58e5bb4 100644
+--- a/products/metrics/frontend/components/metricsOverviewLogic.test.ts
++++ b/products/metrics/frontend/components/metricsOverviewLogic.test.ts
+@@ -72,7 +72,7 @@ describe('metricsOverviewLogic', () => {
+         ['a named service', 'api', { key: 'service_name', op: 'eq', value: 'api' }, ['api']],
+         ['the unknown service', '', { key: 'service_name', op: 'regex', value: '^$' }, ['']],
+     ])(
+-        'viewService sends a service filter for %s, scopes the picker, and opens the catalog',
++        'viewService sends a service filter for %s, scopes the picker, and opens the viewer',
+         async (_name, serviceName, expected, pickerServices) => {
+             logic = metricsOverviewLogic()
+             logic.mount()
+@@ -84,12 +84,10 @@ describe('metricsOverviewLogic', () => {
+                 metricsSceneLogic.actionTypes.setActiveTab,
+             ])
+ 
+-            // Clicking into a service lands on its catalog of metric cards, not an
+-            // empty viewer, so there is something to look at before picking a name.
+-            expect(metricsSceneLogic.values.activeTab).toBe('explore')
++            expect(metricsSceneLogic.values.activeTab).toBe('viewer')
+             expect(metricsViewerLogic.values.queryFilters).toEqual([expected])
+-            // The landing promise: the catalog the user arrives at offers only the
+-            // metrics that service reports, not every metric in the project.
++            // The viewer's metric picker offers only the metrics that this service
++            // reports, not every metric in the project.
+             expect(metricNamePickerLogic.values.services).toEqual(pickerServices)
+         }
+     )
+diff --git a/products/metrics/frontend/components/metricsOverviewLogic.tsx b/products/metrics/frontend/components/metricsOverviewLogic.tsx
+index 7d5ac20057..766fe00afb 100644
+--- a/products/metrics/frontend/components/metricsOverviewLogic.tsx
++++ b/products/metrics/frontend/components/metricsOverviewLogic.tsx
+@@ -98,13 +98,11 @@ export const metricsOverviewLogic = kea<metricsOverviewLogicType>([
+         },
+     })),
+     listeners(({ actions }) => ({
+-        // A service row click lands the user on that service's catalog of metric
+-        // cards, already narrowed to the service, so there is something to scan
+-        // before picking a name. The catalog reuses the viewer's filter + picker
+-        // scope, and a card click from there opens the viewer with the metric set.
++        // A service row click lands in the viewer with that service already
++        // selected. The viewer reuses the filter to scope its metric picker.
+         viewService: ({ serviceName }) => {
+             actions.setFilterGroup(serviceFilterGroup(serviceName))
+-            actions.setActiveTab('explore')
++            actions.setActiveTab('viewer')
+         },
+     })),
+     afterMount(({ actions, cache }) => {

@@ -161,6 +161,20 @@ demo-pr PR="98893":
     cd "{{REPO_ROOT}}"
     "{{SHOWCASE_DIR}}/scripts/demo_pr.sh" "{{PR}}"
 
+# Run only the frontend Jest tests impacted by your git diff (via Jest --findRelatedTests reverse graph)
+test-affected-frontend BASE="origin/master" EXTRA_ARGS="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd "{{REPO_ROOT}}"
+    "{{SHOWCASE_DIR}}/scripts/run_affected_frontend_tests.sh" "{{BASE}}" "{{EXTRA_ARGS}}"
+
+# Demonstrate end-to-end frontend PR test execution vs upstream CI
+demo-pr-frontend:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd "{{REPO_ROOT}}"
+    "{{SHOWCASE_DIR}}/scripts/demo_frontend_pr.sh"
+
 demo-pr-signals:
     @just --justfile {{SHOWCASE_DIR}}/Justfile demo-pr 98893
 

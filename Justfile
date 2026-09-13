@@ -20,6 +20,14 @@ list-affected BASE="origin/master":
 demo-pr PR="98893":
     @just --justfile {{SHOWCASE_JUSTFILE}} demo-pr "{{PR}}"
 
+# Run only the frontend Jest tests impacted by your git diff (via Jest --findRelatedTests reverse graph)
+test-affected-frontend BASE="origin/master" EXTRA_ARGS="":
+    @just --justfile {{SHOWCASE_JUSTFILE}} test-affected-frontend "{{BASE}}" "{{EXTRA_ARGS}}"
+
+# Demonstrate end-to-end frontend PR test execution vs upstream CI (#99503 Metrics)
+demo-pr-frontend:
+    @just --justfile {{SHOWCASE_JUSTFILE}} demo-pr-frontend
+
 # Convenience aliases for PR demonstrations
 demo-pr-signals:
     @just --justfile {{SHOWCASE_JUSTFILE}} demo-pr-signals

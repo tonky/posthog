@@ -111,10 +111,13 @@ just services-status
 # 3. List tests affected by your current branch diff (without executing)
 just list-affected origin/master
 
-# 4. Run ONLY affected tests against your git diff
+# 4. Run ONLY affected backend tests against your git diff
 just test-affected origin/master
 
-# 5. Stop services when done
+# 5. Run ONLY affected frontend Jest tests against your git diff
+just test-affected-frontend origin/master
+
+# 6. Stop services when done
 just services-down
 ```
 
@@ -123,14 +126,17 @@ just services-down
 To verify the speedup on real PR diffs:
 
 ```bash
-# Demo 1: PR #98893 (REST API Team Guard - 350 tests in ~34s)
+# Demo 1: PR #98893 (REST API Team Guard - 350 backend tests in ~34s vs 23m CI)
 just demo-pr-signals
 
-# Demo 2: PR #99634 (Temporal Activity & Schemas - 16 tests in ~20s)
+# Demo 2: PR #99634 (Temporal Activity & Schemas - 16 backend tests in ~20s vs 14m CI)
 just demo-pr-temporal
 
-# Demo 3: PR #99520 (Warehouse Source - 15 tests in ~10s)
+# Demo 3: PR #99520 (Warehouse Source - 15 backend tests in ~10s vs 13m CI)
 just demo-pr-warehouse
+
+# Demo 4: PR #99503 (Frontend Metrics - 3 Jest tests in ~10s vs 12m CI)
+just demo-pr-frontend
 ```
 
 Each demo automatically reverts the working copy, applies the saved diff, runs the tests in `enve`, and prints a comparative scorecard.
