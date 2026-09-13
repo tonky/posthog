@@ -426,6 +426,7 @@ def get_backend_file_impact(backend_files: list[str], diff_text: str = "") -> tu
 # High-fanout barrel files that artificially trigger the entire monorepo in Jest
 HIGH_FANOUT_BARRELS = {
     "frontend/src/types.ts",
+    "frontend/src/queries/schema/schema-general.ts",
 }
 
 # Root-level types that truly affect the entire product if modified
