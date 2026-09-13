@@ -102,5 +102,9 @@ We use `enve` as the single unifying foundation for everything:
    - Rather than waiting 3+ minutes for Django to apply 2,690+ migrations on fresh databases, `showcase/snapshots/test_posthog.sql.gz` hydrates the full schema + migration state in **1.18 seconds**.
    - `enve.cue` automatically hydrates empty databases on first startup.
    - Run `just snapshot-db` to refresh the committed snapshot whenever upstream squashes or lands major schema changes.
-5. **Always Inspect Scoped Attribution**:
+5. **Optimized Frontend Test Execution & 50% CPU Cap**:
+   - `frontend/jest.config.ts` pins `maxWorkers: '50%'` by default in local dev, preventing Jest from launching 9–10 workers and freezing macOS during large test runs.
+   - `pnpm --filter=@posthog/frontend test <file>` now seamlessly runs individual test files without defaulting to the entire monolithic test shard.
+   - Jest polyfills (`jest.polyfills.js`) automatically silence `@mswjs/interceptors` debug logging, avoiding stdout formatting storms during tests.
+6. **Always Inspect Scoped Attribution**:
    - If `snob_lib` or `jest` identifies an unexpectedly large number of tests, check for imports of root barrel files (`urls.ts`, `settings.py`).

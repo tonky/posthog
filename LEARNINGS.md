@@ -150,3 +150,18 @@ This document captures architectural discoveries, testing subtleties, scoping me
 - **Zero Microservices Required**: PostHog frontend unit tests run inside Jest simulating a DOM in memory (`jsdom`).
 - All network calls, endpoints, and data stores (Postgres, ClickHouse, Redis, Kafka, Temporal, SeaweedFS) are intercepted and mocked at the client runtime via **MSW (Mock Service Worker)** and Kea test mocks.
 - Running background microservices (`enve up`) during frontend-only PR evaluation is unnecessary and wastes ~200–450 MB RAM. `evaluate_pr.py` scopes service monitoring exclusively to PRs containing backend/Python changes.
+
+### Frontend Test Resource Traps & Jest Optimizations
+
+- **The Monolithic `--testPathPattern` Argument Trap**:
+  - Upstream `frontend/package.json` had `"test": "jest --testPathPattern='(frontend/|products/...)' ..."` hardcoded.
+  - When running `pnpm test path/to/myTest.test.ts`, Jest appended the argument _after_ the glob filter, causing Jest to ignore the target file and spawn 9 parallel workers running the **entire** test shard (~6–8 GB RAM and 800% CPU).
+  - **Fix**: Updated `frontend/package.json` with a shell dispatch: when arguments are passed, it runs `jest "$@"`; when called with no arguments, it runs the full CI shard.
+- **Jest Worker CPU Capping (50% CPU in local dev)**:
+  - By default on Apple Silicon (10 cores), Jest spawns `cores - 1 = 9` Node workers simultaneously, causing aggressive CPU throttling and UI lag.
+  - In `frontend/jest.config.ts`, added: `maxWorkers: process.env.JEST_MAX_WORKERS || (process.env.CI ? '100%' : '50%')`.
+  - This caps local Jest runs to 5 workers (~50% CPU), maintaining smooth system responsiveness while preserving fast test execution.
+- **The MSW Debug Interceptor Logging Storm**:
+  - When `DEBUG=1` is set in the ambient development shell (for Django or Granian), `@mswjs/interceptors` outputs verbose log lines for every mocked HTTP request/response to stdout.
+  - During test execution, this produced over **160,000 log lines** per run and burned significant CPU formatting strings.
+  - **Fix**: In `frontend/jest.polyfills.js`, silenced non-Jest `DEBUG` logging before MSW boots, keeping test output clean and eliminating string formatting overhead.

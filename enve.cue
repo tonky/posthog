@@ -48,7 +48,7 @@ devEnv: schema.#DevEnvironment & {
 	}
 
 	environment: {
-		DEBUG:                             "1"
+		DEBUG:                             "0"
 		DATABASE_URL:                      "postgres://posthog:posthog@127.0.0.1:15432/posthog"
 		PERSONS_DATABASE_URL:              "postgres://posthog:posthog@127.0.0.1:15432/posthog"
 		DAGSTER_TEST_POSTGRES_URL:         "postgresql://posthog:posthog@127.0.0.1:15432/test_dagster"

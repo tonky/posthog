@@ -237,6 +237,9 @@ const config: Config = {
         '^@mathjax/src/(.*)$': '<rootDir>/src/test/mocks/mathjaxMock.js',
     },
 
+    // Limit worker parallelism to 50% CPU in local dev so Jest doesn't saturate all cores and freeze the machine.
+    maxWorkers: process.env.JEST_MAX_WORKERS || (process.env.CI ? '100%' : '50%'),
+
     // An array of regexp pattern strings, matched against all module paths before considered 'visible' to the module loader
     // modulePathIgnorePatterns: [],
 

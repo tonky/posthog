@@ -2,6 +2,12 @@
 // not provide. Source them from undici (jsdom otherwise clobbers the Node globals)
 // and assign before the test framework boots, so this must run first in setupFiles.
 /* eslint-disable @typescript-eslint/no-require-imports */
+
+// Silence @mswjs/interceptors verbose debug logging that floods stdout and burns CPU when DEBUG=1 is set in development
+if (process.env.DEBUG && !process.env.DEBUG.includes('jest')) {
+    delete process.env.DEBUG
+}
+
 const { TextEncoder, TextDecoder } = require('node:util')
 const { ReadableStream, WritableStream, TransformStream } = require('node:stream/web')
 const { Blob, File } = require('node:buffer')
