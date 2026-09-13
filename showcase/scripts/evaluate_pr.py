@@ -334,8 +334,52 @@ def run_command(
     return proc.returncode, output, duration, stats
 
 
-def get_backend_file_impact(backend_files: list[str]) -> tuple[dict[str, list[str]], list[str]]:
-    """Determine impacted backend tests per source file using snob_lib and heuristic fallbacks."""
+PYTHON_HIGH_FANOUT_BARRELS = {
+    "posthog/schema_enums.py",
+    "products/warehouse_sources/backend/facade/types.py",
+}
+
+
+def resolve_python_barrel_diff(file_path: str, diff_text: str) -> tuple[set[str], list[str]]:
+    """Extract modified symbols from a high-fanout Python barrel file diff and find tests via ripgrep."""
+    lines = diff_text.splitlines()
+    in_file = False
+    added_identifiers = set()
+    for line in lines:
+        if line.startswith(f"diff --git a/{file_path}"):
+            in_file = True
+        elif line.startswith("diff --git") and in_file:
+            break
+        if in_file and line.startswith("+") and not line.startswith("+++"):
+            m = re.search(r"^\+\s*([A-Za-z0-9_]+)\s*=", line)
+            if m:
+                added_identifiers.add(m.group(1))
+
+    if not added_identifiers:
+        return set(), []
+
+    regex_pattern = r"\b(" + "|".join(re.escape(s) for s in sorted(added_identifiers)) + r")\b"
+    cmd_tests = [
+        "rg",
+        "-l",
+        "--glob",
+        "test_*.py",
+        "--glob",
+        "*_test.py",
+        "-e",
+        regex_pattern,
+        "posthog",
+        "products",
+        "common",
+        "ee",
+    ]
+    res_tests = subprocess.run(cmd_tests, cwd=REPO_ROOT, capture_output=True, text=True)
+    tests = {line.strip() for line in res_tests.stdout.splitlines() if line.strip()}
+    return tests, sorted(added_identifiers)
+
+
+def get_backend_file_impact(backend_files: list[str], diff_text: str = "") -> tuple[dict[str, list[str]], list[str]]:
+    """Determine impacted backend tests per source file using snob_lib, AST barrel scoping, and heuristic fallbacks."""
     impact_map: dict[str, list[str]] = {}
     all_selected: set[str] = set()
 
@@ -343,6 +387,11 @@ def get_backend_file_impact(backend_files: list[str]) -> tuple[dict[str, list[st
         if "/test/" in f or "/tests/" in f or Path(f).name.startswith("test_"):
             impact_map[f] = [f]
             all_selected.add(f)
+        elif f in PYTHON_HIGH_FANOUT_BARRELS and diff_text:
+            barrel_tests, symbols = resolve_python_barrel_diff(f, diff_text)
+            tests = sorted(barrel_tests)
+            impact_map[f] = tests
+            all_selected.update(tests)
         else:
             # Query snob_lib via isolated python command
             cmd = [
@@ -657,7 +706,7 @@ def main() -> int:
                     print(f"  - {f}")
 
             # Calculate precise file-to-test impact map
-            backend_impact_map, selected_tests = get_backend_file_impact(backend_files)
+            backend_impact_map, selected_tests = get_backend_file_impact(backend_files, diff_text)
 
             print("\n• Impact Dependency Graph (Which source files trigger which tests):")
             for src, targets in backend_impact_map.items():

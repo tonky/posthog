@@ -14,12 +14,15 @@ from __future__ import annotations
 import logging
 from collections.abc import Generator
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import xgboost as xgb
 
 import pytest
 
 import numpy as np
 import pandas as pd
-import xgboost as xgb
 
 from posthog.temporal.session_replay.surfacing_scoring_sweep import scorer as scorer_mod
 from posthog.temporal.session_replay.surfacing_scoring_sweep.features import FEATURE_RANGES
@@ -86,6 +89,8 @@ def train_synthetic_booster(
     Labels are `first_feature > 0.5` so the booster has real signal.
     For non-logistic objectives, build the DMatrix + train directly.
     """
+    import xgboost as xgb
+
     rng = np.random.default_rng(seed)
     data = rng.random((rows, len(feature_names))).astype(np.float32)
     df = pd.DataFrame(data, columns=list(feature_names))
