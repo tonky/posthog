@@ -23,8 +23,7 @@ use rdkafka::{Message, TopicPartitionList};
 use redis::{Client, Commands};
 use time::OffsetDateTime;
 use tokio::net::TcpListener;
-use tokio::time::timeout;
-use tracing::{info, warn, Level};
+use tracing::{info, Level};
 
 use capture::config::{CaptureMode, Config, EnvelopeCompression, KafkaConfig};
 use capture::server::serve;
@@ -36,7 +35,7 @@ pub static DEFAULT_CONFIG: Lazy<Config> = Lazy::new(|| Config {
     print_sink: false,
     noop_sink: false,
     address: SocketAddr::from_str("127.0.0.1:0").unwrap(),
-    redis_url: "redis://localhost:6379/".to_string(),
+    redis_url: std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://localhost:6379/".to_string()),
     redis_response_timeout_ms: 100,
     redis_connection_timeout_ms: 5000,
     global_rate_limit_enabled: false,
@@ -90,7 +89,9 @@ pub static DEFAULT_CONFIG: Lazy<Config> = Lazy::new(|| Config {
         kafka_producer_message_max_bytes: 1000000, // 1MB, rdkafka default
         kafka_topic_metadata_refresh_interval_ms: 10000,
         kafka_compression_codec: "none".to_string(),
-        kafka_hosts: "kafka:9092".to_string(),
+        kafka_hosts: std::env::var("KAFKA_HOSTS")
+            .or_else(|_| std::env::var("KAFKA_URL"))
+            .unwrap_or_else(|_| "kafka:9092".to_string()),
         kafka_topic: "events_plugin_ingestion".to_string(),
         kafka_overflow_topic: "events_plugin_ingestion_overflow".to_string(),
         kafka_historical_topic: "events_plugin_ingestion_historical".to_string(),
@@ -706,13 +707,12 @@ impl Drop for EphemeralTopic {
         // Give some time for any ongoing polls to complete
         std::thread::sleep(Duration::from_millis(100));
 
-        // Then delete the topic
-        match futures::executor::block_on(timeout(
-            Duration::from_secs(10),
-            delete_topic(self.topic_name.clone()),
-        )) {
-            Ok(_) => info!("dropped topic: {}", self.topic_name.clone()),
-            Err(err) => warn!("failed to drop topic: {}", err),
+        // Then delete the topic cleanly in the background without blocking the runtime thread
+        let topic_name = self.topic_name.clone();
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            handle.spawn(async move {
+                let _ = tokio::time::timeout(Duration::from_secs(5), delete_topic(topic_name)).await;
+            });
         }
     }
 }
@@ -723,11 +723,13 @@ async fn delete_topic(topic: String) {
         "bootstrap.servers",
         DEFAULT_CONFIG.kafka.kafka_hosts.clone(),
     );
-    let admin = AdminClient::from_config(&config).expect("failed to create admin client");
-    admin
-        .delete_topics(&[&topic], &AdminOptions::default())
-        .await
-        .expect("failed to delete topic");
+    if let Ok(admin) = AdminClient::from_config(&config) {
+        drop(
+            admin
+                .delete_topics(&[&topic], &AdminOptions::default())
+                .await,
+        );
+    }
 }
 
 pub struct PrefixedRedis {

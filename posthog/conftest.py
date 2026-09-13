@@ -1,5 +1,6 @@
 import os
 import time
+import shutil
 import warnings
 import subprocess
 from collections.abc import Callable
@@ -236,6 +237,16 @@ def run_persons_sqlx_migrations(keepdb: bool = False):
     migrations_path = os.path.abspath(migrations_path)
 
     env = {**os.environ, "DATABASE_URL": database_url}
+
+    if not shutil.which("sqlx"):
+        from django.core.management import call_command
+
+        if not keepdb:
+            from posthog.management.commands.apply_persons_migrations import _ensure_database_exists
+
+            _ensure_database_exists(database_url)
+        call_command("apply_persons_migrations", migrations_dir=migrations_path)
+        return
 
     if not keepdb:
         # Drop and recreate database to ensure clean state

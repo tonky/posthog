@@ -343,7 +343,6 @@ async fn it_overflows_events_on_specified_keys() -> Result<()> {
     let mut config = DEFAULT_CONFIG.clone();
     // this is the candidate list of tokens/event keys to reroute on sight
     config.ingestion_force_overflow_by_token_distinct_id = Some(format!("{token1},{key2}"));
-    config.kafka.kafka_hosts = "localhost:9092".to_string();
     config.kafka.kafka_producer_linger_ms = 0; // Send messages immediately
     config.kafka.kafka_message_timeout_ms = 10000; // 10s timeout
     config.kafka.kafka_producer_max_retries = 3;
@@ -523,7 +522,6 @@ async fn it_overflows_events_on_specified_keys_preserving_locality() -> Result<(
     let mut config = DEFAULT_CONFIG.clone();
     // this is the candidate list of tokens/event keys to reroute on sight
     config.ingestion_force_overflow_by_token_distinct_id = Some(format!("{token1},{key2}"));
-    config.kafka.kafka_hosts = "localhost:9092".to_string();
     config.kafka.kafka_producer_linger_ms = 0; // Send messages immediately
     config.kafka.kafka_message_timeout_ms = 10000; // 10s timeout
     config.kafka.kafka_producer_max_retries = 3;
@@ -693,7 +691,6 @@ async fn it_should_not_set_force_disable_person_processing_header_when_rate_limi
     let mut config = DEFAULT_CONFIG.clone();
     // NO forced overflow keys - only rate limiting
     config.ingestion_force_overflow_by_token_distinct_id = None;
-    config.kafka.kafka_hosts = "localhost:9092".to_string();
     config.kafka.kafka_producer_linger_ms = 0;
     config.kafka.kafka_message_timeout_ms = 10000;
     config.kafka.kafka_producer_max_retries = 3;
@@ -781,7 +778,6 @@ async fn it_reroutes_to_historical_on_event_timestamp() -> Result<()> {
     config.enable_historical_rerouting = true;
     config.historical_rerouting_threshold_days = 1_i64;
 
-    config.kafka.kafka_hosts = "localhost:9092".to_string();
     config.kafka.kafka_producer_linger_ms = 0; // Send messages immediately
     config.kafka.kafka_message_timeout_ms = 10000; // 10s timeout
     config.kafka.kafka_producer_max_retries = 3;
@@ -858,7 +854,6 @@ async fn it_overflows_events_on_burst() -> Result<()> {
     let overflow_topic = EphemeralTopic::new().await;
 
     let mut config = DEFAULT_CONFIG.clone();
-    config.kafka.kafka_hosts = "localhost:9092".to_string();
     config.kafka.kafka_producer_linger_ms = 0; // Send messages immediately
     config.kafka.kafka_message_timeout_ms = 10000; // 10s timeout
     config.kafka.kafka_producer_max_retries = 3;

@@ -29,8 +29,11 @@ use capture::v1::sinks::{Config, SinkName};
 use capture::v1::test_utils::{self, prepared, WrappedEventMut};
 
 fn v1_kafka_config(topic: &str) -> capture::v1::sinks::kafka::config::Config {
+    let hosts = std::env::var("KAFKA_HOSTS")
+        .or_else(|_| std::env::var("KAFKA_URL"))
+        .unwrap_or_else(|_| "kafka:9092".to_string());
     let env: std::collections::HashMap<String, String> = [
-        ("HOSTS", "kafka:9092"),
+        ("HOSTS", hosts.as_str()),
         ("TOPIC_MAIN", topic),
         ("TOPIC_HISTORICAL", topic),
         ("TOPIC_OVERFLOW", topic),

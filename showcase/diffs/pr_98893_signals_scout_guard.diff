@@ -1,0 +1,147 @@
+diff --git a/products/signals/backend/scout_harness/views.py b/products/signals/backend/scout_harness/views.py
+index 205fa8c2c5..fd1e870f5d 100644
+--- a/products/signals/backend/scout_harness/views.py
++++ b/products/signals/backend/scout_harness/views.py
+@@ -453,7 +453,9 @@ class ScoutCanonicalTeamAccessPermission(BasePermission):
+ 
+     def has_permission(self, request: Request, view) -> bool:
+         if not request.user.is_authenticated:
+-            return True
++            # Unreachable while `IsAuthenticated` runs ahead of this class, but deny rather than
++            # allow, so this class can never be the reason an anonymous request gets through.
++            return False
+         team = view.team
+         if team.parent_team_id is None or team.parent_team_id == team.id or team.parent_team is None:
+             return True
+@@ -1283,7 +1285,7 @@ class SignalScratchpadViewSet(TeamAndOrgViewSetMixin, viewsets.GenericViewSet):
+ 
+     serializer_class = ScratchpadEntrySerializer
+     authentication_classes = [SessionAuthentication, PersonalAPIKeyAuthentication, OAuthAccessTokenAuthentication]
+-    permission_classes = [IsAuthenticated, APIScopePermission]
++    permission_classes = [IsAuthenticated, APIScopePermission, ScoutCanonicalTeamAccessPermission]
+     scope_object = "signal_scout"
+     # `list` returns a raw newest-first array (capped at limit=1000 by the query serializer),
+     # not a paginated wrapper. See SignalScoutRunViewSet for the same rationale.
+@@ -1582,7 +1584,7 @@ class SignalProjectProfileViewSet(TeamAndOrgViewSetMixin, viewsets.GenericViewSe
+ 
+     serializer_class = ProjectProfileSerializer
+     authentication_classes = [SessionAuthentication, PersonalAPIKeyAuthentication, OAuthAccessTokenAuthentication]
+-    permission_classes = [IsAuthenticated, APIScopePermission]
++    permission_classes = [IsAuthenticated, APIScopePermission, ScoutCanonicalTeamAccessPermission]
+     scope_object = "signal_scout"
+     # `.unscoped()` — see `SignalScoutRunViewSet` for the same module-load reasoning.
+     # The `current` action filters by team_id explicitly via `get_project_profile`.
+@@ -1669,7 +1671,7 @@ class SignalScoutMetadataViewSet(TeamAndOrgViewSetMixin, viewsets.GenericViewSet
+ 
+     serializer_class = ScoutMetadataSerializer
+     authentication_classes = [SessionAuthentication, PersonalAPIKeyAuthentication, OAuthAccessTokenAuthentication]
+-    permission_classes = [IsAuthenticated, APIScopePermission]
++    permission_classes = [IsAuthenticated, APIScopePermission, ScoutCanonicalTeamAccessPermission]
+     scope_object = "signal_scout"
+     # No model backs this endpoint — metadata is computed from the flag payload. A real queryset is
+     # still required to satisfy the team/org viewset mixin; the `current` action never reads it.
+@@ -1734,7 +1736,7 @@ class SignalScoutMembersViewSet(TeamAndOrgViewSetMixin, viewsets.GenericViewSet)
+ 
+     serializer_class = ScoutMemberSerializer
+     authentication_classes = [SessionAuthentication, PersonalAPIKeyAuthentication, OAuthAccessTokenAuthentication]
+-    permission_classes = [IsAuthenticated, APIScopePermission]
++    permission_classes = [IsAuthenticated, APIScopePermission, ScoutCanonicalTeamAccessPermission]
+     scope_object = "signal_scout_internal"
+     # No team-scoped model backs this endpoint — members are resolved from project access. A queryset is
+     # still required to satisfy the team/org viewset mixin; `list` never reads it. Mirrors
+diff --git a/products/signals/backend/test/test_scout_harness_api.py b/products/signals/backend/test/test_scout_harness_api.py
+index d65ed96302..a89fde43ec 100644
+--- a/products/signals/backend/test/test_scout_harness_api.py
++++ b/products/signals/backend/test/test_scout_harness_api.py
+@@ -71,7 +71,11 @@ if TYPE_CHECKING:
+ 
+ 
+ def _authenticate_as_scout(
+-    test: APIBaseTest, *, scopes: PosthogMcpScopes = "signals_scout", sandbox_task_id: UUID | None = None
++    test: APIBaseTest,
++    *,
++    scopes: PosthogMcpScopes = "signals_scout",
++    sandbox_task_id: UUID | None = None,
++    team_id: int | None = None,
+ ) -> None:
+     """Auth the test client with a scout-internal token, mirroring how the harness sandbox
+     reaches these endpoints in production. The emit action requires `signal_scout_internal:write`
+@@ -86,6 +90,9 @@ def _authenticate_as_scout(
+ 
+     `sandbox_task_id` binds the token to a task, which is how a report-pipeline run is minted and
+     the only way the scratchpad write path can resolve its writer identity.
++
++    `team_id` confines the token to a team other than the test's own, which is how a child
++    environment's token is minted.
+     """
+     # `create_oauth_access_token_for_user` resolves the Array app by `get_instance_region()`,
+     # which isn't deterministic across test contexts — create the app for every region client
+@@ -103,7 +110,11 @@ def _authenticate_as_scout(
+             },
+         )
+     token = create_oauth_access_token_for_user(
+-        test.user, test.team.id, scopes=scopes, include_internal_scopes=True, sandbox_task_id=sandbox_task_id
++        test.user,
++        team_id if team_id is not None else test.team.id,
++        scopes=scopes,
++        include_internal_scopes=True,
++        sandbox_task_id=sandbox_task_id,
+     )
+     test.client.logout()
+     test.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+@@ -3968,6 +3979,55 @@ class TestScoutHarnessMembersAPI(APIBaseTest):
+         assert response.status_code == status.HTTP_403_FORBIDDEN
+ 
+ 
++class TestScoutCanonicalTeamGuardAPI(APIBaseTest):
++    """Every scout surface that canonicalizes to the parent team must authorize against it.
++
++    The scout models persist under the canonical (parent) team, so a request made through a child
++    environment URL reads the parent's rows. A credential confined to the child alone passes the
++    default team check (URL team == child) and would otherwise reach data it was never scoped to.
++    """
++
++    def setUp(self) -> None:
++        super().setUp()
++        self.env = Team.objects.create(organization=self.organization, parent_team=self.team, name="env")
++
++    @parameterized.expand(
++        [
++            ("scratchpad", "scratchpad/"),
++            ("project_profile", "project_profile/current/"),
++            ("metadata", "metadata/current/"),
++        ]
++    )
++    def test_child_scoped_api_key_cannot_read_parent_surface(self, _name: str, path: str) -> None:
++        from posthog.models.personal_api_key import PersonalAPIKey
++        from posthog.models.utils import generate_random_token_personal, hash_key_value
++
++        raw = generate_random_token_personal()
++        PersonalAPIKey.objects.create(
++            label="child-scoped",
++            user=self.user,
++            secure_value=hash_key_value(raw),
++            scopes=["signal_scout:read"],
++            scoped_teams=[self.env.id],
++        )
++        self.client.logout()
++
++        response = self.client.get(
++            f"/api/projects/{self.env.id}/signals/scout/{path}", HTTP_AUTHORIZATION=f"Bearer {raw}"
++        )
++
++        assert response.status_code == status.HTTP_403_FORBIDDEN, response.content
++
++    def test_child_scoped_scout_token_cannot_read_parent_members(self) -> None:
++        # The roster is member PII and only a sandbox token reaches it, so the child-scoped case
++        # needs that token rather than a PAK — an internal scope is never on a user-grantable key.
++        _authenticate_as_scout(self, team_id=self.env.id)
++
++        response = self.client.get(f"/api/projects/{self.env.id}/signals/scout/members/")
++
++        assert response.status_code == status.HTTP_403_FORBIDDEN, response.content
++
++
+ class TestScoutRunDerivedMetadata(APIBaseTest):
+     def _stamp(self, run: SignalScoutRun) -> dict:
+         stamp_derived_metadata(run_id=run.id, team_id=self.team.id)

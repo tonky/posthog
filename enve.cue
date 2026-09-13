@@ -1,0 +1,319 @@
+package devshell
+
+import (
+	schema "github.com/tonky/enve/schema/v1:schema"
+	"github.com/tonky/enve/pkgs:pkgs"
+)
+
+// PostHog Analytics Polyglot Monorepo
+// Zero-Daemon Rootless Developer Environment & Microservice Topology
+devEnv: schema.#DevEnvironment & {
+	name:        "posthog-monorepo"
+	description: "PostHog Polyglot Monorepo (Django + Rust Capture + ClickHouse + Kafka + Temporal + SeaweedFS)"
+
+	tools: [
+		pkgs.postgres,
+		"redis",
+		"clickhouse",
+		pkgs.temporal,
+		pkgs.seaweedfs,
+		pkgs.tansu,
+		"python311",
+		"uv",
+	]
+
+	hosts: {
+		"db":            "127.0.0.1"
+		"redis7":        "127.0.0.1"
+		"clickhouse":    "127.0.0.1"
+		"kafka":         "127.0.0.1"
+		"objectstorage": "127.0.0.1"
+		"temporal":      "127.0.0.1"
+	}
+
+	environment: {
+		DATABASE_URL:                      "postgres://posthog:posthog@127.0.0.1:15432/posthog"
+		DAGSTER_TEST_POSTGRES_URL:         "postgresql://posthog:posthog@127.0.0.1:15432/test_dagster"
+		PGPORT:                            "15432"
+		REDIS_URL:                         "redis://127.0.0.1:16379"
+		REDIS_PORT:                        "16379"
+		CLICKHOUSE_HOST:                   "127.0.0.1"
+		CLICKHOUSE_HTTP_PORT:              "8123"
+		CLICKHOUSE_TCP_PORT:               "9000"
+		CLICKHOUSE_POSTGRES_HOST:          "127.0.0.1"
+		CLICKHOUSE_POSTGRES_PORT:          "15432"
+		PERSON_ON_EVENTS_V2_ENABLED:       "true"
+		KAFKA_HOSTS:                       "127.0.0.1:19092"
+		KAFKA_URL:                         "127.0.0.1:19092"
+		TEMPORAL_HOST:                     "127.0.0.1"
+		TEMPORAL_PORT:                     "7233"
+		TEMPORAL_ADDRESS:                  "127.0.0.1:7233"
+		CAPTURE_PORT:                      "3000"
+		OBJECT_STORAGE_ENABLED:            "True"
+		OBJECT_STORAGE_ENDPOINT:           "http://127.0.0.1:19000"
+		OBJECT_STORAGE_ACCESS_KEY_ID:      "object_storage_root_user"
+		OBJECT_STORAGE_SECRET_ACCESS_KEY:  "object_storage_root_password"
+		NOTEBOOKS_FRAME_STORE_S3_ENDPOINT: "http://127.0.0.1:19000"
+	}
+
+	services: {
+		// 1. PostgreSQL Relational Database (Port 15432)
+		postgres: pkgs.#PostgresService & {
+			port:      15432
+			dataDir:   ".enve/data/postgres"
+			database:  "posthog"
+			user:      "posthog"
+			timeoutMs: 5000
+
+			command: "postgres -D .enve/data/postgres -k /tmp -p 15432 -c fsync=off -c synchronous_commit=off"
+
+			lifecycle: {
+				init: [
+					"sh -c 'test -f .enve/data/postgres/PG_VERSION || initdb -D .enve/data/postgres -U posthog --auth-local=trust --auth-host=trust --no-sync'",
+				]
+				postStart: [
+					"psql -h 127.0.0.1 -p 15432 -U posthog -d postgres -c 'CREATE ROLE postgres SUPERUSER LOGIN;' || true",
+					"psql -h 127.0.0.1 -p 15432 -U posthog -d postgres -c 'CREATE DATABASE posthog;' || true",
+					"psql -h 127.0.0.1 -p 15432 -U posthog -d postgres -c 'CREATE DATABASE test_posthog;' || true",
+					"psql -h 127.0.0.1 -p 15432 -U posthog -d postgres -c 'CREATE DATABASE test_posthog_persons;' || true",
+				]
+			}
+
+			restartPolicy: schema.#RestartPolicy.OnFailure
+
+			healthCheck: {
+				port:      15432
+				command:   "pg_isready -h 127.0.0.1 -p 15432 -U posthog"
+				timeoutMs: 2000
+			}
+
+			readinessProbe: {
+				port:      15432
+				command:   "psql -h 127.0.0.1 -p 15432 -U posthog -d postgres -c 'SELECT 1;'"
+				timeoutMs: 5000
+			}
+		}
+
+		// 2. Redis In-Memory Store (Port 16379)
+		redis: pkgs.#RedisService & {
+			port:      16379
+			dataDir:   ".enve/data/redis"
+			timeoutMs: 3000
+
+			command: "redis-server --port 16379 --dir .enve/data/redis --save '' --appendonly no --daemonize no"
+
+			lifecycle: init: [
+				"mkdir -p .enve/data/redis",
+			]
+
+			restartPolicy: schema.#RestartPolicy.OnFailure
+
+			healthCheck: {
+				port:      16379
+				timeoutMs: 1000
+			}
+
+			readinessProbe: {
+				port:      16379
+				command:   "redis-cli -p 16379 ping"
+				timeoutMs: 3000
+			}
+		}
+
+		// 3. ClickHouse Analytical DBMS (Port 8123 HTTP / 9000 TCP)
+		clickhouse: pkgs.#ClickHouseService & {
+			port:      8123
+			tcpPort:   9000
+			dataDir:   ".enve/data/clickhouse"
+			dependsOn: ["kafka"]
+			timeout:   "15000ms"
+			timeoutMs: 15000
+
+			command: "clickhouse-server --config-file showcase/config/clickhouse.xml"
+
+			environment: {
+				CLICKHOUSE_USER_SCRIPTS_DIR:    ".enve/data/clickhouse/user_scripts/"
+				CLICKHOUSE_UDF_CONFIG:          "user_defined_function.xml"
+				CLICKHOUSE_TMP_DIR:             ".enve/data/clickhouse/tmp/"
+				CLICKHOUSE_USER_FILES_DIR:      ".enve/data/clickhouse/user_files/"
+				CLICKHOUSE_FORMAT_SCHEMA_DIR:   ".enve/data/clickhouse/format_schemas/"
+				CLICKHOUSE_ACCESS_DIR:          ".enve/data/clickhouse/access/"
+				CLICKHOUSE_KEEPER_LOG_DIR:      ".enve/data/clickhouse/keeper/log/"
+				CLICKHOUSE_KEEPER_SNAPSHOT_DIR: ".enve/data/clickhouse/keeper/snapshots/"
+				KAFKA_HOSTS:                    "127.0.0.1:19092"
+			}
+
+			lifecycle: init: [
+				"mkdir -p .enve/data/clickhouse/tmp .enve/data/clickhouse/user_files .enve/data/clickhouse/format_schemas .enve/data/clickhouse/access .enve/data/clickhouse/keeper/log .enve/data/clickhouse/keeper/snapshots && ln -sf $(git rev-parse --show-toplevel)/posthog/user_scripts .enve/data/clickhouse/user_scripts",
+			]
+
+			restartPolicy: schema.#RestartPolicy.OnFailure
+
+			healthCheck: {
+				port:      8123
+				path:      "http://127.0.0.1:8123/ping"
+				timeout:   "15000ms"
+				timeoutMs: 15000
+			}
+
+			readinessProbe: {
+				port:      8123
+				command:   "curl -s -f 'http://127.0.0.1:8123/?query=SELECT+1'"
+				timeout:   "15000ms"
+				timeoutMs: 15000
+			}
+		}
+
+		// 4. Kafka Streaming Broker via Tansu (Port 19092)
+		kafka: pkgs.#TansuService & {
+			port:          19092
+			storageEngine: "memory://tansu/"
+			timeoutMs:     3000
+
+			command: "tansu --listener-url tcp://127.0.0.1:19092 --advertised-listener-url tcp://127.0.0.1:19092 --storage-engine memory://tansu/"
+
+			lifecycle: postStart: [
+				".venv/bin/python showcase/scripts/create_test_kafka_topics.py || true",
+			]
+
+			restartPolicy: schema.#RestartPolicy.OnFailure
+
+			healthCheck: {
+				port:      19092
+				timeoutMs: 1000
+			}
+
+			readinessProbe: {
+				port:      19092
+				timeoutMs: 3000
+			}
+		}
+
+		// 5. Temporal Workflow Engine (Port 7233)
+		temporal: pkgs.#TemporalService & {
+			port:       7233
+			dataDir:    ".enve/data/temporal"
+			dbFilename: ".enve/data/temporal/temporal.db"
+			timeoutMs:  5000
+
+			command: "temporal server start-dev --port 7233 --ip 127.0.0.1 --headless --db-filename .enve/data/temporal/temporal.db"
+
+			lifecycle: init: [
+				"mkdir -p .enve/data/temporal",
+			]
+
+			restartPolicy: schema.#RestartPolicy.OnFailure
+
+			healthCheck: {
+				port:      7233
+				timeoutMs: 2000
+			}
+
+			readinessProbe: {
+				port:      7233
+				command:   "temporal operator cluster health --address 127.0.0.1:7233"
+				timeoutMs: 5000
+			}
+		}
+
+		// 6. SeaweedFS S3 Object Storage (Port 19000)
+		seaweedfs: pkgs.#SeaweedfsService & {
+			port:      19000
+			dataDir:   ".enve/data/seaweedfs"
+			timeoutMs: 6000
+
+			command: "weed mini -ip=127.0.0.1 -ip.bind=127.0.0.1 -dir=.enve/data/seaweedfs -s3.port=19000 -bucket=posthog,test-posthog,posthog-recordings,test-recordings"
+
+			environment: {
+				AWS_ACCESS_KEY_ID:     "object_storage_root_user"
+				AWS_SECRET_ACCESS_KEY: "object_storage_root_password"
+				S3_BUCKET:             "posthog,test-posthog,posthog-recordings,test-recordings"
+			}
+
+			lifecycle: init: [
+				"mkdir -p .enve/data/seaweedfs",
+			]
+
+			restartPolicy: schema.#RestartPolicy.OnFailure
+
+			healthCheck: {
+				port:      19000
+				timeoutMs: 3000
+			}
+
+			readinessProbe: {
+				port:      19000
+				command:   "curl -s -o /dev/null http://127.0.0.1:19000/"
+				timeoutMs: 6000
+			}
+		}
+
+		// 7. Central Service: PostHog Backend (Django ASGI on Port 8000)
+		backend: schema.#Service & {
+			command: ".venv/bin/python -m granian --interface asgi posthog.asgi:application --host 127.0.0.1 --port 8000"
+			port:    8000
+			dependsOn: ["postgres", "redis", "clickhouse"]
+			timeoutMs: 30000
+
+			environment: {
+				DEBUG:                 "1"
+				SECRET_KEY:            "posthog-enve-dev-key"
+				DATABASE_URL:          "postgres://posthog:posthog@127.0.0.1:15432/posthog"
+				PERSONS_DB_WRITER_URL: "postgres://posthog:posthog@127.0.0.1:15432/posthog"
+				REDIS_URL:             "redis://127.0.0.1:16379"
+				CLICKHOUSE_HOST:       "127.0.0.1"
+				CLICKHOUSE_HTTP_PORT:  "8123"
+				CLICKHOUSE_PORT:       "9000"
+			}
+
+			restartPolicy: schema.#RestartPolicy.OnFailure
+
+			healthCheck: {
+				port:      8000
+				path:      "http://127.0.0.1:8000/_health"
+				timeoutMs: 60000
+			}
+
+			readinessProbe: {
+				port:      8000
+				path:      "http://127.0.0.1:8000/_health"
+				timeoutMs: 60000
+			}
+		}
+
+		// 8. Central Service: PostHog Capture Gateway (Rust on Port 3000)
+		capture: schema.#Service & {
+			command: "cargo run --manifest-path rust/capture/Cargo.toml"
+			port:    3000
+			dependsOn: ["postgres", "redis", "kafka"]
+			timeoutMs: 60000
+
+			environment: {
+				DATABASE_URL: "postgres://posthog:posthog@127.0.0.1:15432/posthog"
+				REDIS_URL:    "redis://127.0.0.1:16379"
+				KAFKA_HOSTS:  "127.0.0.1:19092"
+				ADDRESS:      "127.0.0.1:3000"
+			}
+
+			restartPolicy: schema.#RestartPolicy.OnFailure
+
+			healthCheck: {
+				port:      3000
+				path:      "http://127.0.0.1:3000/_liveness"
+				timeoutMs: 60000
+			}
+
+			readinessProbe: {
+				port:      3000
+				path:      "http://127.0.0.1:3000/_readiness"
+				timeoutMs: 60000
+			}
+		}
+	}
+
+	shellHook: """
+		echo "🦔 Welcome to PostHog Monorepo (Zero-Daemon enve environment)"
+		echo "Run 'enve up' to start background microservices in <1.2s"
+		echo "Run 'enve up postgres redis' for minimal web API hacking"
+		"""
+}
