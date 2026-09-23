@@ -243,8 +243,9 @@ profiles: {
                 "postStart": [
                     "clickhouse-client -q 'CREATE DATABASE IF NOT EXISTS posthog;'",
                     "clickhouse-client -q 'CREATE DATABASE IF NOT EXISTS posthog_test;'",
+                    "clickhouse-client -q 'CREATE ROLE IF NOT EXISTS autoresearch;'",
                     "clickhouse-client -q 'SYSTEM FLUSH LOGS'",
-                    "clickhouse-client -q 'CREATE ROW POLICY OR REPLACE autoresearch_own_queries_only ON system.query_log AS RESTRICTIVE FOR SELECT USING initial_user = currentUser() TO autoresearch'"
+                    "clickhouse-client -q 'CREATE ROW POLICY OR REPLACE autoresearch_own_queries_only ON system.query_log AS RESTRICTIVE FOR SELECT USING initial_user = currentUser() TO autoresearch' || true"
                 ],
                 "init": [
                     "mkdir -p .enve/data/clickhouse/tmp .enve/data/clickhouse/user_files .enve/data/clickhouse/format_schemas .enve/data/clickhouse/access .enve/data/clickhouse/keeper/log .enve/data/clickhouse/keeper/snapshots .enve/data/clickhouse/.enve/data/clickhouse && ln -sfn $(git rev-parse --show-toplevel)/posthog/user_scripts .enve/data/clickhouse/user_scripts && ln -sfn $(git rev-parse --show-toplevel)/posthog/user_scripts .enve/data/clickhouse/.enve/data/clickhouse/user_scripts && chmod -R +x posthog/user_scripts/ 2>/dev/null || true"
