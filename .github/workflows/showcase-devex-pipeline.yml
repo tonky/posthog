@@ -3,15 +3,14 @@ name: 'PostHog DeveX Showcase: E2E Pipeline Acceleration'
 on:
     workflow_dispatch:
     pull_request:
-        paths:
-            - 'scripts/showcase_*'
-            - '.github/workflows/showcase-devex-pipeline.yml'
-            - 'SHOWCASE.md'
-            - 'scripts/build_container_assets.sh'
+        branches:
+            - 'master'
+            - 'perf/ci-modernization'
     push:
         branches:
             - 'showcase/**'
             - 'feat/**'
+            - 'perf/ci-modernization'
             - 'master'
 
 concurrency:
