@@ -200,7 +200,7 @@ profiles: {
             "watch": []
         },
         "clickhouse": {
-            "command": "sh -c 'mkdir -p showcase/config/udf .enve/config && test -f docker/clickhouse/user_defined_function.xml && cp -f docker/clickhouse/user_defined_function.xml showcase/config/udf/ || true; test -f posthog/user_scripts/latest_user_defined_function.xml && cp -f posthog/user_scripts/latest_user_defined_function.xml showcase/config/udf/ || true; printf \"127.0.0.1 localhost\\n127.0.0.2 db\\n\" > .enve/config/hosts && exec bwrap --dev-bind / / --ro-bind .enve/config/hosts /etc/hosts --die-with-parent -- clickhouse-server --config-file showcase/config/clickhouse.xml'",
+            "command": "sh -c 'mkdir -p showcase/config/udf .enve/config && test -f docker/clickhouse/user_defined_function.xml && cp -f docker/clickhouse/user_defined_function.xml showcase/config/udf/ || true; test -f posthog/user_scripts/latest_user_defined_function.xml && cp -f posthog/user_scripts/latest_user_defined_function.xml showcase/config/udf/ || true; printf \"127.0.0.1 localhost\\n127.0.0.2 db\\n\" > .enve/config/hosts; if command -v bwrap >/dev/null 2>&1; then exec bwrap --dev-bind / / --ro-bind .enve/config/hosts /etc/hosts --die-with-parent -- clickhouse-server --config-file showcase/config/clickhouse.xml; else printf \"127.0.0.2 db\\n\" | sudo tee -a /etc/hosts >/dev/null 2>&1 || true; exec clickhouse-server --config-file showcase/config/clickhouse.xml; fi'",
             "configFile": ".enve/config/clickhouse/config.xml",
             "dataDir": ".enve/data/clickhouse",
             "dependsOn": [

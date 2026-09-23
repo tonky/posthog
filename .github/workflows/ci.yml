@@ -97,6 +97,7 @@ jobs:
         if command -v sudo >/dev/null 2>&1; then
           sudo mkdir -p -m 0755 /nix 2>/dev/null || true
           sudo chown -R $(id -u):$(id -g) /nix 2>/dev/null || true
+          printf "\n127.0.0.2 db\n" | sudo tee -a /etc/hosts 2>/dev/null || true
         fi
         if [ -d "/nix" ]; then
           if [ -d "/nix/store" ] && [ ! -L "/nix/store" ]; then
@@ -247,6 +248,7 @@ jobs:
         if command -v sudo >/dev/null 2>&1; then
           sudo mkdir -p -m 0755 /nix 2>/dev/null || true
           sudo chown -R $(id -u):$(id -g) /nix 2>/dev/null || true
+          printf "\n127.0.0.2 db\n" | sudo tee -a /etc/hosts 2>/dev/null || true
         fi
         if [ -d "/nix" ]; then
           if [ -d "/nix/store" ] && [ ! -L "/nix/store" ]; then
@@ -494,6 +496,7 @@ jobs:
         if command -v sudo >/dev/null 2>&1; then
           sudo mkdir -p -m 0755 /nix 2>/dev/null || true
           sudo chown -R $(id -u):$(id -g) /nix 2>/dev/null || true
+          printf "\n127.0.0.2 db\n" | sudo tee -a /etc/hosts 2>/dev/null || true
         fi
         if [ -d "/nix" ]; then
           if [ -d "/nix/store" ] && [ ! -L "/nix/store" ]; then
@@ -578,6 +581,7 @@ jobs:
         if command -v sudo >/dev/null 2>&1; then
           sudo mkdir -p -m 0755 /nix 2>/dev/null || true
           sudo chown -R $(id -u):$(id -g) /nix 2>/dev/null || true
+          printf "\n127.0.0.2 db\n" | sudo tee -a /etc/hosts 2>/dev/null || true
         fi
         if [ -d "/nix" ]; then
           if [ -d "/nix/store" ] && [ ! -L "/nix/store" ]; then
