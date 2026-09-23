@@ -1,10 +1,19 @@
-package devshell
+package schema
 
 // -------------------------------------------------------------
 // enve Shield: Supply Chain Security & Policy Schemas
 // -------------------------------------------------------------
 
-#VulnerabilitySeverity: "none" | "low" | "medium" | "high" | "critical"
+#VulnerabilitySeverity: {
+	None:     "none"
+	Low:      "low"
+	Medium:   "medium"
+	High:     "high"
+	Critical: "critical"
+}
+#VulnerabilityTolerance: #VulnerabilitySeverity.None | #VulnerabilitySeverity.Low |
+	#VulnerabilitySeverity.Medium | #VulnerabilitySeverity.High |
+	#VulnerabilitySeverity.Critical | *#VulnerabilitySeverity.None
 
 #LicensePolicy: {
 	// Explicitly allowed SPDX license identifiers (e.g. ["MIT", "Apache-2.0", "BSD-3-Clause"])
@@ -30,11 +39,11 @@ package devshell
 }
 
 #SecurityPolicy: {
-	name:        string & !=""
+	name:         string & !=""
 	description?: string
 
 	// Maximum allowable vulnerability threshold before build/CI failure
-	vulnerabilityTolerance: #VulnerabilitySeverity | *"none"
+	vulnerabilityTolerance: #VulnerabilityTolerance
 
 	// License compliance enforcement rules
 	licensePolicy?: #LicensePolicy

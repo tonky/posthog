@@ -1,0 +1,124 @@
+{
+  "run_id": "run-18d5402c3fd3a7ac",
+  "report": {
+    "services": {
+      "total": {
+        "peak_ram_bytes": 52228096,
+        "avg_ram_bytes": 51899559,
+        "total_cpu_time_ms": 1160,
+        "user_cpu_time_ms": 840,
+        "system_cpu_time_ms": 320,
+        "avg_cpu_cores": 0.044232602478551,
+        "peak_cpu_cores": 0.06634890371782651,
+        "duration_ms": 26225
+      },
+      "services": {
+        "enve_supervisor": {
+          "peak_ram_bytes": 52228096,
+          "avg_ram_bytes": 51899559,
+          "total_cpu_time_ms": 1160,
+          "user_cpu_time_ms": 840,
+          "system_cpu_time_ms": 320,
+          "avg_cpu_cores": 0.044232602478551,
+          "peak_cpu_cores": 0.06634890371782651,
+          "duration_ms": 26225
+        }
+      }
+    },
+    "components": {
+      "backend": {
+        "total": {
+          "peak_ram_bytes": 1186414592,
+          "avg_ram_bytes": 716390800,
+          "total_cpu_time_ms": 81700,
+          "user_cpu_time_ms": 75100,
+          "system_cpu_time_ms": 6600,
+          "avg_cpu_cores": 1.0694277187287293,
+          "peak_cpu_cores": 6.597357576863133,
+          "duration_ms": 76396
+        },
+        "jobs": {
+          "shard_1": {
+            "peak_ram_bytes": 1169813504,
+            "avg_ram_bytes": 712320053,
+            "total_cpu_time_ms": 13610,
+            "user_cpu_time_ms": 12540,
+            "system_cpu_time_ms": 1070,
+            "avg_cpu_cores": 1.0654454360419603,
+            "peak_cpu_cores": 5.535070183928861,
+            "duration_ms": 12774
+          },
+          "shard_2": {
+            "peak_ram_bytes": 1174409216,
+            "avg_ram_bytes": 710389914,
+            "total_cpu_time_ms": 13080,
+            "user_cpu_time_ms": 12020,
+            "system_cpu_time_ms": 1060,
+            "avg_cpu_cores": 1.02275392915787,
+            "peak_cpu_cores": 3.598314716348665,
+            "duration_ms": 12789
+          },
+          "shard_3": {
+            "peak_ram_bytes": 1178750976,
+            "avg_ram_bytes": 723755552,
+            "total_cpu_time_ms": 14030,
+            "user_cpu_time_ms": 12860,
+            "system_cpu_time_ms": 1170,
+            "avg_cpu_cores": 1.058228993815055,
+            "peak_cpu_cores": 2.7093187125490874,
+            "duration_ms": 13258
+          },
+          "shard_4": {
+            "peak_ram_bytes": 1186414592,
+            "avg_ram_bytes": 731915058,
+            "total_cpu_time_ms": 13900,
+            "user_cpu_time_ms": 12810,
+            "system_cpu_time_ms": 1090,
+            "avg_cpu_cores": 1.0415886099662794,
+            "peak_cpu_cores": 6.597357576863133,
+            "duration_ms": 13345
+          },
+          "shard_5": {
+            "peak_ram_bytes": 1163730944,
+            "avg_ram_bytes": 703577391,
+            "total_cpu_time_ms": 13340,
+            "user_cpu_time_ms": 12250,
+            "system_cpu_time_ms": 1090,
+            "avg_cpu_cores": 1.1183769282360831,
+            "peak_cpu_cores": 6.295999722567623,
+            "duration_ms": 11928
+          },
+          "shard_6": {
+            "peak_ram_bytes": 1178116096,
+            "avg_ram_bytes": 714502522,
+            "total_cpu_time_ms": 13740,
+            "user_cpu_time_ms": 12620,
+            "system_cpu_time_ms": 1120,
+            "avg_cpu_cores": 1.1168915623475857,
+            "peak_cpu_cores": 4.9823633590051735,
+            "duration_ms": 12302
+          }
+        }
+      }
+    }
+  },
+  "execution_records": [
+    {
+      "component": "backend",
+      "job": "test",
+      "status": "success",
+      "duration_ms": 76396,
+      "metrics": {
+        "peak_ram_bytes": 1186414592,
+        "avg_ram_bytes": 716390800,
+        "total_cpu_time_ms": 81700,
+        "user_cpu_time_ms": 75100,
+        "system_cpu_time_ms": 6600,
+        "avg_cpu_cores": 1.0694277187287293,
+        "peak_cpu_cores": 6.597357576863133,
+        "duration_ms": 76396
+      },
+      "cached": false
+    }
+  ]
+}

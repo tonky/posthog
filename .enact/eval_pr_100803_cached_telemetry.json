@@ -1,0 +1,91 @@
+{
+  "run_id": "run-18d577426607851e",
+  "report": {
+    "services": {
+      "total": {
+        "peak_ram_bytes": 52027392,
+        "avg_ram_bytes": 51618752,
+        "total_cpu_time_ms": 1130,
+        "user_cpu_time_ms": 840,
+        "system_cpu_time_ms": 290,
+        "avg_cpu_cores": 0.05451037144235408,
+        "peak_cpu_cores": 0.08176555716353112,
+        "duration_ms": 20730
+      },
+      "services": {
+        "enve_supervisor": {
+          "peak_ram_bytes": 52027392,
+          "avg_ram_bytes": 51618752,
+          "total_cpu_time_ms": 1130,
+          "user_cpu_time_ms": 840,
+          "system_cpu_time_ms": 290,
+          "avg_cpu_cores": 0.05451037144235408,
+          "peak_cpu_cores": 0.08176555716353112,
+          "duration_ms": 20730
+        }
+      }
+    },
+    "components": {
+      "backend": {
+        "total": {
+          "peak_ram_bytes": 1229660160,
+          "avg_ram_bytes": 847710309,
+          "total_cpu_time_ms": 18580,
+          "user_cpu_time_ms": 17080,
+          "system_cpu_time_ms": 1500,
+          "avg_cpu_cores": 0.9855718226182898,
+          "peak_cpu_cores": 2.4224923896392205,
+          "duration_ms": 18852
+        },
+        "jobs": {
+          "shard_1": {
+            "peak_ram_bytes": 1229660160,
+            "avg_ram_bytes": 847710309,
+            "total_cpu_time_ms": 18580,
+            "user_cpu_time_ms": 17080,
+            "system_cpu_time_ms": 1500,
+            "avg_cpu_cores": 0.9855718226182898,
+            "peak_cpu_cores": 2.4224923896392205,
+            "duration_ms": 18852
+          }
+        }
+      }
+    }
+  },
+  "execution_records": [
+    {
+      "component": "backend",
+      "job": "fmt",
+      "status": "cached",
+      "duration_ms": 0,
+      "metrics": {
+        "peak_ram_bytes": 0,
+        "avg_ram_bytes": 0,
+        "total_cpu_time_ms": 0,
+        "user_cpu_time_ms": 0,
+        "system_cpu_time_ms": 0,
+        "avg_cpu_cores": 0.0,
+        "peak_cpu_cores": 0.0,
+        "duration_ms": 0
+      },
+      "cached": true
+    },
+    {
+      "component": "backend",
+      "job": "test",
+      "status": "failed",
+      "duration_ms": 18852,
+      "metrics": {
+        "peak_ram_bytes": 1229660160,
+        "avg_ram_bytes": 847710309,
+        "total_cpu_time_ms": 18580,
+        "user_cpu_time_ms": 17080,
+        "system_cpu_time_ms": 1500,
+        "avg_cpu_cores": 0.9855718226182898,
+        "peak_cpu_cores": 2.4224923896392205,
+        "duration_ms": 18852
+      },
+      "cached": false
+    }
+  ]
+}

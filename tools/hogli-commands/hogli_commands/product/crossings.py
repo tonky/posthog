@@ -52,6 +52,7 @@ from collections import Counter, defaultdict
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from .ast_helpers import ast_parse_safe, get_model_names, lazy_reexport_map
 from .isolation import COMPUTED_WIRING_LOCATIONS, MODEL_CROSSINGS, facade_model_crossings
@@ -255,7 +256,8 @@ def product_model_labels(products: Iterable[str] | None = None) -> dict[str, str
 
 
 def _is_test_module(path: Path) -> bool:
-    if "test" in path.parts or "tests" in path.parts:
+    rel = path.relative_to(REPO_ROOT) if path.is_relative_to(REPO_ROOT) else path
+    if "test" in rel.parts or "tests" in rel.parts:
         return True
     return path.name.startswith("test_") or path.name.endswith("_test.py") or path.name == "conftest.py"
 
@@ -263,7 +265,8 @@ def _is_test_module(path: Path) -> bool:
 def _is_out_of_scope_module(path: Path) -> bool:
     """Tests reach concrete classes through testing doors, so they are not consumers. A migration
     reaches a model through the historical registry, which is the only way a migration can."""
-    return _is_test_module(path) or "migrations" in path.parts
+    rel = path.relative_to(REPO_ROOT) if path.is_relative_to(REPO_ROOT) else path
+    return _is_test_module(path) or "migrations" in rel.parts
 
 
 @dataclass(frozen=True, slots=True)
@@ -364,7 +367,8 @@ def _candidates(kind_hint: _KindHint | None = None) -> list[_Candidate]:
     found = []
     for root in SCANNED_ROOTS:
         for path in sorted((REPO_ROOT / root).rglob("*.py")):
-            if SKIPPED_DIRS.intersection(path.parts):
+            rel = path.relative_to(REPO_ROOT) if path.is_relative_to(REPO_ROOT) else path
+            if SKIPPED_DIRS.intersection(rel.parts):
                 continue
             source = path.read_bytes()
             dotted = _dotted_module(path)
@@ -801,6 +805,15 @@ def _wiring_location_exports(product: str, location: str) -> dict[_Export, str]:
             if (REPO_ROOT / source.replace(".", "/")).with_suffix(".py").is_relative_to(root):
                 exports[_Export(_dotted_module(facade_path), name)] = label
     return exports
+
+
+def names_defined_in(product: str, location: str) -> frozenset[str]:
+    """The names a wiring location, or a subtree of one, defines and hands out.
+
+    A product may watch one subtree of a computed wiring location rather than the whole of it, and
+    that is only sound while every `drives(...)` line names something inside the watched subtree.
+    This is how such a check reads the subtree."""
+    return frozenset(export.name for export in _wiring_location_exports(product, location))
 
 
 def _top_level_names(tree: ast.Module) -> list[str]:
@@ -1401,11 +1414,40 @@ def driven_wiring_locations(product: str, path: Path | None = None) -> frozenset
     Read from the crossings baseline. The baseline is the evidence the lint reads: the repo-invariant
     test keeps it equal to a fresh scan, so a location with no line here has no outside driver."""
     prefix = f"{product}:"
-    return frozenset(
-        line.split(" ", 1)[0].removeprefix(prefix)
-        for line in _baseline_lines(path or BASELINE_PATH)
-        if line.startswith(prefix)
-    )
+    locations: set[str] = set()
+    for line in _baseline_lines(path or BASELINE_PATH):
+        if not line.startswith(prefix):
+            continue
+        crossing, _, kind, _ = line.split(" ")
+        if kind.startswith("drives("):
+            locations.add(crossing.removeprefix(prefix))
+    return frozenset(locations)
+
+
+def recorded_facade_shape_rows(product: str, path: Path | None = None) -> frozenset[str]:
+    prefix = f"products.{product}.backend.facade."
+    rows: set[str] = set()
+    for line in _baseline_lines(path or BASELINE_PATH):
+        if " facade-" not in line:
+            continue
+        if line.split(" ")[1].startswith(prefix):
+            rows.add(line)
+    return frozenset(rows)
+
+
+def facade_shape_use(finding: Any) -> CrossingUse:
+    crossing = getattr(finding, "crossing", "")
+    consumer = getattr(finding, "consumer", "")
+    if not consumer:
+        consumer = f"{getattr(finding, 'dotted_module', '')}.{getattr(finding, 'symbol', '')}"
+    param = getattr(finding, "parameter", None)
+    kind_str = getattr(finding, "kind", "")
+    kind = f"facade-{kind_str}({param})" if param else f"facade-{kind_str}"
+    return CrossingUse(crossing, consumer, kind, getattr(finding, "count", 1))
+
+
+def facade_shape_uses(products: Iterable[str] | None = None) -> list[CrossingUse]:
+    return []
 
 
 @functools.lru_cache(maxsize=4)

@@ -1,169 +1,383 @@
 package pkgs
 
-import devshell "github.com/tonky/enve/schema/v1:schema"
+import "github.com/tonky/enve/schema/v1:schema"
 
 // -------------------------------------------------------------
 // Local Developer Services, Databases & Container Tools
 // -------------------------------------------------------------
 
-postgres: devshell.#RustBuildSpec & {
-	pname:   "postgresql"
-	version: "17.4"
-	src:     "https://ftp.postgresql.org/pub/source/v17.4/postgresql-17.4.tar.gz"
-}
+postgres: {pname: "postgresql"}
+postgresql: {pname: "postgresql"}
+postgresql_18: {pname: "postgresql", version: "18"}
+postgresql_17: {pname: "postgresql", version: "17"}
+postgresql_16: {pname: "postgresql", version: "16"}
+postgresql_15: {pname: "postgresql", version: "15"}
+postgresql_14: {pname: "postgresql", version: "14"}
 
-postgresql: postgres
-postgresql_17: postgres
-postgresql_16: devshell.#RustBuildSpec & {
-	pname:   "postgresql"
-	version: "16.4"
-	src:     "https://ftp.postgresql.org/pub/source/v16.4/postgresql-16.4.tar.gz"
-}
-postgresql_15: devshell.#RustBuildSpec & {
-	pname:   "postgresql"
-	version: "15.8"
-	src:     "https://ftp.postgresql.org/pub/source/v15.8/postgresql-15.8.tar.gz"
-}
-postgresql_14: devshell.#RustBuildSpec & {
-	pname:   "postgresql"
-	version: "14.13"
-	src:     "https://ftp.postgresql.org/pub/source/v14.13/postgresql-14.13.tar.gz"
-}
-
-redis: devshell.#RustBuildSpec & {
-	pname:   "redis"
-	version: "7.4.2"
-	src:     "https://github.com/redis/redis/archive/refs/tags/7.4.2.tar.gz"
-}
-
-docker_compose: devshell.#GoBuildSpec & {
-	pname:       "docker-compose"
-	version:     "2.33.1"
-	src:         "https://github.com/docker/compose/archive/refs/tags/v2.33.1.tar.gz"
-	subPackages: "cmd"
-}
-
-mysql: devshell.#RustBuildSpec & {
-	pname:   "mysql"
-	version: "8.4.0"
-	src:     "https://github.com/mysql/mysql-server/archive/refs/tags/mysql-8.4.0.tar.gz"
-}
-
-minio: devshell.#GoBuildSpec & {
-	pname:       "minio"
-	version:     "2025.2.7"
-	src:         "https://github.com/minio/minio/archive/refs/tags/RELEASE.2025-02-07T23-21-09Z.tar.gz"
-	subPackages: "."
-}
-
-mailpit: devshell.#GoBuildSpec & {
-	pname:       "mailpit"
-	version:     "1.21.8"
-	src:         "https://github.com/axllent/mailpit/archive/refs/tags/v1.21.8.tar.gz"
-	subPackages: "."
-}
-
-clickhouse: devshell.#RustBuildSpec & {
-	pname:   "clickhouse"
-	version: "26.1"
-	src:     "https://github.com/ClickHouse/ClickHouse/archive/refs/tags/v26.1.1.1-stable.tar.gz"
-}
+redis: {pname: "redis"}
+valkey: {pname: "valkey"}
+docker_compose: {pname: "docker-compose"}
+mysql: {pname: "mysql"}
+garage: {pname: "garage"}
+mailpit: {pname: "mailpit"}
+clickhouse: {pname: "clickhouse"}
+temporal: {pname: "temporal-cli"}
+seaweedfs: {pname: "seaweedfs"}
+tansu: {pname: "tansu"}
+kafka: {pname: "tansu"}
 
 // -------------------------------------------------------------
 // High-Level Microservice & Daemon Presets (#Service presets)
 // -------------------------------------------------------------
 
-#PostgresService: devshell.#Service & {
-	let srvPort = 5432
-	port: srvPort
-	let dataDir = ".enve/data/postgres"
-	command: "postgres -D \(dataDir) -k /tmp -p \(srvPort)"
+#PostgresService: schema.#Service & {
+	package: schema.#PackageRef | *"postgresql"
+
+	let defaultPort = 5432
+	let defaultDataDir = ".enve/data/postgres"
+	let defaultDb = "postgres"
+	let defaultUser = "postgres"
+	let defaultTimeout = "2500ms"
+
+	port:    schema.#Port | *defaultPort
+	dataDir: string | *defaultDataDir
+	// With the data, not in `/tmp`: a socket left behind by a crashed postmaster
+	// otherwise blocks the next start of an unrelated project on the same port, which
+	// is what the supervisor's stale-socket sweep exists to paper over.
+	socketDir: string | *dataDir
+	database:  string | *defaultDb
+	user:      string | *defaultUser
+	timeout:   schema.#Duration | *defaultTimeout
+	command:   string | *"postgres -D \(dataDir) -k \(socketDir) -p \(port)"
+	lifecycle: {
+		init: [
+			*"initdb -D \"$DATA_DIR\" -U postgres --auth-local=trust --auth-host=trust" | string,
+		]
+		// Postgres runs its checkpointer and walwriter as child processes, so the group
+		// SIGTERM that stops every other service reaches them directly and the postmaster
+		// reads that as a crash rather than a shutdown. Without this it never checkpoints,
+		// and every later boot pays for an automatic recovery.
+		preStop: [
+			*"pg_ctl stop -D \"$DATA_DIR\" -m fast" | string,
+		]
+	}
 	environment: {
 		PGDATA:       dataDir
-		PGPORT:       srvPort
-		PGHOST:       "/tmp"
-		DATABASE_URL: "postgresql://postgres@localhost:\(srvPort)/postgres"
+		PGPORT:       "\(port)"
+		PGHOST:       socketDir
+		PGUSER:       user
+		DATABASE_URL: "postgresql://\(user)@localhost:\(port)/\(database)"
+	}
+	let servicePort = port
+	healthCheck: {
+		port:    schema.#Port | *servicePort
+		command: string | *"pg_isready -h 127.0.0.1 -p \(servicePort) -U \(user)"
+		timeout: schema.#Duration | *"1000ms"
 	}
 	readinessProbe: {
-		port:      srvPort
-		timeoutMs: 5000
+		port:    schema.#Port | *servicePort
+		command: string | *"psql -h 127.0.0.1 -p \(servicePort) -U \(user) -d \(database) -c 'SELECT 1;'"
+		timeout: schema.#Duration | *defaultTimeout
 	}
 }
 
-#RedisService: devshell.#Service & {
-	let srvPort = 6379
-	port: srvPort
-	let dataDir = ".enve/data/redis"
-	command: "redis-server --port \(srvPort) --dir \(dataDir) --daemonize no"
+#RedisService: schema.#Service & {
+	package: schema.#PackageRef | *"redis"
+
+	let defaultPort = 6379
+	let defaultDataDir = ".enve/data/redis"
+	let defaultTimeout = "1500ms"
+
+	port:    schema.#Port | *defaultPort
+	dataDir: string | *defaultDataDir
+	timeout: schema.#Duration | *defaultTimeout
+	command: string | *"redis-server --port \(port) --dir \(dataDir) --daemonize no"
 	environment: {
-		REDIS_PORT: srvPort
-		REDIS_URL:  "redis://localhost:\(srvPort)/0"
+		REDIS_PORT: "\(port)"
+		REDIS_URL:  "redis://localhost:\(port)/0"
+	}
+	let servicePort = port
+	healthCheck: {
+		port:    schema.#Port | *servicePort
+		timeout: schema.#Duration | *"800ms"
 	}
 	readinessProbe: {
-		port:      srvPort
-		timeoutMs: 3000
+		port:    schema.#Port | *servicePort
+		command: string | *"redis-cli -p \(servicePort) ping"
+		timeout: schema.#Duration | *defaultTimeout
 	}
 }
 
-#MinioService: devshell.#Service & {
-	let srvPort = 9000
-	port: srvPort
-	let consolePort = 9001
-	let dataDir = ".enve/data/minio"
-	command: "minio server \(dataDir) --address :\(srvPort) --console-address :\(consolePort)"
+#ValkeyService: schema.#Service & {
+	package: schema.#PackageRef | *"valkey"
+
+	let defaultPort = 6379
+	let defaultDataDir = ".enve/data/valkey"
+	let defaultTimeout = "1500ms"
+
+	port:    schema.#Port | *defaultPort
+	dataDir: string | *defaultDataDir
+	timeout: schema.#Duration | *defaultTimeout
+	command: string | *"valkey-server --port \(port) --dir \(dataDir) --daemonize no"
+	// Valkey answers the Redis protocol, so its clients read the Redis variables.
 	environment: {
-		MINIO_PORT:          srvPort
-		MINIO_CONSOLE_PORT:  consolePort
-		MINIO_ROOT_USER:     "minioadmin"
-		MINIO_ROOT_PASSWORD: "minioadmin"
-		S3_ENDPOINT:         "http://localhost:\(srvPort)"
+		REDIS_PORT: "\(port)"
+		REDIS_URL:  "redis://localhost:\(port)/0"
+	}
+	let servicePort = port
+	healthCheck: {
+		port:    schema.#Port | *servicePort
+		timeout: schema.#Duration | *"800ms"
 	}
 	readinessProbe: {
-		port:      srvPort
-		timeoutMs: 5000
+		port:    schema.#Port | *servicePort
+		command: string | *"valkey-cli -p \(servicePort) ping"
+		timeout: schema.#Duration | *defaultTimeout
 	}
 }
 
-#NginxService: devshell.#Service & {
-	let srvPort = 8080
-	port: srvPort
-	let srvConfigFile = "/etc/nginx/nginx.conf"
-	let runDir = ".enve/data/nginx"
-	command: "nginx -p \(runDir) -c \(srvConfigFile) -g 'daemon off;'"
-	readinessProbe: {
-		port:      srvPort
-		timeoutMs: 3000
-	}
-}
+#GarageService: schema.#Service & {
+	package: schema.#PackageRef | *"garage"
 
-#MySQLService: devshell.#Service & {
-	let srvPort = 3306
-	port: srvPort
-	let dataDir = ".enve/data/mysql"
-	command: "mysqld --datadir=\(dataDir) --port=\(srvPort)"
+	let defaultPort = 3900
+	let defaultDataDir = ".enve/data/garage"
+	let defaultTimeout = "4000ms"
+
+	// Garage listens three times: S3 for clients, RPC between nodes, and the admin API
+	// readiness asks. Upstream puts the admin API on 3903; enve puts the two extra
+	// listeners beside the S3 port, so one declared port moves all three and two
+	// instances never collide. That arithmetic lives in the conventions layer, which is
+	// what a `garage: {}` declaration goes through, and it is what writes the config
+	// the server reads. These are its answers for the default port, spelled out
+	// because a CUE default cannot compute one — so a preset that sets `port` should
+	// set `rpcPort` and `adminPort` beside it rather than leave them at 3901/3902.
+	port: schema.#Port | *defaultPort
+	let defaultRpcPort = 3901
+	let defaultAdminPort = 3902
+	rpcPort:   schema.#Port | *defaultRpcPort
+	adminPort: schema.#Port | *defaultAdminPort
+	dataDir:   string | *defaultDataDir
+	// Written by enve when `garage` is declared under `services:`. A project that
+	// configures garage itself supplies its own through `files:`.
+	configFile: string | *"\(dataDir)/garage.toml"
+	timeout:    schema.#Duration | *defaultTimeout
+	command:    string | *"garage -c \"\(configFile)\" server"
+	// The variables seaweedfs exports, so code that reads them works against either.
 	environment: {
-		MYSQL_TCP_PORT: srvPort
+		AWS_ENDPOINT_URL:   "http://127.0.0.1:\(port)"
+		S3_ENDPOINT:        "http://127.0.0.1:\(port)"
+		AWS_DEFAULT_REGION: "garage"
 	}
+	let servicePort = port
+	let adminEndpoint = adminPort
+	healthCheck: {
+		port:    schema.#Port | *servicePort
+		timeout: schema.#Duration | *"1500ms"
+	}
+	// `/health` answers as soon as the node is up and before a layout exists, which is what
+	// makes it usable: the layout is applied by `postStart`, after readiness has passed.
 	readinessProbe: {
-		port:      srvPort
-		timeoutMs: 5000
+		port:    schema.#Port | *adminEndpoint
+		path:    string | *"http://127.0.0.1:\(adminEndpoint)/health"
+		timeout: schema.#Duration | *defaultTimeout
 	}
 }
 
-#ClickHouseService: devshell.#Service & {
-	let httpPort = 8123
-	let tcpPort = 9000
-	port: httpPort
-	let dataDir = ".enve/data/clickhouse"
-	let configFile = ".enve/config/clickhouse/config.xml"
-	command: "clickhouse-server --config-file=\(configFile)"
-	environment: {
-		CLICKHOUSE_DATA_DIR:  dataDir
-		CLICKHOUSE_HTTP_PORT: "\(httpPort)"
-		CLICKHOUSE_TCP_PORT:  "\(tcpPort)"
+#NginxService: schema.#Service & {
+	package: schema.#PackageRef | *"nginx"
+
+	let defaultPort = 8080
+	let defaultDataDir = ".enve/data/nginx"
+	let defaultRunDir = defaultDataDir
+	let defaultTimeout = "2000ms"
+
+	port:   schema.#Port | *defaultPort
+	runDir: string | *defaultRunDir
+	// The config lives with the service, not at `/etc/nginx/nginx.conf`: the host's file
+	// is absent on a clean machine and, where it exists, asks for port 80 and writes to
+	// /var/log/nginx. Declaring `nginx` under `services:` has enve write one; a project
+	// that configures nginx itself supplies its own through `files:`.
+	configFile: string | *"\(runDir)/nginx.conf"
+	timeout:    schema.#Duration | *defaultTimeout
+	// `-e stderr` because nginx opens its compiled-in `logs/error.log` before it reads a
+	// line of the config, and that directory does not exist under a fresh prefix.
+	command: string | *"nginx -p \"\(runDir)\" -c \"\(configFile)\" -e stderr -g \"daemon off;\""
+	let servicePort = port
+	healthCheck: {
+		port:    schema.#Port | *servicePort
+		timeout: schema.#Duration | *"1000ms"
 	}
 	readinessProbe: {
-		port:      httpPort
-		timeoutMs: 5000
+		port:    schema.#Port | *servicePort
+		path:    string | *"http://127.0.0.1:\(servicePort)/"
+		timeout: schema.#Duration | *defaultTimeout
 	}
 }
+
+#MySQLService: schema.#Service & {
+	package: schema.#PackageRef | *"mysql"
+
+	let defaultPort = 3306
+	let defaultDataDir = ".enve/data/mysql"
+	let defaultTimeout = "3500ms"
+
+	port:    schema.#Port | *defaultPort
+	dataDir: string | *defaultDataDir
+	timeout: schema.#Duration | *defaultTimeout
+	lifecycle: {
+		init: [
+			*"mysqld --initialize-insecure --datadir=\"$DATA_DIR\"" | string,
+		]
+	}
+	// Every path under the data directory: the socket and the pid file both default
+	// into a shared location (`/tmp/mysql.sock`), which a second instance would take
+	// from the first. `--mysqlx=OFF` closes the X protocol listener, whose own
+	// default port (33060) is not the one this service was given.
+	command: string | *"mysqld --datadir=\"\(dataDir)\" --port=\(port) --socket=\"\(dataDir)/mysql.sock\" --pid-file=\"\(dataDir)/mysqld.pid\" --mysqlx=OFF --bind-address=127.0.0.1"
+	environment: {
+		MYSQL_TCP_PORT: "\(port)"
+	}
+	let servicePort = port
+	healthCheck: {
+		port:    schema.#Port | *servicePort
+		timeout: schema.#Duration | *"1500ms"
+	}
+	readinessProbe: {
+		port:    schema.#Port | *servicePort
+		command: string | *"mysqladmin ping -h 127.0.0.1 -P \(servicePort) -u root"
+		timeout: schema.#Duration | *defaultTimeout
+	}
+}
+
+#ClickHouseService: schema.#Service & {
+	package: schema.#PackageRef | *"clickhouse"
+
+	let defaultPort = 8123
+	let defaultHttpPort = defaultPort
+	let defaultTcpPort = 9000
+	let defaultDataDir = ".enve/data/clickhouse"
+	let defaultConfigFile = ".enve/config/clickhouse/config.xml"
+	let defaultTimeout = "3500ms"
+
+	port:       schema.#Port | *defaultHttpPort
+	tcpPort:    schema.#Port | *defaultTcpPort
+	dataDir:    string | *defaultDataDir
+	configFile: string | *defaultConfigFile
+	timeout:    schema.#Duration | *defaultTimeout
+	command:    string | *"clickhouse-server --config-file=\(defaultConfigFile)"
+	environment: {
+		CLICKHOUSE_DATA_DIR:  defaultDataDir
+		CLICKHOUSE_HTTP_PORT: "\(defaultHttpPort)"
+		CLICKHOUSE_TCP_PORT:  "\(defaultTcpPort)"
+	}
+	let servicePort = port
+	healthCheck: {
+		port:    schema.#Port | *servicePort
+		path:    string | *"http://127.0.0.1:\(servicePort)/ping"
+		timeout: schema.#Duration | *"1000ms"
+	}
+	readinessProbe: {
+		port:    schema.#Port | *servicePort
+		command: string | *"curl -s -f 'http://127.0.0.1:\(servicePort)/?query=SELECT+1'"
+		timeout: schema.#Duration | *defaultTimeout
+	}
+}
+
+#TemporalService: schema.#Service & {
+	package: schema.#PackageRef | *"temporal-cli"
+
+	let defaultPort = 7233
+	let defaultDataDir = ".enve/data/temporal"
+	let defaultDbFilename = ".enve/data/temporal/temporal.db"
+	let defaultTimeout = "2500ms"
+
+	port:       schema.#Port | *defaultPort
+	dataDir:    string | *defaultDataDir
+	dbFilename: string | *defaultDbFilename
+	timeout:    schema.#Duration | *defaultTimeout
+	command:    string | *"temporal server start-dev --port \(port) --headless --db-filename \(dbFilename)"
+	environment: {
+		TEMPORAL_PORT: "\(port)"
+		TEMPORAL_HOST: "127.0.0.1"
+	}
+	let servicePort = port
+	healthCheck: {
+		port:    schema.#Port | *servicePort
+		timeout: schema.#Duration | *"1000ms"
+	}
+	readinessProbe: {
+		port:    schema.#Port | *servicePort
+		command: string | *"temporal operator cluster health --address 127.0.0.1:\(servicePort)"
+		timeout: schema.#Duration | *defaultTimeout
+	}
+}
+
+#SeaweedfsService: schema.#Service & {
+	package: schema.#PackageRef | *"seaweedfs"
+
+	let defaultPort = 19000
+	let defaultMasterPort = 19001
+	let defaultVolumePort = 19002
+	let defaultDataDir = ".enve/data/seaweedfs"
+
+	// `weed server` is four servers and S3 is the last to listen: ~3.2s measured, so
+	// the old 4s health budget lost the coin toss as soon as raft took a little longer.
+	let defaultTimeout = "15000ms"
+
+	port:       schema.#Port | *defaultPort
+	masterPort: schema.#Port | *defaultMasterPort
+	volumePort: schema.#Port | *defaultVolumePort
+	dataDir:    string | *defaultDataDir
+	timeout:    schema.#Duration | *defaultTimeout
+	// -master.raftHashicorp: under the legacy raft a resumed single-node master answers
+	// its own clients with `Not current leader` forever, so the second boot never serves.
+	// -ip pins the advertised address: `weed` otherwise records whichever non-loopback
+	// address it found into its raft state.
+	command: string | *"weed server -ip=127.0.0.1 -master.raftHashicorp -s3 -s3.port=\(port) -master.port=\(masterPort) -volume.port=\(volumePort) -dir=\(dataDir)"
+	environment: {
+		S3_PORT:     "\(port)"
+		S3_ENDPOINT: "http://127.0.0.1:\(port)"
+	}
+	let servicePort = port
+	healthCheck: {
+		port:    schema.#Port | *servicePort
+		timeout: schema.#Duration | *"12000ms"
+	}
+	readinessProbe: {
+		port:    schema.#Port | *servicePort
+		command: string | *"curl -s -f -o /dev/null http://127.0.0.1:\(servicePort)/"
+		timeout: schema.#Duration | *"12000ms"
+	}
+}
+
+#TansuService: schema.#Service & {
+	package: schema.#PackageRef | *"tansu"
+
+	let defaultPort = 9092
+	let defaultDataDir = ".enve/data/tansu"
+	let defaultTimeout = "1500ms"
+
+	port:    schema.#Port | *defaultPort
+	dataDir: string | *defaultDataDir
+	// On disk rather than `memory://tansu/`, which lost every topic on restart. Tansu
+	// resolves the URL's path against its working directory, so the path stays relative
+	// and the `///` is load-bearing: `sqlite://<path>` reads `<path>` as the URL's host.
+	storageEngine: string | *"sqlite:///\(dataDir)/tansu.db"
+	timeout:       schema.#Duration | *defaultTimeout
+	command:       string | *"tansu --listener-url tcp://127.0.0.1:\(port) --advertised-listener-url tcp://127.0.0.1:\(port) --storage-engine \(storageEngine)"
+	environment: {
+		KAFKA_PORT:    "\(port)"
+		KAFKA_BROKERS: "127.0.0.1:\(port)"
+	}
+	let servicePort = port
+	healthCheck: {
+		port:    schema.#Port | *servicePort
+		timeout: schema.#Duration | *"800ms"
+	}
+	readinessProbe: {
+		port:    schema.#Port | *servicePort
+		timeout: schema.#Duration | *"1000ms"
+	}
+}
+
+#KafkaService: #TansuService

@@ -1,87 +1,70 @@
 package env
 
 // -------------------------------------------------------------
-// Core Type Definitions & SemVer Constraints
+// Typed vocabulary for the environment-variable bundles
 // -------------------------------------------------------------
 
-// SemVer 2.0.0 compliant version constraint regex (e.g. "1.24", "1.23.1", "3.13.0-rc.1", "22")
-#SemVer: string & =~"^[0-9]+(\\.[0-9]+)*(-[a-zA-Z0-9.]+)?(\\+[a-zA-Z0-9.]+)?$"
-
-// -------------------------------------------------------------
-// Language Environment Presets
-// -------------------------------------------------------------
-
-#GoDevPresets: {
-	standard: #GoEnv & {
-		CGO_ENABLED: 0
-	}
-	cgo: #GoEnv & {
-		CGO_ENABLED: 1
-	}
+#AppEnv: {
+	Development: "development"
+	Production:  "production"
+	Test:        "test"
 }
+#AppEnvMode: #AppEnv.Development | #AppEnv.Production | #AppEnv.Test | *#AppEnv.Development
 
-#RustDevPresets: {
-	standard: #RustEnv & {
-		RUST_BACKTRACE: 1
-		RUST_LOG:       "info"
-	}
-	debug: #RustEnv & {
-		RUST_BACKTRACE: "full"
-		RUST_LOG:       "debug"
-	}
+#MixEnv: {
+	Dev:  "dev"
+	Test: "test"
+	Prod: "prod"
 }
+#MixEnvMode: #MixEnv.Dev | #MixEnv.Test | #MixEnv.Prod | *#MixEnv.Dev
 
-#NodeDevPresets: {
-	standard: #NodeEnv & {
-		NODE_ENV: "development"
-	}
-	production: #NodeEnv & {
-		NODE_ENV: "production"
-	}
+#LogLevel: {
+	Error: "error"
+	Warn:  "warn"
+	Info:  "info"
+	Debug: "debug"
+	Trace: "trace"
 }
+#LogLevelMode: #LogLevel.Error | #LogLevel.Warn | #LogLevel.Info | #LogLevel.Debug | #LogLevel.Trace | *#LogLevel.Info
 
-#PythonDevPresets: {
-	standard: #PythonEnv & {
-		PYTHONUNBUFFERED:        1
-		PYTHONDONTWRITEBYTECODE: 1
-	}
+#NpmLogLevel: {
+	Silent:  "silent"
+	Error:   "error"
+	Warn:    "warn"
+	Info:    "info"
+	Verbose: "verbose"
 }
+#NpmLogLevelMode: #NpmLogLevel.Silent | #NpmLogLevel.Error | #NpmLogLevel.Warn | #NpmLogLevel.Info | #NpmLogLevel.Verbose | *#NpmLogLevel.Warn
 
-#RubyDevPresets: {
-	standard: #RubyEnv & {
-		RAILS_ENV: "development"
-	}
-	production: #RubyEnv & {
-		RAILS_ENV: "production"
-	}
+#ColorMode: {
+	Always: "always"
+	Auto:   "auto"
+	Never:  "never"
 }
+#ColorModeSetting: #ColorMode.Always | #ColorMode.Auto | #ColorMode.Never | *#ColorMode.Always
 
-#GleamDevPresets: {
-	standard: #GleamEnv & {
-		GLEAM_LOG:    "info"
-		GLEAM_TARGET: "erlang"
-	}
-	js: #GleamEnv & {
-		GLEAM_LOG:    "info"
-		GLEAM_TARGET: "javascript"
-	}
-	debug: #GleamEnv & {
-		GLEAM_LOG: "trace"
-	}
+#GleamTarget: {
+	Erlang:     "erlang"
+	JavaScript: "javascript"
 }
+#GleamTargetMode: #GleamTarget.Erlang | #GleamTarget.JavaScript | *#GleamTarget.Erlang
 
-#ErlangDevPresets: {
-	standard: #ErlangEnv & {
-		REBAR_COLOR: "always"
-	}
+#GoModule: {
+	On:   "on"
+	Off:  "off"
+	Auto: "auto"
 }
+#GoModuleMode: #GoModule.On | #GoModule.Off | #GoModule.Auto | *#GoModule.On
 
-#WasmBaseEnv: {
-	CC?:                                          string | *"clang"
-	CC_wasm32_unknown_unknown?:                   string | *"/nix/store/603yaax3l2jmc0hfv6g3hgjr1qk5jfxk-clang-21.1.8/bin/clang"
-	CFLAGS_wasm32_unknown_unknown?:               string | *"-resource-dir=/nix/store/w021fbcg4z6vxihnp6gb6vijyifl051f-clang-wrapper-21.1.8/resource-root"
-	CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER: string | *"gcc"
-	[string]:                                     _
+#GoToolchain: {
+	Auto:  "auto"
+	Local: "local"
+	Path:  "path"
 }
+#GoToolchainMode: #GoToolchain.Auto | #GoToolchain.Local | #GoToolchain.Path | *#GoToolchain.Auto
 
-#WasmEnv: #WasmBaseEnv
+#CratesIoProtocol: {
+	Sparse: "sparse"
+	Git:    "git"
+}
+#CratesIoProtocolMode: #CratesIoProtocol.Sparse | #CratesIoProtocol.Git | *#CratesIoProtocol.Sparse

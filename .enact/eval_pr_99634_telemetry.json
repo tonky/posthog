@@ -1,0 +1,134 @@
+{
+  "run_id": "run-18d526757c41ce53",
+  "report": {
+    "services": {
+      "total": {
+        "peak_ram_bytes": 1765302272,
+        "avg_ram_bytes": 1516759936,
+        "total_cpu_time_ms": 14020,
+        "user_cpu_time_ms": 9480,
+        "system_cpu_time_ms": 4540,
+        "avg_cpu_cores": 0.8568634641241902,
+        "peak_cpu_cores": 1.2852951961862853,
+        "duration_ms": 16362
+      },
+      "services": {
+        "clickhouse": {
+          "peak_ram_bytes": 945278976,
+          "avg_ram_bytes": 902492909,
+          "total_cpu_time_ms": 8270,
+          "user_cpu_time_ms": 5880,
+          "system_cpu_time_ms": 2390,
+          "avg_cpu_cores": 0.5054394328321721,
+          "peak_cpu_cores": 0.7581591492482581,
+          "duration_ms": 16362
+        },
+        "enve_supervisor": {
+          "peak_ram_bytes": 52359168,
+          "avg_ram_bytes": 52359168,
+          "total_cpu_time_ms": 3590,
+          "user_cpu_time_ms": 2290,
+          "system_cpu_time_ms": 1300,
+          "avg_cpu_cores": 0.21941082997188607,
+          "peak_cpu_cores": 0.3291162449578291,
+          "duration_ms": 16362
+        },
+        "kafka": {
+          "peak_ram_bytes": 47689728,
+          "avg_ram_bytes": 47689728,
+          "total_cpu_time_ms": 310,
+          "user_cpu_time_ms": 200,
+          "system_cpu_time_ms": 110,
+          "avg_cpu_cores": 0.01894633907835228,
+          "peak_cpu_cores": 0.02841950861752842,
+          "duration_ms": 16362
+        },
+        "postgres": {
+          "peak_ram_bytes": 331603968,
+          "avg_ram_bytes": 150465952,
+          "total_cpu_time_ms": 840,
+          "user_cpu_time_ms": 440,
+          "system_cpu_time_ms": 400,
+          "avg_cpu_cores": 0.05133846718005134,
+          "peak_cpu_cores": 0.07700770077007701,
+          "duration_ms": 16362
+        },
+        "redis": {
+          "peak_ram_bytes": 16617472,
+          "avg_ram_bytes": 16617472,
+          "total_cpu_time_ms": 10,
+          "user_cpu_time_ms": 10,
+          "system_cpu_time_ms": 0,
+          "avg_cpu_cores": 0.0006111722283339445,
+          "peak_cpu_cores": 0.0009167583425009168,
+          "duration_ms": 16362
+        },
+        "seaweedfs": {
+          "peak_ram_bytes": 261349376,
+          "avg_ram_bytes": 249949371,
+          "total_cpu_time_ms": 630,
+          "user_cpu_time_ms": 350,
+          "system_cpu_time_ms": 280,
+          "avg_cpu_cores": 0.03850385038503851,
+          "peak_cpu_cores": 0.05775577557755776,
+          "duration_ms": 16362
+        },
+        "temporal": {
+          "peak_ram_bytes": 145399808,
+          "avg_ram_bytes": 141083917,
+          "total_cpu_time_ms": 370,
+          "user_cpu_time_ms": 310,
+          "system_cpu_time_ms": 60,
+          "avg_cpu_cores": 0.022613372448355946,
+          "peak_cpu_cores": 0.03392005867253392,
+          "duration_ms": 16362
+        }
+      }
+    },
+    "components": {
+      "backend": {
+        "total": {
+          "peak_ram_bytes": 1187069952,
+          "avg_ram_bytes": 741325095,
+          "total_cpu_time_ms": 13420,
+          "user_cpu_time_ms": 12340,
+          "system_cpu_time_ms": 1080,
+          "avg_cpu_cores": 1.0820835349137237,
+          "peak_cpu_cores": 5.767910355449034,
+          "duration_ms": 12402
+        },
+        "jobs": {
+          "test": {
+            "peak_ram_bytes": 1187069952,
+            "avg_ram_bytes": 741325095,
+            "total_cpu_time_ms": 13420,
+            "user_cpu_time_ms": 12340,
+            "system_cpu_time_ms": 1080,
+            "avg_cpu_cores": 1.0820835349137237,
+            "peak_cpu_cores": 5.767910355449034,
+            "duration_ms": 12402
+          }
+        }
+      }
+    }
+  },
+  "execution_records": [
+    {
+      "component": "backend",
+      "job": "test",
+      "status": "success",
+      "duration_ms": 12402,
+      "metrics": {
+        "peak_ram_bytes": 1187069952,
+        "avg_ram_bytes": 741325095,
+        "total_cpu_time_ms": 13420,
+        "user_cpu_time_ms": 12340,
+        "system_cpu_time_ms": 1080,
+        "avg_cpu_cores": 1.0820835349137237,
+        "peak_cpu_cores": 5.767910355449034,
+        "duration_ms": 12402
+      },
+      "cached": false
+    }
+  ]
+}
