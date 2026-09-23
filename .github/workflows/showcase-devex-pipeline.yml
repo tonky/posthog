@@ -53,7 +53,10 @@ jobs:
                   ENVE_TOKEN: ${{ secrets.ENVE_TOKEN }}
                   GH_TOKEN: ${{ secrets.ENVE_TOKEN || secrets.GITHUB_TOKEN }}
               run: |
-                  if ! command -v enve >/dev/null 2>&1 || ! enve --version 2>&1 | rg -q "0.7.0"; then
+                  if [ -f "${GITHUB_WORKSPACE:-$PWD}/bin/enve" ]; then
+                    sudo cp "${GITHUB_WORKSPACE:-$PWD}/bin/enve" /usr/local/bin/enve
+                    sudo chmod +x /usr/local/bin/enve
+                  elif ! command -v enve >/dev/null 2>&1; then
                     python3 scripts/fetch_enve.py /tmp/enve || true
                     if [ -f /tmp/enve ]; then
                       sudo mv /tmp/enve /usr/local/bin/enve
@@ -65,7 +68,7 @@ jobs:
             - name: Validate Monorepo Specification (enve.cue)
               shell: bash
               run: |
-                  enve check enve.cue
+                  enve cue check
 
             - name: 'Measure Setup Tax: Upstream Docker Compose Baseline vs Live tmpfs PostgreSQL'
               id: measure
@@ -218,7 +221,10 @@ jobs:
                   ENVE_TOKEN: ${{ secrets.ENVE_TOKEN }}
                   GH_TOKEN: ${{ secrets.ENVE_TOKEN || secrets.GITHUB_TOKEN }}
               run: |
-                  if ! command -v enve >/dev/null 2>&1 || ! enve --version 2>&1 | rg -q "0.7.0"; then
+                  if [ -f "${GITHUB_WORKSPACE:-$PWD}/bin/enve" ]; then
+                    sudo cp "${GITHUB_WORKSPACE:-$PWD}/bin/enve" /usr/local/bin/enve
+                    sudo chmod +x /usr/local/bin/enve
+                  elif ! command -v enve >/dev/null 2>&1; then
                     python3 scripts/fetch_enve.py /tmp/enve || true
                     if [ -f /tmp/enve ]; then
                       sudo mv /tmp/enve /usr/local/bin/enve
@@ -331,7 +337,10 @@ jobs:
                   ENVE_TOKEN: ${{ secrets.ENVE_TOKEN }}
                   GH_TOKEN: ${{ secrets.ENVE_TOKEN || secrets.GITHUB_TOKEN }}
               run: |
-                  if ! command -v enve >/dev/null 2>&1 || ! enve --version 2>&1 | rg -q "0.7.0"; then
+                  if [ -f "${GITHUB_WORKSPACE:-$PWD}/bin/enve" ]; then
+                    sudo cp "${GITHUB_WORKSPACE:-$PWD}/bin/enve" /usr/local/bin/enve
+                    sudo chmod +x /usr/local/bin/enve
+                  elif ! command -v enve >/dev/null 2>&1; then
                     python3 scripts/fetch_enve.py /tmp/enve || true
                     if [ -f /tmp/enve ]; then
                       sudo mv /tmp/enve /usr/local/bin/enve

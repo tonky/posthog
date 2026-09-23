@@ -2,7 +2,8 @@ package replay
 
 // PostHog showcase test services and environment, adapted for replay.
 // Application servers whose sources are outside the replay archive stay in the reference overlay.
-devEnv: {
+profiles: {
+    dev: {
     "description": "PostHog Polyglot Monorepo (Django + Vite + Node Ingestion + Rust Services + Go AI Gateway + ClickHouse + Kafka + Temporal + SeaweedFS)",
     "disabledServices": [],
     "environment": {
@@ -89,7 +90,6 @@ devEnv: {
     },
     "name": "posthog-replay",
     "ports": [],
-    "runtimes": {},
     "services": {
         "postgres": {
             "command": "postgres -D .enve/data/postgres -k /tmp -h 127.0.0.2 -p 5432 -c fsync=off -c synchronous_commit=off",
@@ -112,12 +112,10 @@ devEnv: {
             "files": {},
             "healthCheck": {
                 "command": "pg_isready -h 127.0.0.2 -p 5432 -U posthog",
-                "intervalMs": 10000,
                 "originDir": "/home/tonky/projects/posthog",
                 "port": 5432,
                 "retries": 3,
                 "timeout": "15000ms",
-                "timeoutMs": 15000
             },
             "host": "127.0.0.1",
             "isolation": "auto",
@@ -145,17 +143,14 @@ devEnv: {
             "port": 5432,
             "readinessProbe": {
                 "command": "psql -h 127.0.0.2 -p 5432 -U posthog -d postgres -c 'SELECT 1;'",
-                "initialDelayMs": 0,
                 "originDir": "/home/tonky/projects/posthog",
                 "port": 5432,
                 "timeout": "15000ms",
-                "timeoutMs": 15000
             },
             "resources": {},
             "restartPolicy": "on-failure",
             "socketDir": "/tmp",
             "timeout": "15000ms",
-            "timeoutMs": 15000,
             "user": "posthog",
             "volumes": [],
             "watch": []
@@ -176,12 +171,10 @@ devEnv: {
             "external": false,
             "files": {},
             "healthCheck": {
-                "intervalMs": 10000,
                 "originDir": "/home/tonky/projects/posthog",
                 "port": 16379,
                 "retries": 3,
                 "timeout": "800ms",
-                "timeoutMs": 1000
             },
             "host": "127.0.0.1",
             "isolation": "auto",
@@ -196,16 +189,13 @@ devEnv: {
             "port": 16379,
             "readinessProbe": {
                 "command": "redis-cli -p 16379 ping",
-                "initialDelayMs": 0,
                 "originDir": "/home/tonky/projects/posthog",
                 "port": 16379,
                 "timeout": "1500ms",
-                "timeoutMs": 3000
             },
             "resources": {},
             "restartPolicy": "on-failure",
             "timeout": "1500ms",
-            "timeoutMs": 3000,
             "volumes": [],
             "watch": []
         },
@@ -241,13 +231,11 @@ devEnv: {
             "external": false,
             "files": {},
             "healthCheck": {
-                "intervalMs": 10000,
                 "originDir": "/home/tonky/projects/posthog",
                 "path": "http://127.0.0.1:8123/ping",
                 "port": 8123,
                 "retries": 3,
                 "timeout": "15000ms",
-                "timeoutMs": 15000
             },
             "host": "127.0.0.1",
             "isolation": "auto",
@@ -268,17 +256,14 @@ devEnv: {
             "port": 8123,
             "readinessProbe": {
                 "command": "curl -s -f 'http://127.0.0.1:8123/?query=SELECT+1'",
-                "initialDelayMs": 0,
                 "originDir": "/home/tonky/projects/posthog",
                 "port": 8123,
                 "timeout": "15000ms",
-                "timeoutMs": 15000
             },
             "resources": {},
             "restartPolicy": "on-failure",
             "tcpPort": 9000,
             "timeout": "15000ms",
-            "timeoutMs": 15000,
             "volumes": [],
             "watch": []
         },
@@ -298,12 +283,10 @@ devEnv: {
             "external": false,
             "files": {},
             "healthCheck": {
-                "intervalMs": 10000,
                 "originDir": "/home/tonky/projects/posthog",
                 "port": 19092,
                 "retries": 3,
                 "timeout": "800ms",
-                "timeoutMs": 1000
             },
             "host": "127.0.0.1",
             "isolation": "auto",
@@ -317,17 +300,14 @@ devEnv: {
             "packages": [],
             "port": 19092,
             "readinessProbe": {
-                "initialDelayMs": 0,
                 "originDir": "/home/tonky/projects/posthog",
                 "port": 19092,
                 "timeout": "1000ms",
-                "timeoutMs": 3000
             },
             "resources": {},
             "restartPolicy": "on-failure",
             "storageEngine": "memory://tansu/",
             "timeout": "1500ms",
-            "timeoutMs": 3000,
             "volumes": [],
             "watch": []
         },
@@ -350,12 +330,10 @@ devEnv: {
             "external": false,
             "files": {},
             "healthCheck": {
-                "intervalMs": 1000,
                 "originDir": "/home/tonky/projects/posthog",
                 "port": 19000,
                 "retries": 15,
                 "timeout": "15000ms",
-                "timeoutMs": 15000
             },
             "host": "127.0.0.1",
             "isolation": "auto",
@@ -370,16 +348,13 @@ devEnv: {
             "port": 19000,
             "readinessProbe": {
                 "command": "curl -s -o /dev/null http://127.0.0.1:19000/",
-                "initialDelayMs": 0,
                 "originDir": "/home/tonky/projects/posthog",
                 "port": 19000,
                 "timeout": "6000ms",
-                "timeoutMs": 6000
             },
             "resources": {},
             "restartPolicy": "on-failure",
             "timeout": "6000ms",
-            "timeoutMs": 6000,
             "volumes": [],
             "watch": []
         },
@@ -400,12 +375,10 @@ devEnv: {
             "external": false,
             "files": {},
             "healthCheck": {
-                "intervalMs": 10000,
                 "originDir": "/home/tonky/projects/posthog",
                 "port": 7233,
                 "retries": 3,
                 "timeout": "5000ms",
-                "timeoutMs": 5000
             },
             "host": "127.0.0.1",
             "isolation": "auto",
@@ -420,16 +393,13 @@ devEnv: {
             "port": 7233,
             "readinessProbe": {
                 "command": "temporal operator cluster health --address 127.0.0.1:7233",
-                "initialDelayMs": 0,
                 "originDir": "/home/tonky/projects/posthog",
                 "port": 7233,
                 "timeout": "10000ms",
-                "timeoutMs": 10000
             },
             "resources": {},
             "restartPolicy": "on-failure",
             "timeout": "10000ms",
-            "timeoutMs": 10000,
             "volumes": [],
             "watch": []
         },
@@ -480,11 +450,9 @@ devEnv: {
             "external": false,
             "files": {},
             "healthCheck": {
-                "intervalMs": 1000,
                 "port": 7234,
                 "retries": 25,
                 "timeout": "25000ms",
-                "timeoutMs": 25000
             },
             "host": "127.0.0.1",
             "isolation": "auto",
@@ -493,15 +461,12 @@ devEnv: {
             "port": 7234,
             "readinessProbe": {
                 "command": "curl -s -f http://127.0.0.1:7234/metrics",
-                "initialDelayMs": 0,
                 "port": 7234,
                 "timeout": "25000ms",
-                "timeoutMs": 25000
             },
             "resources": {},
             "restartPolicy": "on-failure",
             "timeout": "25000ms",
-            "timeoutMs": 25000,
             "volumes": [],
             "watch": []
         },
@@ -553,11 +518,9 @@ devEnv: {
             "external": false,
             "files": {},
             "healthCheck": {
-                "intervalMs": 1000,
                 "port": 8000,
                 "retries": 15,
                 "timeout": "15000ms",
-                "timeoutMs": 15000
             },
             "host": "127.0.0.1",
             "isolation": "auto",
@@ -573,15 +536,12 @@ devEnv: {
             "port": 8000,
             "readinessProbe": {
                 "command": "curl -s -f http://127.0.0.1:8000/_health",
-                "initialDelayMs": 0,
                 "port": 8000,
                 "timeout": "15000ms",
-                "timeoutMs": 15000
             },
             "resources": {},
             "restartPolicy": "on-failure",
             "timeout": "15000ms",
-            "timeoutMs": 15000,
             "volumes": [],
             "watch": []
         }
@@ -605,16 +565,13 @@ devEnv: {
         },
         {
             "pname": "uv",
-            "version": "0.12.11"
+            "version": "0.12.17"
         },
         {
             "pname": "nodejs",
             "version": "24.20.0"
         },
-        {
-            "pname": "pnpm",
-            "version": "11.27.0"
-        },
+        "pnpm",
         {
             "pname": "just",
             "version": "1.58.0"
@@ -624,4 +581,5 @@ devEnv: {
         "actionlint",
         "shellcheck"
     ]
+}
 }
