@@ -304,6 +304,17 @@ def module_level_import_nodes(tree: ast.Module, *, type_checking: bool = False) 
     return nodes
 
 
+def module_level_import_froms(tree: ast.Module) -> list[tuple[int, str | None, list[tuple[str, str | None]]]]:
+    """Every module-level `from ... import ...` as (level, module, [(name, asname)])."""
+    results: list[tuple[int, str | None, list[tuple[str, str | None]]]] = []
+    for node in ast.iter_child_nodes(tree):
+        if _is_type_checking_guard(node):
+            continue
+        if isinstance(node, ast.ImportFrom):
+            results.append((node.level, node.module, [(alias.name, alias.asname) for alias in node.names]))
+    return results
+
+
 def lazy_reexport_map(tree: ast.Module) -> dict[str, str]:
     """PEP 562 lazy re-export map: {exported name -> dotted source module}.
 

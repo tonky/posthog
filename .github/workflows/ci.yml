@@ -65,6 +65,7 @@ jobs:
           helpers
           patches
           scripts
+          showcase
           enve.cue
           enve.lock
           package.json
@@ -209,6 +210,8 @@ jobs:
           turbo.json
           patches
           scripts
+          showcase
+          tools
           .
           playwright
           common/hogvm

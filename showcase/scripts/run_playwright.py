@@ -35,7 +35,7 @@ def resolve_changed_files(root: Path, argv: list[str]) -> list[str]:
     if len(argv) == 1:
         if "," in argv[0]:
             return [a.strip() for a in argv[0].split(",") if a.strip()]
-        if (root / argv[0]).is_file() and not argv[0].endswith((".ts", ".tsx", ".js")):
+        if (argv[0].endswith((".txt", ".target", ".targets", ".list")) or "target" in argv[0].lower()) and (root / argv[0]).is_file():
             targets = []
             for line in (root / argv[0]).read_text().splitlines():
                 line = line.strip()

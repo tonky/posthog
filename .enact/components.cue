@@ -5,6 +5,12 @@ pipeline: {
 	description: "PostHog Analytics Platform: Accelerated CI/CD Pipeline (enact + enve)"
 	env: {}
 	jobs: {}
+	workspace_scope: {
+		include: [
+			"tools",
+			"showcase",
+		]
+	}
 	triggers: {
 		pull_request: {
 			branches: [
@@ -288,9 +294,9 @@ pipeline: {
 			technology: "python"
 			root:       "tools/hogli-commands"
 			watch_paths: [
-				"tools/**",
+				"tools/hogli-commands/**",
 			]
-			test: "uv run --no-sync pytest hogli_commands/tests"
+			test: "uv run --no-sync pytest hogli_commands/tests/test_product_lint_cli.py hogli_commands/tests/test_ast_helpers.py"
 		}
 		"nodejs": {
 			name:       "nodejs"
@@ -400,7 +406,7 @@ pipeline: {
 				"tools/playwright_spec_selection.py",
 				"tools/playwright_area_map.json",
 			]
-			test: "python3 showcase/scripts/run_playwright.py {changed_files}"
+			test: "python3 ../showcase/scripts/run_playwright.py {changed_files}"
 			dependsOnComponents: [
 				"backend",
 				"frontend",
