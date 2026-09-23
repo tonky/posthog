@@ -1251,3 +1251,7 @@ environment:
         bin_script: run-seaweedfs
         description: 'TODO: add description for run-seaweedfs'
         hidden: true
+    enact:
+        bin_script: enact
+        description: 'TODO: add description for enact'
+        hidden: true
