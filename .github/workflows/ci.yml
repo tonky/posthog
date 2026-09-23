@@ -62,8 +62,14 @@ jobs:
           .github
           setup
           bin
+          helpers
+          patches
+          scripts
           enve.cue
           enve.lock
+          package.json
+          pnpm-lock.yaml
+          pnpm-workspace.yaml
         sparse-checkout-cone-mode: 'true'
         submodules: 'false'
     - name: Restore enact CLI binary cache
