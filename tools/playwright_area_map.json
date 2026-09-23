@@ -64,14 +64,16 @@
         "bin/**"
     ],
     "smoke_subset": ["playwright/e2e/auth.spec.ts"],
-    "scenes_smoke_only": ["billing", "groups", "hog-functions", "integrations", "max", "web-analytics"],
+    "scenes_smoke_only": ["groups", "hog-functions", "integrations", "max", "web-analytics"],
     "products": {
         "ai_observability": ["products/ai_observability/frontend/e2e/"],
+        "billing": ["products/billing/frontend/e2e/"],
         "posthog_ai": ["products/posthog_ai/frontend/e2e/"],
         "replay": ["products/replay/frontend/e2e/"],
         "surveys": ["products/surveys/frontend/e2e/"]
     },
     "scenes": {
+        "billing": ["products/billing/frontend/e2e/"],
         "surveys": ["products/surveys/frontend/e2e/"],
         "session-recordings": ["products/replay/frontend/e2e/"],
         "sessions": ["products/replay/frontend/e2e/"],
@@ -90,13 +92,13 @@
         ],
         "saved-insights": ["playwright/e2e/product-analytics/insights-list.spec.ts"],
         "insights": [
-            "playwright/e2e/product-analytics/",
+            "playwright/e2e/product-analytics/insights/trends.spec.ts",
             "playwright/e2e/insight-sharing-password.spec.ts",
             "playwright/e2e/shared-insight-unauthenticated.spec.ts"
         ],
-        "funnels": ["playwright/e2e/product-analytics/"],
-        "paths": ["playwright/e2e/product-analytics/"],
-        "paths-v2": ["playwright/e2e/product-analytics/"],
+        "funnels": ["playwright/e2e/product-analytics/insights/funnels.spec.ts"],
+        "paths": ["playwright/e2e/product-analytics/insights/paths.spec.ts"],
+        "paths-v2": ["playwright/e2e/product-analytics/insights/paths.spec.ts"],
         "retention": ["playwright/e2e/product-analytics/retention.spec.ts"],
         "persons": ["playwright/e2e/persons/persons.spec.ts"],
         "persons-management": ["playwright/e2e/persons/persons.spec.ts"],
