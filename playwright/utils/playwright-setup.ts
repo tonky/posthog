@@ -180,8 +180,11 @@ export class PlaywrightSetup {
                 }
 
                 if (!response.ok()) {
-                    // Server errors (5xx) are retryable; client errors (4xx) are not
-                    if (response.status() >= 500 && attempt < maxRetries) {
+                    const isConfigurationError =
+                        typeof result?.error === 'string' &&
+                        (result.error.includes('not configured') || result.error.includes('EndpointConnectionError'))
+                    // Server errors (5xx) are retryable (unless structural/config errors); client errors (4xx) are not
+                    if (response.status() >= 500 && !isConfigurationError && attempt < maxRetries) {
                         console.warn(
                             `[PlaywrightSetup] Server error ${response.status()} on attempt ${attempt}/${maxRetries} for '${setupType}', retrying...`
                         )
