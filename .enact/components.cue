@@ -412,40 +412,7 @@ pipeline: {
 				"backend",
 				"frontend",
 			]
-			uses: [
-				{
-					protocol: "http"
-					target:   "server"
-				},
-				{
-					protocol: "sql"
-					target:   "postgres"
-				},
-				{
-					protocol: "http"
-					target:   "clickhouse"
-				},
-				{
-					protocol: "redis"
-					target:   "redis"
-				},
-				{
-					protocol: "http"
-					target:   "seaweedfs"
-				},
-				{
-					protocol: "kafka"
-					target:   "kafka"
-				},
-				{
-					protocol: "grpc"
-					target:   "temporal"
-				},
-				{
-					protocol: "http"
-					target:   "temporal-worker"
-				},
-			]
+			uses: []
 		}
 	}
 }
