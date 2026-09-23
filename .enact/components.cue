@@ -7,6 +7,7 @@ pipeline: {
 	jobs: {}
 	workspace_scope: {
 		include: [
+			".enact",
 			"tools",
 			"showcase",
 		]
