@@ -88,10 +88,14 @@ jobs:
         git config --global --add safe.directory "*" 2>/dev/null || true
         mkdir -p "$HOME/.cargo/bin" "$HOME/.local/share/enve/store"
         if command -v sudo >/dev/null 2>&1; then
-          sudo mkdir -p -m 0755 /nix /nix/store 2>/dev/null || true
+          sudo mkdir -p -m 0755 /nix 2>/dev/null || true
           sudo chown -R $(id -u):$(id -g) /nix 2>/dev/null || true
         fi
-        if [ -d "/nix" ] && [ ! -e "/nix/store" ]; then
+        if [ -d "/nix" ]; then
+          if [ -d "/nix/store" ] && [ ! -L "/nix/store" ]; then
+            cp -rn /nix/store/* "$HOME/.local/share/enve/store/" 2>/dev/null || true
+            rm -rf /nix/store 2>/dev/null || true
+          fi
           ln -sfn "$HOME/.local/share/enve/store" /nix/store 2>/dev/null || true
         fi
         BIN_DIR="${GITHUB_WORKSPACE:-$PWD}/bin"
@@ -232,10 +236,14 @@ jobs:
         git config --global --add safe.directory "*" 2>/dev/null || true
         mkdir -p "$HOME/.cargo/bin" "$HOME/.local/share/enve/store"
         if command -v sudo >/dev/null 2>&1; then
-          sudo mkdir -p -m 0755 /nix /nix/store 2>/dev/null || true
+          sudo mkdir -p -m 0755 /nix 2>/dev/null || true
           sudo chown -R $(id -u):$(id -g) /nix 2>/dev/null || true
         fi
-        if [ -d "/nix" ] && [ ! -e "/nix/store" ]; then
+        if [ -d "/nix" ]; then
+          if [ -d "/nix/store" ] && [ ! -L "/nix/store" ]; then
+            cp -rn /nix/store/* "$HOME/.local/share/enve/store/" 2>/dev/null || true
+            rm -rf /nix/store 2>/dev/null || true
+          fi
           ln -sfn "$HOME/.local/share/enve/store" /nix/store 2>/dev/null || true
         fi
         BIN_DIR="${GITHUB_WORKSPACE:-$PWD}/bin"
@@ -259,6 +267,13 @@ jobs:
           ${{ runner.os }}-nix-store-
     - name: Pull Dependencies via enve
       run: |-
+        if [ -d "/nix" ]; then
+          if [ -d "/nix/store" ] && [ ! -L "/nix/store" ]; then
+            cp -rn /nix/store/* "$HOME/.local/share/enve/store/" 2>/dev/null || true
+            rm -rf /nix/store 2>/dev/null || true
+          fi
+          ln -sfn "$HOME/.local/share/enve/store" /nix/store 2>/dev/null || true
+        fi
         if [ -f "enve.lock" ]; then
           if [ "${{ steps.nix_l1_cache.outputs.cache-hit }}" != "true" ] && [ -n "$ENACT_R2_BUCKET" ]; then
             enve cache pull enve.lock --cache "$ENACT_R2_BUCKET" --insecure -j 16
@@ -468,10 +483,14 @@ jobs:
         git config --global --add safe.directory "*" 2>/dev/null || true
         mkdir -p "$HOME/.cargo/bin" "$HOME/.local/share/enve/store"
         if command -v sudo >/dev/null 2>&1; then
-          sudo mkdir -p -m 0755 /nix /nix/store 2>/dev/null || true
+          sudo mkdir -p -m 0755 /nix 2>/dev/null || true
           sudo chown -R $(id -u):$(id -g) /nix 2>/dev/null || true
         fi
-        if [ -d "/nix" ] && [ ! -e "/nix/store" ]; then
+        if [ -d "/nix" ]; then
+          if [ -d "/nix/store" ] && [ ! -L "/nix/store" ]; then
+            cp -rn /nix/store/* "$HOME/.local/share/enve/store/" 2>/dev/null || true
+            rm -rf /nix/store 2>/dev/null || true
+          fi
           ln -sfn "$HOME/.local/share/enve/store" /nix/store 2>/dev/null || true
         fi
         BIN_DIR="${GITHUB_WORKSPACE:-$PWD}/bin"
@@ -548,10 +567,14 @@ jobs:
         git config --global --add safe.directory "*" 2>/dev/null || true
         mkdir -p "$HOME/.cargo/bin" "$HOME/.local/share/enve/store"
         if command -v sudo >/dev/null 2>&1; then
-          sudo mkdir -p -m 0755 /nix /nix/store 2>/dev/null || true
+          sudo mkdir -p -m 0755 /nix 2>/dev/null || true
           sudo chown -R $(id -u):$(id -g) /nix 2>/dev/null || true
         fi
-        if [ -d "/nix" ] && [ ! -e "/nix/store" ]; then
+        if [ -d "/nix" ]; then
+          if [ -d "/nix/store" ] && [ ! -L "/nix/store" ]; then
+            cp -rn /nix/store/* "$HOME/.local/share/enve/store/" 2>/dev/null || true
+            rm -rf /nix/store 2>/dev/null || true
+          fi
           ln -sfn "$HOME/.local/share/enve/store" /nix/store 2>/dev/null || true
         fi
         BIN_DIR="${GITHUB_WORKSPACE:-$PWD}/bin"
@@ -691,6 +714,13 @@ jobs:
           ${{ runner.os }}-nix-store-
     - name: Pull Dependencies via enve
       run: |-
+        if [ -d "/nix" ]; then
+          if [ -d "/nix/store" ] && [ ! -L "/nix/store" ]; then
+            cp -rn /nix/store/* "$HOME/.local/share/enve/store/" 2>/dev/null || true
+            rm -rf /nix/store 2>/dev/null || true
+          fi
+          ln -sfn "$HOME/.local/share/enve/store" /nix/store 2>/dev/null || true
+        fi
         if [ -f "enve.lock" ]; then
           if [ "${{ steps.nix_l1_cache.outputs.cache-hit }}" != "true" ] && [ -n "$ENACT_R2_BUCKET" ]; then
             enve cache pull enve.lock --cache "$ENACT_R2_BUCKET" --insecure -j 16
