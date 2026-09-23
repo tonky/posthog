@@ -1255,3 +1255,7 @@ environment:
         bin_script: enact
         description: 'TODO: add description for enact'
         hidden: true
+    enve:
+        bin_script: enve
+        description: 'TODO: add description for enve'
+        hidden: true
