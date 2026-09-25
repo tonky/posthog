@@ -52,9 +52,7 @@ if [ "${FORCE_PRIME:-0}" = "1" ] || [ "${1:-}" = "--force" ] || [ "${COUNT:-0}" 
     log_cmd "psql -h $PG_HOST -p $PG_PORT -U $PG_USER -d postgres -c 'CREATE DATABASE posthog TEMPLATE template_posthog;'"
     psql -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" -d postgres -q \
         -c "DROP DATABASE IF EXISTS posthog;" \
-        -c "CREATE DATABASE posthog TEMPLATE template_posthog;" \
-        -c "DROP DATABASE IF EXISTS test_postgres;" \
-        -c "CREATE DATABASE test_postgres TEMPLATE template_posthog;"
+        -c "CREATE DATABASE posthog TEMPLATE template_posthog;"
         
     log_ok "PostgreSQL databases primed & templated in <1.5s."
 else

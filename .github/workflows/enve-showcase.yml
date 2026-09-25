@@ -111,17 +111,6 @@ jobs:
               uses: actions/setup-node@v4
               with:
                   node-version: 22
-                  cache: pnpm
-
-            - name: 'L1 Cache: Python Dependencies (.venv & uv cache)'
-              uses: actions/cache@v4
-              with:
-                  path: |
-                      .venv
-                      ~/.cache/uv
-                  key: posthog-python-${{ runner.os }}-${{ hashFiles('uv.lock') }}
-                  restore-keys: |
-                      posthog-python-${{ runner.os }}-
 
             - name: 'Cold Start: Hermetic Store Materialization (enve cache pull)'
               env:
@@ -183,21 +172,26 @@ jobs:
                   VENV_HASH="$(sha256sum uv.lock | awk '{print $1}')"
                   VENV_KEY="cache/posthog-venv-${VENV_HASH}.tar.zst"
                   if [ ! -d ".venv" ]; then
-                    echo "L1 Cache Miss: Checking L2 Cloudflare R2 binary cache for pre-built virtualenv (${VENV_KEY})..."
+                    echo "Checking L2 Cloudflare R2 binary cache for pre-built virtualenv (${VENV_KEY})..."
                     if [ -n "${AWS_ACCESS_KEY_ID:-}" ]; then
-                      if aws s3 cp "s3://${R2_BUCKET}/${VENV_KEY}" - --endpoint-url "${R2_ENDPOINT}" 2>/dev/null | tar -I "zstd -T0" -xf - 2>/dev/null; then
-                        echo "L2 Cache Hit: Restored .venv directly from Cloudflare R2"
+                      START_VENV=$(date +%s%N)
+                      if aws s3 cp "s3://${R2_BUCKET}/${VENV_KEY}" - --endpoint-url "${R2_ENDPOINT}" 2>/dev/null | tar -I "zstd -d -T0" -xf - 2>/dev/null; then
+                        END_VENV=$(date +%s%N)
+                        VENV_SEC=$(awk "BEGIN {printf \"%.2f\", ($END_VENV - $START_VENV) / 1000000000}")
+                        echo "L2 Cache Hit: Restored .venv directly from Cloudflare R2 in ${VENV_SEC}s"
                       fi
                     fi
                   fi
 
                   # 2. Sync python dependencies in hermetic enve environment
                   if [ ! -d ".venv" ]; then
-                    echo "L1/L2 Cache Miss: Installing python dependencies with uv in hermetic enve environment..."
+                    echo "L2 Cache Miss: Installing python dependencies with uv in hermetic enve environment..."
                     enve run -f showcase/enve.cue -- uv sync --frozen
+                    # Purge unused CUDA / NVIDIA libraries (410MB dead bloat on CPU runner)
+                    rm -rf .venv/lib/python*/site-packages/nvidia* 2>/dev/null || true
                     if [ -n "${AWS_ACCESS_KEY_ID:-}" ]; then
-                      echo "Uploading virtualenv to L2 Cloudflare R2 binary cache..."
-                      tar -I "zstd -T0 -3" -cf - .venv | aws s3 cp - "s3://${R2_BUCKET}/${VENV_KEY}" --endpoint-url "${R2_ENDPOINT}" 2>/dev/null || true
+                      echo "Uploading slimmed virtualenv to L2 Cloudflare R2 binary cache with zstd -1 -T0..."
+                      tar --exclude='__pycache__' --exclude='*.pyc' -I "zstd -1 -T0" -cf - .venv | aws s3 cp - "s3://${R2_BUCKET}/${VENV_KEY}" --endpoint-url "${R2_ENDPOINT}" 2>/dev/null || true
                     fi
                   else
                     echo "Verifying virtualenv consistency with uv..."

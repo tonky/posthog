@@ -81,7 +81,7 @@ profiles: dev: schema.#Profile & {
 			}
 			lifecycle: {
 				init: [
-					"sh -c 'test -f /tmp/posthog_pg_15432/PG_VERSION || { initdb -D /tmp/posthog_pg_15432 --auth=trust --username=posthog --no-sync && echo \"CREATE ROLE postgres SUPERUSER LOGIN;\" | postgres --single -D /tmp/posthog_pg_15432 template1 && echo \"CREATE DATABASE posthog;\" | postgres --single -D /tmp/posthog_pg_15432 template1 && echo \"CREATE DATABASE test_posthog;\" | postgres --single -D /tmp/posthog_pg_15432 template1 && echo \"CREATE DATABASE test_posthog_persons;\" | postgres --single -D /tmp/posthog_pg_15432 template1; }'",
+					"sh -c 'test -f /tmp/posthog_pg_15432/PG_VERSION || { initdb -D /tmp/posthog_pg_15432 --auth=trust --username=posthog --no-sync && printf \"CREATE ROLE postgres SUPERUSER LOGIN;\\nCREATE DATABASE posthog;\\nCREATE DATABASE test_posthog;\\nCREATE DATABASE test_posthog_persons;\\n\" | postgres --single -D /tmp/posthog_pg_15432 template1; }'",
 				]
 				postStart: [
 					"sh -c 'test -f scripts/prime_database.sh && bash scripts/prime_database.sh || bash showcase/scripts/prime_database.sh'",
