@@ -14,28 +14,84 @@ REPO_ROOT="$(cd "$SHOWCASE_DIR/.." && pwd)"
 export SHOWCASE_DIR
 export REPO_ROOT
 
-# 1. Integrate enve toolchain and environment variables
-if command -v enve >/dev/null 2>&1; then
-    eval "$(cd "$SHOWCASE_DIR" && enve direnv 2>/dev/null | grep -E '^export ' || true)"
-fi
+# Standardized timestamp logging helpers (no emojis, CLI command visibility)
+log_ts() {
+    date '+%Y-%m-%d %H:%M:%S'
+}
 
-# Add tools materialized in enve user store (e.g. Tansu Kafka)
-if [ -d "${HOME}/.cache/enve/store" ]; then
-    for store_bin in "${HOME}/.cache/enve/store"/*/bin; do
-        if [ -d "$store_bin" ]; then
-            export PATH="$store_bin:$PATH"
+log_info() {
+    echo "[$(log_ts)] [INFO] $*"
+}
+
+log_cmd() {
+    echo "[$(log_ts)] [CMD] $*"
+}
+
+log_step() {
+    echo "[$(log_ts)] [STEP] $*"
+}
+
+log_ok() {
+    echo "[$(log_ts)] [OK] $*"
+}
+
+log_warn() {
+    echo "[$(log_ts)] [WARN] $*" >&2
+}
+
+log_error() {
+    echo "[$(log_ts)] [ERROR] $*" >&2
+}
+
+# Pure-bash stream filter to prefix unstamped output lines with ISO timestamps
+stamp_lines() {
+    local line ts
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        if [[ "$line" =~ ^\[[0-9]{4}-[0-9]{2}-[0-9]{2} ]] || [[ -z "${line// }" ]] || [[ "$line" == "====="* ]]; then
+            printf '%s\n' "$line"
+        else
+            printf -v ts '%(%Y-%m-%d %H:%M:%S)T' -1
+            printf '[%s] %s\n' "$ts" "$line"
         fi
     done
+}
+
+
+# 1. Integrate enve toolchain and environment variables
+if command -v enve >/dev/null 2>&1; then
+    eval "$(cd "$SHOWCASE_DIR" && enve direnv 2>/dev/null | { command -v rg >/dev/null 2>&1 && rg '^export ' || awk '/^export /'; } || true)"
 fi
 
-# Ensure repo virtualenv takes precedence for python/pytest
-if [ -d "$REPO_ROOT/.venv/bin" ]; then
+# Ensure Node.js is discoverable in container runner environments
+for node_dir in /opt/acttoolcache/node/*/x64/bin; do
+    if [ -d "$node_dir" ]; then
+        export PATH="$node_dir:$PATH"
+        break
+    fi
+done
+
+# Silence third-party CLI update checks and telemetry
+export TURBO_DISABLE_UPDATE_CHECK=1
+export TURBO_TELEMETRY_DISABLED=1
+export DO_NOT_TRACK=1
+
+
+
+# Ensure repo virtualenv takes precedence for python/pytest if functional
+if [ -d "$REPO_ROOT/.venv/bin" ] && "$REPO_ROOT/.venv/bin/python" --version >/dev/null 2>&1; then
     export PATH="$REPO_ROOT/.venv/bin:$PATH"
     export VIRTUAL_ENV="$REPO_ROOT/.venv"
     export PYTHON_BIN="$REPO_ROOT/.venv/bin/python"
 else
     export PYTHON_BIN="$(command -v python3 || command -v python)"
 fi
+
+# Ensure auxiliary tool paths (e.g. cargo, pnpm) are in PATH
+for extra_path in "$HOME/.cargo/bin" "$HOME/.local/share/pnpm" "${PNPM_HOME:-}"; do
+    if [ -n "$extra_path" ] && [ -d "$extra_path" ]; then
+        export PATH="$extra_path:$PATH"
+    fi
+done
 
 # 3. Host Operating System and Architecture
 HOST_OS="$(uname -s)"
@@ -63,6 +119,12 @@ else
 fi
 mkdir -p "$SHOWCASE_TMPFS"
 export SHOWCASE_TMPFS
+
+# Unprivileged user resolution for services (e.g. PostgreSQL) when running as root in containers
+if [ "$(id -u)" -eq 0 ]; then
+    export ENVE_SERVICE_UID="${ENVE_SERVICE_UID:-1000}"
+    export ENVE_SERVICE_GID="${ENVE_SERVICE_GID:-1000}"
+fi
 
 # 6. Service Port Definitions (Loopback Networking)
 export PG_PORT="${PGPORT:-15432}"
@@ -178,17 +240,11 @@ export OPENBLAS_NUM_THREADS="${CPUS_PER_WORKER:-1}"
 export MKL_NUM_THREADS="${CPUS_PER_WORKER:-1}"
 export NUMEXPR_NUM_THREADS="${CPUS_PER_WORKER:-1}"
 
-# 11. Verify enve version 0.8.3
+# 11. Verify enve installation
 verify_enve() {
     if ! command -v enve >/dev/null 2>&1; then
-        echo "❌ FATAL: enve command not found in PATH." >&2
-        echo "   Please ensure enve 0.8.3 is installed or enter via 'enve dev'." >&2
-        exit 1
-    fi
-    local ver_out
-    ver_out="$(enve --version 2>&1 || true)"
-    if ! echo "$ver_out" | grep -qE "0\.8\.3"; then
-        echo "❌ FATAL: enve 0.8.3 required, but found: $ver_out" >&2
+        log_error "FATAL: enve command not found in PATH."
+        log_error "Please ensure enve is installed or enter via 'enve dev'."
         exit 1
     fi
 }

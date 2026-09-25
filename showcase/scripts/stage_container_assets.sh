@@ -14,7 +14,7 @@ source "$SCRIPT_DIR/common_env.sh"
 STAGING_DIR="${1:-dist/showcase-container-root}"
 
 echo "======================================================================="
-echo "  📦 Staging PostHog Container Application Assets to: $STAGING_DIR"
+log_info "Staging PostHog Container Application Assets to: $STAGING_DIR"
 echo "======================================================================="
 
 rm -rf "$STAGING_DIR"
@@ -25,7 +25,8 @@ mkdir -p "$STAGING_DIR/code/.tiktoken_cache"
 mkdir -p "$STAGING_DIR/docker-entrypoint.d"
 
 # 1. Staging core application modules (ignoring tests, snapshots, and dev artifacts upfront)
-echo "• 1. Staging core application modules (ignoring tests, snapshots, and dev artifacts upfront)..."
+log_info "1. Staging core application modules (ignoring tests, snapshots, and dev artifacts upfront)..."
+log_cmd "rsync -a --exclude=__pycache__ --exclude=*.pyc --exclude=test_*.py --exclude=*_test.py --exclude=tests --exclude=__tests__ --exclude=__snapshots__ --exclude=*.stories.* --exclude=products/*/frontend --exclude=node_modules --exclude=products/desktop posthog ee products common manage.py $STAGING_DIR/code/"
 rsync -a \
     --exclude='__pycache__' \
     --exclude='*.pyc' \
@@ -41,7 +42,7 @@ rsync -a \
     posthog ee products common manage.py "$STAGING_DIR/code/"
 
 # 2. Persons SQL Migrations, MCP Schemas & Stamphog Owners
-echo "• 2. Staging migrations, schemas, and tooling..."
+log_info "2. Staging migrations, schemas, and tooling..."
 if [ -d "rust/persons_migrations" ]; then
     mkdir -p "$STAGING_DIR/code/rust"
     cp -r rust/persons_migrations "$STAGING_DIR/code/rust/"
@@ -56,7 +57,7 @@ if [ -d "tools/owners" ]; then
 fi
 
 # 3. Server Entrypoint Executables
-echo "• 3. Staging server entrypoint scripts..."
+log_info "3. Staging server entrypoint scripts..."
 mkdir -p "$STAGING_DIR/code/bin"
 [ -d "bin" ] && cp -r bin/* "$STAGING_DIR/code/bin/" 2>/dev/null || true
 [ -f bin/docker-server-unit ] && cp bin/docker-server-unit "$STAGING_DIR/code/bin/"
@@ -65,12 +66,12 @@ mkdir -p "$STAGING_DIR/code/bin"
 chmod +x "$STAGING_DIR/code/bin/"* 2>/dev/null || true
 
 # 4. NGINX Unit Configuration Template
-echo "• 4. Staging NGINX Unit configuration template..."
+log_info "4. Staging NGINX Unit configuration template..."
 [ -f unit.json.tpl ] && cp unit.json.tpl "$STAGING_DIR/docker-entrypoint.d/unit.json.tpl"
 [ -f unit.json.tpl ] && cp unit.json.tpl "$STAGING_DIR/code/unit.json.tpl"
 
 # 5. Frontend Bundle & Product Catalog (Slimming Step: keep templates only)
-echo "• 5. Staging compiled frontend templates (ignoring non-HTML static assets)..."
+log_info "5. Staging compiled frontend templates (ignoring non-HTML static assets)..."
 mkdir -p "$STAGING_DIR/code/frontend/dist"
 SOURCE_FE_DIST=""
 if [ -d "dist/prebuilt-frontend/code/frontend/dist" ] && [ -s "dist/prebuilt-frontend/code/frontend/dist/index.html" ]; then
@@ -98,7 +99,7 @@ else
 fi
 
 # 6. Django Static Assets (Slimming Step: exclude sourcemaps *.map)
-echo "• 6. Staging collected staticfiles (ignoring sourcemaps upfront)..."
+log_info "6. Staging collected staticfiles (ignoring sourcemaps upfront)..."
 STATIC_EXCLUDES=(--exclude='*.map' --exclude='*.map.gz' --exclude='*.map.br')
 
 if [ -d "dist/staticfiles" ] && [ "$(ls -A dist/staticfiles 2>/dev/null)" ]; then
@@ -108,7 +109,7 @@ elif [ -d "staticfiles" ] && [ "$(ls -A staticfiles 2>/dev/null)" ]; then
 fi
 
 # 7. GeoIP Database Setup & Commit Metadata
-echo "• 7. Staging GeoIP database and commit metadata..."
+log_info "7. Staging GeoIP database and commit metadata..."
 if [ -f share/GeoLite2-City.mmdb ]; then
     cp share/GeoLite2-City.mmdb "$STAGING_DIR/code/share/"
 elif [ -f dist/geoip/code/share/GeoLite2-City.mmdb ]; then
@@ -123,7 +124,7 @@ echo "$COMMIT_HASH" > "$STAGING_DIR/code/commit.txt"
 # 8. Stage Production Python Runtime (/python-runtime)
 # Upfront Optimization: Build lean runtime directly from release wheels & uv.lock.
 # Eliminates the anti-pattern of copying dirty developer .venv and post-hoc stripping.
-echo "• 8. Staging clean production Python runtime (release wheels, zero dev dependencies, CUDA purged upfront)..."
+log_info "8. Staging clean production Python runtime (release wheels, zero dev dependencies, CUDA purged upfront)..."
 mkdir -p "$STAGING_DIR/python-runtime"
 
 if [ -d "dist/wheel-cache" ] && [ "$(ls -1 dist/wheel-cache/*.whl 2>/dev/null | wc -l)" -gt 0 ] && command -v uv >/dev/null 2>&1; then
@@ -136,18 +137,18 @@ if [ -d "dist/wheel-cache" ] && [ "$(ls -1 dist/wheel-cache/*.whl 2>/dev/null | 
     # Purge unused CUDA/GPU runtime packages upfront
     rm -rf "$STAGING_DIR/python-runtime/lib/python3.13/site-packages/nvidia"* 2>/dev/null || true
     # Slimming Step: Purge upstream package test directories inside vendor site-packages (removes ~110MB & ~18k files)
-    echo "   -> Purging upstream test suites & docs from vendor site-packages..."
-    find "$STAGING_DIR/python-runtime/lib/python3.13/site-packages" -type d \( -name "tests" -o -name "test" -o -name "__tests__" -o -name "testing" \) -exec rm -rf {} + 2>/dev/null || true
+    log_info "Purging upstream test suites & docs from vendor site-packages..."
+    fd -H -I -t d '^(tests|test|__tests__|testing)$' "$STAGING_DIR/python-runtime/lib/python3.13/site-packages" -x rm -rf 2>/dev/null || true
 elif command -v uv >/dev/null 2>&1; then
-    echo "   -> Populating production site-packages via uv sync --frozen --no-dev --compile-bytecode..."
+    log_info "Populating production site-packages via uv sync --frozen --no-dev --compile-bytecode..."
     uv venv "$STAGING_DIR/python-runtime" --python 3.13 >/dev/null 2>&1 || true
     UV_PROJECT_ENVIRONMENT="$STAGING_DIR/python-runtime" uv sync \
         --frozen --no-dev --no-editable --no-install-workspace \
         --compile-bytecode >/dev/null 2>&1 || true
     rm -rf "$STAGING_DIR/python-runtime/lib/python3.13/site-packages/nvidia"* 2>/dev/null || true
-    find "$STAGING_DIR/python-runtime/lib/python3.13/site-packages" -type d \( -name "tests" -o -name "test" -o -name "__tests__" -o -name "testing" \) -exec rm -rf {} + 2>/dev/null || true
+    fd -H -I -t d '^(tests|test|__tests__|testing)$' "$STAGING_DIR/python-runtime/lib/python3.13/site-packages" -x rm -rf 2>/dev/null || true
 elif [ -d ".venv" ] && [ -f ".venv/pyvenv.cfg" ]; then
-    echo "   -> Fallback: rsyncing production subsets from local .venv..."
+    log_info "Fallback: rsyncing production subsets from local .venv..."
     rsync -a \
         --exclude='nvidia*' \
         --exclude='dagster_webserver*' \
@@ -189,14 +190,14 @@ fi
 
 # 9. Verify Native Extensions and Ensure Release Symbol Cleanliness
 if command -v strip >/dev/null 2>&1 && [ -d "$STAGING_DIR/python-runtime/lib" ]; then
-    echo "• 9. Verifying lean native extension runtime (release symbols clean, OpenBLAS preserved)..."
-    find "$STAGING_DIR/python-runtime/lib" -type f -name "*.so*" ! -name "*openblas*" -exec strip --strip-unneeded {} + 2>/dev/null || true
+    log_info "9. Verifying lean native extension runtime (release symbols clean, OpenBLAS preserved)..."
+    fd -t f -e so '.*' "$STAGING_DIR/python-runtime/lib" -E "*openblas*" -x strip --strip-unneeded 2>/dev/null || true
 fi
 
-TOTAL_FILES=$(find "$STAGING_DIR" -type f | wc -l)
+TOTAL_FILES=$(fd -t f . "$STAGING_DIR" | wc -l)
 TOTAL_SIZE=$(du -sh "$STAGING_DIR" | awk '{print $1}')
 echo "======================================================================="
-echo "✅ Complete application & runtime staging finished!"
-echo "   Files staged: $TOTAL_FILES"
-echo "   Total size:   $TOTAL_SIZE"
+log_ok "Complete application & runtime staging finished!"
+log_info "Files staged: $TOTAL_FILES"
+log_info "Total size:   $TOTAL_SIZE"
 echo "======================================================================="

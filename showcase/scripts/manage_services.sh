@@ -33,7 +33,7 @@ wait_for_condition() {
         sleep "$interval"
     done
 
-    echo "✗ FATAL: $name failed probe after $((max_attempts * 50 / 1000))s!" >&2
+    log_error "FATAL: $name failed probe after $((max_attempts * 50 / 1000))s!" >&2
     if [[ -n "$log_file" && -f "$log_file" ]]; then
         echo "=== [LOG: $name ($log_file)] ===" >&2
         tail -n 30 "$log_file" >&2 || true
@@ -71,11 +71,11 @@ start_services() {
     local pg_log="${LOG_DIR}/postgres.log"
 
     if pg_isready -h 127.0.0.1 -p "$PG_PORT" -U posthog >/dev/null 2>&1; then
-        echo "ℹ PostgreSQL already running on port ${PG_PORT}"
+        log_info "PostgreSQL already running on port ${PG_PORT}"
         SERVICE_STATUS["postgres"]="running (reused)"
         SERVICE_READY_MS["postgres"]="0"
     else
-        echo "▶ Starting rootless PostgreSQL cluster on tmpfs..."
+        log_info "Starting rootless PostgreSQL cluster on tmpfs..."
         rm -rf "$pg_data"
         mkdir -p "$pg_data"
         initdb -D "$pg_data" --auth=trust --username=posthog --no-sync >/dev/null 2>&1
@@ -109,7 +109,7 @@ start_services() {
         t1_pg=$(date +%s%N)
         SERVICE_READY_MS["postgres"]=$(( (t1_pg - t0_pg) / 1000000 ))
         SERVICE_STATUS["postgres"]="health: ok, readiness: ok"
-        echo "✓ Live PostgreSQL running on port ${PG_PORT} (${SERVICE_STATUS["postgres"]})"
+        log_ok "Live PostgreSQL running on port ${PG_PORT} (${SERVICE_STATUS["postgres"]})"
     fi
     local cur_pg_pid
     cur_pg_pid=$(cat "$PID_DIR/postgres.pid" 2>/dev/null || pgrep -f "postgres -D.*$PG_PORT" | head -n 1 || echo "")
@@ -124,11 +124,11 @@ start_services() {
     local redis_log="${LOG_DIR}/redis.log"
 
     if nc -z 127.0.0.1 "$REDIS_PORT" 2>/dev/null; then
-        echo "ℹ Redis already running on port ${REDIS_PORT}"
+        log_info "Redis already running on port ${REDIS_PORT}"
         SERVICE_STATUS["redis"]="running (reused)"
         SERVICE_READY_MS["redis"]="0"
     else
-        echo "▶ Starting rootless Redis server on tmpfs..."
+        log_info "Starting rootless Redis server on tmpfs..."
         mkdir -p "$redis_dir"
         redis-server --port "$REDIS_PORT" --dir "$redis_dir" --save '' --appendonly no --daemonize yes --logfile "$redis_log" >/dev/null 2>&1
         wait_for_condition "Redis" "nc -z 127.0.0.1 $REDIS_PORT" "$redis_log" 40
@@ -137,7 +137,7 @@ start_services() {
         t1_redis=$(date +%s%N)
         SERVICE_READY_MS["redis"]=$(( (t1_redis - t0_redis) / 1000000 ))
         SERVICE_STATUS["redis"]="health: ok, readiness: ok"
-        echo "✓ Live Redis running on port ${REDIS_PORT} (${SERVICE_STATUS["redis"]})"
+        log_ok "Live Redis running on port ${REDIS_PORT} (${SERVICE_STATUS["redis"]})"
     fi
     local cur_redis_pid
     cur_redis_pid=$(pgrep -f "redis-server.*$REDIS_PORT" | head -n 1 || echo "")
@@ -153,11 +153,11 @@ start_services() {
     local kafka_log="${LOG_DIR}/kafka.log"
 
     if nc -z 127.0.0.1 "$KAFKA_PORT" 2>/dev/null; then
-        echo "ℹ Tansu Kafka broker already running on port ${KAFKA_PORT}"
+        log_info "Tansu Kafka broker already running on port ${KAFKA_PORT}"
         SERVICE_STATUS["kafka"]="running (reused)"
         SERVICE_READY_MS["kafka"]="0"
     else
-        echo "▶ Starting rootless Tansu Kafka broker on 127.0.0.1:${KAFKA_PORT}..."
+        log_info "Starting rootless Tansu Kafka broker on 127.0.0.1:${KAFKA_PORT}..."
         mkdir -p "$kafka_dir"
         setsid tansu --listener-url "tcp://127.0.0.1:${KAFKA_PORT}" \
               --advertised-listener-url "tcp://127.0.0.1:${KAFKA_PORT}" \
@@ -169,7 +169,7 @@ start_services() {
 
         wait_for_condition "Tansu Kafka" "nc -z 127.0.0.1 $KAFKA_PORT" "$kafka_log" 60
         # Provision common Kafka topics in background
-        "$PYTHON_BIN" -c '
+        python3 -c '
 from kafka.admin import KafkaAdminClient, NewTopic
 import re
 try:
@@ -188,7 +188,7 @@ except Exception:
         t1_kafka=$(date +%s%N)
         SERVICE_READY_MS["kafka"]=$(( (t1_kafka - t0_kafka) / 1000000 ))
         SERVICE_STATUS["kafka"]="health: ok, readiness: ok"
-        echo "✓ Live Tansu Kafka broker running on port ${KAFKA_PORT} (${SERVICE_STATUS["kafka"]})"
+        log_ok "Live Tansu Kafka broker running on port ${KAFKA_PORT} (${SERVICE_STATUS["kafka"]})"
     fi
     local cur_kafka_pid
     cur_kafka_pid=$(cat "$PID_DIR/kafka.pid" 2>/dev/null || pgrep -f "tansu.*$KAFKA_PORT" | head -n 1 || echo "")
@@ -202,12 +202,12 @@ except Exception:
     local ch_dir="${SHOWCASE_TMPFS}/ch_${CLICKHOUSE_HTTP_PORT}"
     local ch_log="${LOG_DIR}/clickhouse.log"
 
-    if curl -s -f "http://127.0.0.1:${CLICKHOUSE_HTTP_PORT}/ping" 2>/dev/null | grep -q Ok; then
-        echo "ℹ ClickHouse already running on port ${CLICKHOUSE_HTTP_PORT}"
+    if curl -s -f "http://127.0.0.1:${CLICKHOUSE_HTTP_PORT}/ping" 2>/dev/null | rg -q Ok; then
+        log_info "ClickHouse already running on port ${CLICKHOUSE_HTTP_PORT}"
         SERVICE_STATUS["clickhouse"]="running (reused)"
         SERVICE_READY_MS["clickhouse"]="0"
     else
-        echo "▶ Starting rootless ClickHouse server on tmpfs..."
+        log_info "Starting rootless ClickHouse server on tmpfs..."
         rm -rf "$ch_dir"
         mkdir -p "$ch_dir/data" "$ch_dir/tmp" "$ch_dir/user_files" "$ch_dir/format_schemas" "$ch_dir/access" "$ch_dir/keeper/log" "$ch_dir/keeper/snapshots"
         ln -sf "$REPO_ROOT/posthog/user_scripts" "$ch_dir/data/user_scripts"
@@ -225,14 +225,14 @@ except Exception:
         disown "$ch_pid" 2>/dev/null || true
         echo "$ch_pid" > "$PID_DIR/clickhouse.pid"
 
-        wait_for_condition "ClickHouse" "curl -s -f http://127.0.0.1:${CLICKHOUSE_HTTP_PORT}/ping | grep -q Ok" "$ch_log" 60
+        wait_for_condition "ClickHouse" "curl -s -f http://127.0.0.1:${CLICKHOUSE_HTTP_PORT}/ping | rg -q Ok" "$ch_log" 60
         curl -s --data-binary "CREATE DATABASE IF NOT EXISTS posthog_test" "http://127.0.0.1:${CLICKHOUSE_HTTP_PORT}/" >/dev/null 2>&1 || true
 
         local t1_ch
         t1_ch=$(date +%s%N)
         SERVICE_READY_MS["clickhouse"]=$(( (t1_ch - t0_ch) / 1000000 ))
         SERVICE_STATUS["clickhouse"]="health: ok, readiness: ok"
-        echo "✓ Live ClickHouse running on ports ${CLICKHOUSE_HTTP_PORT} & ${CLICKHOUSE_TCP_PORT} (${SERVICE_STATUS["clickhouse"]})"
+        log_ok "Live ClickHouse running on ports ${CLICKHOUSE_HTTP_PORT} & ${CLICKHOUSE_TCP_PORT} (${SERVICE_STATUS["clickhouse"]})"
     fi
     local cur_ch_pid
     cur_ch_pid=$(cat "$PID_DIR/clickhouse.pid" 2>/dev/null || pgrep -f "clickhouse-server" | head -n 1 || echo "")
@@ -247,11 +247,11 @@ except Exception:
     local temporal_log="${LOG_DIR}/temporal.log"
 
     if nc -z 127.0.0.1 "$TEMPORAL_PORT" 2>/dev/null; then
-        echo "ℹ Temporal dev server already running on port ${TEMPORAL_PORT}"
+        log_info "Temporal dev server already running on port ${TEMPORAL_PORT}"
         SERVICE_STATUS["temporal"]="running (reused)"
         SERVICE_READY_MS["temporal"]="0"
     else
-        echo "▶ Starting rootless Temporal dev server on tmpfs..."
+        log_info "Starting rootless Temporal dev server on tmpfs..."
         mkdir -p "$temporal_dir"
         setsid temporal server start-dev --port "$TEMPORAL_PORT" --headless --db-filename "$temporal_dir/temporal.db" > "$temporal_log" 2>&1 &
         local temporal_pid=$!
@@ -264,7 +264,7 @@ except Exception:
         t1_temporal=$(date +%s%N)
         SERVICE_READY_MS["temporal"]=$(( (t1_temporal - t0_temporal) / 1000000 ))
         SERVICE_STATUS["temporal"]="health: ok, readiness: ok"
-        echo "✓ Live Temporal dev server running on port ${TEMPORAL_PORT} (${SERVICE_STATUS["temporal"]})"
+        log_ok "Live Temporal dev server running on port ${TEMPORAL_PORT} (${SERVICE_STATUS["temporal"]})"
     fi
     local cur_temporal_pid
     cur_temporal_pid=$(cat "$PID_DIR/temporal.pid" 2>/dev/null || pgrep -f "temporal server.*$TEMPORAL_PORT" | head -n 1 || echo "")
@@ -279,11 +279,11 @@ except Exception:
     local s3_log="${LOG_DIR}/objectstorage.log"
 
     if nc -z 127.0.0.1 "$OBJECT_STORAGE_PORT" 2>/dev/null; then
-        echo "ℹ SeaweedFS S3 object storage (weed mini) already running on port ${OBJECT_STORAGE_PORT}"
+        log_info "SeaweedFS S3 object storage (weed mini) already running on port ${OBJECT_STORAGE_PORT}"
         SERVICE_STATUS["objectstorage"]="running (reused)"
         SERVICE_READY_MS["objectstorage"]="0"
     else
-        echo "▶ Starting rootless SeaweedFS S3 object storage server (weed mini) on tmpfs..."
+        log_info "Starting rootless SeaweedFS S3 object storage server (weed mini) on tmpfs..."
         mkdir -p "$s3_dir"
         setsid env AWS_ACCESS_KEY_ID="object_storage_root_user" AWS_SECRET_ACCESS_KEY="object_storage_root_password" S3_BUCKET="posthog,test-posthog,posthog-recordings,test-recordings" \
         weed mini -ip=127.0.0.1 -ip.bind=127.0.0.1 -dir="$s3_dir" -s3.port="$OBJECT_STORAGE_PORT" -bucket="posthog,test-posthog,posthog-recordings,test-recordings" > "$s3_log" 2>&1 &
@@ -297,7 +297,7 @@ except Exception:
         t1_s3=$(date +%s%N)
         SERVICE_READY_MS["objectstorage"]=$(( (t1_s3 - t0_s3) / 1000000 ))
         SERVICE_STATUS["objectstorage"]="health: ok, readiness: ok"
-        echo "✓ Live SeaweedFS S3 object storage running on port ${OBJECT_STORAGE_PORT} (${SERVICE_STATUS["objectstorage"]})"
+        log_ok "Live SeaweedFS S3 object storage running on port ${OBJECT_STORAGE_PORT} (${SERVICE_STATUS["objectstorage"]})"
     fi
     local cur_s3_pid
     cur_s3_pid=$(cat "$PID_DIR/objectstorage.pid" 2>/dev/null || pgrep -f "weed mini" | head -n 1 || echo "")
@@ -319,7 +319,7 @@ except Exception:
 
     echo ""
     echo "========================================================================================================="
-    echo "  📊 Service Resource Telemetry & Timings (tmpfs / user-space)"
+    log_info "Service Resource Telemetry & Timings (tmpfs / user-space)"
     echo "========================================================================================================="
     printf "  %-16s %-8s %-14s %-12s %-30s\n" "SERVICE" "PORT" "STARTUP" "RAM (RSS)" "HEALTH / READINESS"
     echo "  ───────────────────────────────────────────────────────────────────────────────────────────────────────"
@@ -336,7 +336,7 @@ except Exception:
 }
 
 stop_services() {
-    echo "🛑 Stopping running showcase microservices on tmpfs..."
+    log_info "Stopping running showcase microservices on tmpfs..."
     # Stop from PID files first
     if [[ -d "$PID_DIR" ]]; then
         for pid_file in "$PID_DIR"/*.pid; do
@@ -359,14 +359,14 @@ stop_services() {
     pkill -f "temporal server.*$TEMPORAL_PORT" 2>/dev/null || true
     pkill -f "weed mini.*$OBJECT_STORAGE_PORT" 2>/dev/null || true
     sleep 0.2
-    echo "✓ All showcase microservices stopped and cleaned up."
+    log_ok "All showcase microservices stopped and cleaned up."
 }
 
 status_services() {
     echo "======================================================================="
-    echo "  📊 Showcase Data Tier Status & Memory Footprint"
+    log_info "Showcase Data Tier Status & Memory Footprint"
     echo "======================================================================="
-    (ps -eo pid,rss,comm,args 2>/dev/null || true) | { grep -E "(${PG_PORT}|${REDIS_PORT}|${KAFKA_PORT}|${CLICKHOUSE_HTTP_PORT}|${TEMPORAL_PORT}|${OBJECT_STORAGE_PORT}|weed mini|tansu|clickhouse-server)" || true; } | { grep -v grep || true; } | awk '
+    (ps -eo pid,rss,comm,args 2>/dev/null || true) | { rg "(${PG_PORT}|${REDIS_PORT}|${KAFKA_PORT}|${CLICKHOUSE_HTTP_PORT}|${TEMPORAL_PORT}|${OBJECT_STORAGE_PORT}|weed mini|tansu|clickhouse-server)" || true; } | { rg -v "rg" || true; } | awk '
     BEGIN { total=0; printf "%-8s %-12s %-18s %s\n", "PID", "RSS (MB)", "COMMAND", "TARGET" }
     {
         rss_mb = $2 / 1024;

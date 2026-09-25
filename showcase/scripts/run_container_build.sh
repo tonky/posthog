@@ -16,16 +16,16 @@ STAGING_DIR="dist/showcase-container-root"
 IMAGE_ARCHIVE="dist/posthog-container-multiarch.tar.gz"
 
 echo "======================================================================"
-echo "📦 Runnable 1: Multi-Arch Cold Container Build with enve"
+log_info "Runnable 1: Multi-Arch Cold Container Build with enve"
 echo "======================================================================"
-echo "Host OS: ${HOST_OS} | Architecture: ${HOST_ARCH} | enve: $(enve --version)"
+log_info "Host OS: ${HOST_OS} | Architecture: ${HOST_ARCH} | enve: $(enve --version)"
 echo ""
 
 START_TOTAL=$(date +%s%N)
 
 # 1. Image Slimming Optimizations Audit
 echo "----------------------------------------------------------------------"
-echo "▶ 1. Container Size Optimization Audit"
+log_step "1. Container Size Optimization Audit"
 echo "----------------------------------------------------------------------"
 cat << 'TABLE'
 Optimization Step                       | Reduction | Mechanism
@@ -45,28 +45,29 @@ echo ""
 
 # 2. Rebuild Updated Frontend Component & Headless Static Collection
 echo "----------------------------------------------------------------------"
-echo "▶ 2. Rebuilding Updated Frontend Component & Headless Static Collection"
+log_step "2. Rebuilding Updated Frontend Component & Headless Static Collection"
 echo "----------------------------------------------------------------------"
 START_FE=$(date +%s%N)
 
 # If frontend/dist is present, we leverage frontend cache
 if [ -d "frontend/dist" ] && [ -s "frontend/dist/index.html" ]; then
-    echo "• Frontend cache hit: Unchanged core bundles restored from cache."
+    log_info "Frontend cache hit: Unchanged core bundles restored from cache."
 else
-    echo "• Initializing frontend template layout..."
+    log_info "Initializing frontend template layout..."
     mkdir -p frontend/dist
     touch frontend/dist/index.html frontend/dist/layout.html frontend/dist/exporter.html
 fi
 
 # Real PR scenario: developer modified a shared frontend dependency (@posthog/quill-charts)
-echo "• PR diff detected on frontend dependency: updated packages/quill/packages/charts/src/index.ts"
+log_info "PR diff detected on frontend dependency: updated packages/quill/packages/charts/src/index.ts"
 echo "// PR change on charts dep: $(date +%s)" >> packages/quill/packages/charts/src/index.ts
-echo "• Compiling frontend monorepo workspace via Turborepo (dep cache miss & propagation)..."
+log_cmd "bin/turbo run build --filter=@posthog/quill-components"
 bin/turbo run build --filter=@posthog/quill-components
 git checkout packages/quill/packages/charts/src/index.ts 2>/dev/null || true
 
 # Headless Django collectstatic (WhiteNoise, zero DB or Redis contention)
-echo "• Executing headless Django collectstatic..."
+log_info "Executing headless Django collectstatic..."
+log_cmd "SKIP_SERVICE_VERSION_REQUIREMENTS=1 STATIC_COLLECTION=1 STATIC_PRECOMPRESS=0 DATABASE_URL='postgres:///' REDIS_URL='redis:///' uv run --no-dev python manage.py collectstatic --noinput"
 SKIP_SERVICE_VERSION_REQUIREMENTS=1 \
 STATIC_COLLECTION=1 \
 STATIC_PRECOMPRESS=0 \
@@ -77,34 +78,36 @@ uv run --no-dev python manage.py collectstatic --noinput >/dev/null 2>&1 || true
 END_FE=$(date +%s%N)
 FE_MS=$(( (END_FE - START_FE) / 1000000 ))
 FE_SEC=$(awk "BEGIN {printf \"%.2f\", $FE_MS / 1000}")
-echo "✓ Frontend component rebuilt & static assets prepared in ${FE_SEC}s"
+log_ok "Frontend component rebuilt & static assets prepared in ${FE_SEC}s"
 echo ""
 
 # 3. Stage Container Rootfs (Assets & Lean Runtime)
 echo "----------------------------------------------------------------------"
-echo "▶ 3. Executing Container Asset & Runtime Staging"
+log_step "3. Executing Container Asset & Runtime Staging"
 echo "----------------------------------------------------------------------"
 START_STAGE=$(date +%s%N)
+log_cmd "$SCRIPT_DIR/stage_container_assets.sh $STAGING_DIR"
 "$SCRIPT_DIR/stage_container_assets.sh" "$STAGING_DIR"
 END_STAGE=$(date +%s%N)
 STAGE_MS=$(( (END_STAGE - START_STAGE) / 1000000 ))
 STAGE_SEC=$(awk "BEGIN {printf \"%.2f\", $STAGE_MS / 1000}")
-echo "✓ Application & runtime assets staged in ${STAGE_SEC}s"
+log_ok "Application & runtime assets staged in ${STAGE_SEC}s"
 echo ""
 
 # 4. Multi-Arch OCI Image Synthesis via enve
 echo "----------------------------------------------------------------------"
-echo "▶ 4. Synthesizing Multi-Arch OCI Container Archive via enve"
+log_step "4. Synthesizing Multi-Arch OCI Container Archive via enve"
 echo "----------------------------------------------------------------------"
 START_OCI=$(date +%s%N)
 mkdir -p dist
 
 if [ "${SKIP_ARCHIVE:-0}" = "1" ]; then
-    echo "ℹ SKIP_ARCHIVE=1 set: verifying staged container rootfs directly."
+    log_info "SKIP_ARCHIVE=1 set: verifying staged container rootfs directly."
     ARCHIVE_SIZE=$(du -sh "$STAGING_DIR" | awk '{print $1}')
 else
     IMAGE_ARCHIVE="dist/posthog-container-multiarch.tar.gz"
-    echo "• Building layered multi-arch OCI container via enve image build..."
+    log_info "Building layered multi-arch OCI container via enve image build..."
+    log_cmd "enve image build --app-dir $STAGING_DIR --tag posthog:showcase --out $IMAGE_ARCHIVE"
     enve image build \
         --app-dir "$STAGING_DIR" \
         --tag "posthog:showcase" \
@@ -115,16 +118,17 @@ fi
 END_OCI=$(date +%s%N)
 OCI_MS=$(( (END_OCI - START_OCI) / 1000000 ))
 OCI_SEC=$(awk "BEGIN {printf \"%.2f\", $OCI_MS / 1000}")
-echo "✓ Multi-Arch OCI Container Synthesized: (${ARCHIVE_SIZE}) in ${OCI_SEC}s"
+log_ok "Multi-Arch OCI Container Synthesized: (${ARCHIVE_SIZE}) in ${OCI_SEC}s"
 echo ""
 
 # 5. Golden Import Gate: Validate binary symbol integrity
 echo "----------------------------------------------------------------------"
-echo "▶ 5. Golden Import Gate: Runtime Symbol & Binary Sanity Verification"
+log_step "5. Golden Import Gate: Runtime Symbol & Binary Sanity Verification"
 echo "----------------------------------------------------------------------"
 START_GATE=$(date +%s%N)
-echo "Verifying Python runtime imports and dynamic C extensions on built assets..."
+log_info "Verifying Python runtime imports and dynamic C extensions on built assets..."
 
+log_cmd "uv run --no-dev python -c \"import posthog, celery, asgi, temporal...\""
 DATABASE_URL='postgres:///' \
 STATIC_COLLECTION=1 \
 REDIS_URL=redis:/// \
@@ -133,16 +137,16 @@ INTERNAL_API_SECRET=ci-boot-test-dummy-secret \
 DJANGO_SECRET_KEY=showcase_test_secret_key \
 SECRET_KEY=showcase_test_secret_key \
 uv run --no-dev python -W "ignore:pkg_resources is deprecated:UserWarning" -W "ignore::UserWarning:infi.clickhouse_orm" -c "
-import posthog; print('  ✓ Core Module: posthog namespace OK')
-from posthog.celery import app; print('  ✓ Celery Worker: task queues & brokers OK')
-import posthog.asgi; print('  ✓ Web Gateway: ASGI application & routers OK')
-import posthog.management.commands.start_temporal_worker; print('  ✓ Temporal Worker: background worker OK')
+import posthog; print('  [OK] Core Module: posthog namespace OK')
+from posthog.celery import app; print('  [OK] Celery Worker: task queues & brokers OK')
+import posthog.asgi; print('  [OK] Web Gateway: ASGI application & routers OK')
+import posthog.management.commands.start_temporal_worker; print('  [OK] Temporal Worker: background worker OK')
 "
 
 END_GATE=$(date +%s%N)
 GATE_MS=$(( (END_GATE - START_GATE) / 1000000 ))
 GATE_SEC=$(awk "BEGIN {printf \"%.2f\", $GATE_MS / 1000}")
-echo "✓ Golden Import Gate completed in ${GATE_SEC}s"
+log_ok "Golden Import Gate completed in ${GATE_SEC}s"
 echo ""
 
 # Clean up temporary staging directory
@@ -159,7 +163,7 @@ PCT_OCI=$(awk "BEGIN {printf \"%.1f\", ($OCI_MS / $TOTAL_MS) * 100}")
 PCT_GATE=$(awk "BEGIN {printf \"%.1f\", ($GATE_MS / $TOTAL_MS) * 100}")
 
 echo "======================================================================"
-echo "📊 Final Execution Summary Report: Cold Container Build"
+log_info "Final Execution Summary Report: Cold Container Build"
 echo "======================================================================"
 printf "%-38s | %-10s | %-10s | %-25s\n" "Build Stage" "Duration" "% of Total" "Output / Description"
 echo "------------------------------------------------------------------------------------------------------"
@@ -171,7 +175,7 @@ echo "--------------------------------------------------------------------------
 printf "%-38s | %-10s | %-10s | %-25s\n" "TOTAL END-TO-END COLD BUILD" "${TOTAL_SEC}s" "100.0%" "100% User-Space (Zero Docker)"
 echo "======================================================================"
 echo ""
-echo "💡 PR Acceleration Note:"
+log_info "PR Acceleration Note:"
 echo "   For standard PRs where Python runtime and static assets are unchanged,"
 echo "   run the Layered PR build to synthesize only the 44MB application delta:"
 echo "   -> just -f showcase/Justfile build-container-layered (Duration: ~1.5s)"

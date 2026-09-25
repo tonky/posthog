@@ -15,7 +15,7 @@ verify_enve
 TARGET="${1:-posthog/api/test/test_user.py}"
 
 echo "======================================================================="
-echo "📊 Direct CI Comparison: Docker Service Overhead vs. In-Process enve"
+log_info "Direct CI Comparison: Docker Service Overhead vs. In-Process enve"
 echo "======================================================================="
 echo "Empirical Data Source: PostHog CI (workflows/ci-backend.yml)"
 echo "  • PR #95897:         https://github.com/PostHog/posthog/pull/95897"
@@ -26,7 +26,7 @@ echo ""
 
 # 1. Display Upstream Docker Compose CI Baseline
 echo "-----------------------------------------------------------------------"
-echo "▶ 1. Upstream Docker Compose CI Breakdown (Real Production CI Jobs)"
+log_step "1. Upstream Docker Compose CI Breakdown (Real Production CI Jobs)"
 echo "-----------------------------------------------------------------------"
 cat << 'TABLE'
 CI Job (ci-backend.yml)                | Total Job | Docker Setup Overhead | Actual Pytest | Setup % | Verified Job Link
@@ -66,19 +66,19 @@ echo ""
 
 # 2. Live Measurement: In-Process enve Services on tmpfs
 echo "-----------------------------------------------------------------------"
-echo "▶ 2. Live In-Process enve Measurement (Rootless User-Space on tmpfs)"
+log_step "2. Live In-Process enve Measurement (Rootless User-Space on tmpfs)"
 echo "-----------------------------------------------------------------------"
 
 START_ENVE_SERVICES=$(date +%s%N)
-echo "• Starting in-process rootless microservices via manage_services.sh..."
+log_info "Starting in-process rootless microservices via manage_services.sh..."
 "$SCRIPT_DIR/manage_services.sh" start >/dev/null 2>&1
 END_ENVE_SERVICES=$(date +%s%N)
 ENVE_SERVICE_MS=$(( (END_ENVE_SERVICES - START_ENVE_SERVICES) / 1000000 ))
 ENVE_SERVICE_SEC=$(awk "BEGIN {printf \"%.2f\", $ENVE_SERVICE_MS / 1000}")
-echo "  ✓ Postgres, ClickHouse, Redis, Kafka, S3, Temporal healthy in ${ENVE_SERVICE_SEC}s"
+log_ok "Postgres, ClickHouse, Redis, Kafka, S3, Temporal healthy in ${ENVE_SERVICE_SEC}s"
 
 START_TEST=$(date +%s%N)
-echo "• Executing representative test suite via run_backend_shards.sh (4 workers): ${TARGET}..."
+log_info "Executing representative test suite via run_backend_shards.sh (4 workers): ${TARGET}..."
 "$SCRIPT_DIR/run_backend_shards.sh" --workers 4 "$TARGET"
 END_TEST=$(date +%s%N)
 TEST_MS=$(( (END_TEST - START_TEST) / 1000000 ))
@@ -89,7 +89,7 @@ TOTAL_ENVE_SEC=$(awk "BEGIN {printf \"%.2f\", ($ENVE_SERVICE_MS + $TEST_MS) / 10
 # 3. Side-by-Side Comparison Scorecard
 echo ""
 echo "======================================================================="
-echo "🏆 Direct CI Comparison Scorecard"
+log_info "Direct CI Comparison Scorecard"
 echo "======================================================================="
 UPSTREAM_DOCKER_SETUP=88
 UPSTREAM_EST_TOTAL=$(awk "BEGIN {printf \"%.1f\", $UPSTREAM_DOCKER_SETUP + $TEST_SEC}")

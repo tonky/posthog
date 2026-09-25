@@ -103,7 +103,7 @@ def main():
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(contract, indent=2) + "\n", encoding="utf-8")
     num_symbols = sum(len(syms) for syms in contract.values())
-    print(f"✓ Successfully generated {output_path} with {len(contract)} modules and {num_symbols} symbols.")
+    print(f"[OK] Successfully generated {output_path} with {len(contract)} modules and {num_symbols} symbols.")
 
 
 if __name__ == "__main__":

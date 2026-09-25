@@ -1,6 +1,9 @@
-bin/
+bin/*
+!bin/enve
 .enve/
 .pytest_cache/
+cue.mod/
 __pycache__/
-data/
+data/*
+!data/schema-latest.sql.gz
 dist/

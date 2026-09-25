@@ -39,7 +39,7 @@ os.environ.setdefault("SKIP_SERVICE_VERSION_REQUIREMENTS", "1")
 
 
 def test_dag_reachability():
-    print("▶ 1. Validating In-Memory Migration DAG Consistency & Reachability...")
+    print("[STEP] 1. Validating In-Memory Migration DAG Consistency & Reachability...")
     t0 = time.perf_counter()
 
     import django
@@ -67,23 +67,23 @@ def test_dag_reachability():
     elapsed = (time.perf_counter() - t0) * 1000
 
     if unreached:
-        print(f"❌ FATAL: Found {len(unreached)} unreachable migration nodes: {list(unreached)[:3]}", file=sys.stderr)
+        print(f"[FATAL] Found {len(unreached)} unreachable migration nodes: {list(unreached)[:3]}", file=sys.stderr)
         sys.exit(1)
 
-    print(f"   ✓ Built & validated complete DAG across {total_nodes} migration nodes in {elapsed:.2f} ms")
-    print(f"   ✓ Verified {len(leaf_nodes)} active application leaf nodes with 100% reachability (0 orphaned nodes)")
-    print(f"   ✓ Proved graph is strictly acyclic with 0 missing dependency references")
+    print(f"   [OK] Built & validated complete DAG across {total_nodes} migration nodes in {elapsed:.2f} ms")
+    print(f"   [OK] Verified {len(leaf_nodes)} active application leaf nodes with 100% reachability (0 orphaned nodes)")
+    print(f"   [OK] Proved graph is strictly acyclic with 0 missing dependency references")
     return elapsed, total_nodes, len(leaf_nodes)
 
 
 def test_ast_contract():
     print("")
-    print("▶ 2. Verifying Frozen AST Hashed Signatures & Callable Contracts...")
+    print("[STEP] 2. Verifying Frozen AST Hashed Signatures & Callable Contracts...")
     t0 = time.perf_counter()
 
     contract_path = REPO_ROOT / "showcase" / "contracts" / "migration_contract.json"
     if not contract_path.exists():
-        print(f"❌ FATAL: Migration contract not found at {contract_path}", file=sys.stderr)
+        print(f"[FATAL] Migration contract not found at {contract_path}", file=sys.stderr)
         sys.exit(1)
 
     contract = json.loads(contract_path.read_text(encoding="utf-8"))
@@ -129,20 +129,20 @@ def test_ast_contract():
     elapsed = (time.perf_counter() - t0) * 1000
 
     if violations:
-        print(f"❌ Contract Violations Found ({len(violations)}):", file=sys.stderr)
+        print(f"[ERROR] Contract Violations Found ({len(violations)}):", file=sys.stderr)
         for v in violations[:5]:
             print(f"   - {v}", file=sys.stderr)
         sys.exit(1)
 
-    print(f"   ✓ Verified {checked_symbols} historical symbols across {checked_modules} modules in {elapsed:.2f} ms")
-    print(f"   ✓ Verified callable parameter contracts and bytecode signatures")
-    print(f"   ✓ 100% of historical migration dependencies verified intact with ZERO database queries")
+    print(f"   [OK] Verified {checked_symbols} historical symbols across {checked_modules} modules in {elapsed:.2f} ms")
+    print(f"   [OK] Verified callable parameter contracts and bytecode signatures")
+    print(f"   [OK] 100% of historical migration dependencies verified intact with ZERO database queries")
     return elapsed, checked_symbols
 
 
 def test_conflict_engine():
     print("")
-    print("▶ 3. Simulating Merge Queue Branch Collision & Batch Safety Engine...")
+    print("[STEP] 3. Simulating Merge Queue Branch Collision & Batch Safety Engine...")
 
     # Scenario 1: Independent PRs (PR A touches batch_exports, PR B touches customer_analytics)
     pr_a = ("products.batch_exports.backend", "0012_new_destination", [("products.batch_exports.backend", "0011_base")])
@@ -175,7 +175,7 @@ def test_conflict_engine():
 
 def main():
     print("=======================================================================")
-    print("  ⚡ Runnable 2: Merge Queue In-Memory AST Contract & DAG Conflict Gate")
+    print("  [INFO] Runnable 2: Merge Queue In-Memory AST Contract & DAG Conflict Gate")
     print("=======================================================================")
     overall_start = time.perf_counter()
 
@@ -191,7 +191,7 @@ def main():
 
     print("")
     print("=======================================================================")
-    print(f"✅ AST DAG Verification Completed in {total_time_s:.2f}s ({total_time_ms:.2f} ms)")
+    print(f"[OK] AST DAG Verification Completed in {total_time_s:.2f}s ({total_time_ms:.2f} ms)")
     print(f"   • Upstream Trunk Merge Queue Scratch DB Replay: ~1,313,000 ms (~21.9 minutes)")
     print(f"   • Accelerated AST & DAG Conflict Gate:          ~{total_time_ms:.2f} ms ({total_time_s:.2f}s)")
     print(f"   • Speedup Factor:                               ~{speedup:,.0f}x faster merge validation")

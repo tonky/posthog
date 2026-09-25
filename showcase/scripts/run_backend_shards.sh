@@ -89,7 +89,7 @@ if [ -n "$CPU_SET" ] && command -v taskset >/dev/null 2>&1; then
 fi
 
 echo "======================================================================"
-echo "⚡ Runnable 3: Backend CI Shard Execution (ci-backend.yml)"
+log_info "Runnable 3: Backend CI Shard Execution (ci-backend.yml)"
 echo "======================================================================"
 echo "Host OS: ${HOST_OS} | Architecture: ${HOST_ARCH} | Detected Cores: ${CPU_CORES}"
 echo "Requested Workers: ${REQUESTED_WORKERS} | Resolved Workers: ${WORKER_COUNT}"
@@ -103,7 +103,7 @@ echo "Service Storage  : Ephemeral tmpfs (${SHOWCASE_TMPFS})"
 echo ""
 
 SERVICES_WERE_RUNNING=0
-if nc -z 127.0.0.1 "$PG_PORT" 2>/dev/null && nc -z 127.0.0.1 "$REDIS_PORT" 2>/dev/null && curl -s -f "http://127.0.0.1:${CLICKHOUSE_HTTP_PORT}/ping" 2>/dev/null | grep -q Ok; then
+if nc -z 127.0.0.1 "$PG_PORT" 2>/dev/null && nc -z 127.0.0.1 "$REDIS_PORT" 2>/dev/null && curl -s -f "http://127.0.0.1:${CLICKHOUSE_HTTP_PORT}/ping" 2>/dev/null | rg -q Ok; then
     SERVICES_WERE_RUNNING=1
 fi
 
@@ -114,7 +114,7 @@ if [ "$WORKER_COUNT" -gt 1 ]; then
     EXISTING_DBS=$(psql -h localhost -p "$PG_PORT" -U posthog -d postgres -tAc "SELECT datname FROM pg_database" 2>/dev/null || true)
     for ((w=0; w<WORKER_COUNT; w++)); do
         db="test_posthog_gw$w"
-        if echo "$EXISTING_DBS" | grep -qx "$db"; then
+        if echo "$EXISTING_DBS" | rg -qx "$db"; then
             gw_mig=$(psql -h localhost -p "$PG_PORT" -U posthog -d "$db" -tAc "SELECT count(*) FROM django_migrations" 2>/dev/null || echo "0")
             if [ "${gw_mig:-0}" -lt 2000 ]; then
                 psql -h localhost -p "$PG_PORT" -U posthog -d postgres -c "DROP DATABASE IF EXISTS $db;" >/dev/null 2>&1 || true
@@ -124,7 +124,7 @@ if [ "$WORKER_COUNT" -gt 1 ]; then
             psql -h localhost -p "$PG_PORT" -U posthog -d postgres -c "CREATE DATABASE $db TEMPLATE test_posthog;" >/dev/null 2>&1 || true
         fi
         pdb_persons="test_posthog_gw${w}_persons"
-        if ! echo "$EXISTING_DBS" | grep -qx "$pdb_persons"; then
+        if ! echo "$EXISTING_DBS" | rg -qx "$pdb_persons"; then
             psql -h localhost -p "$PG_PORT" -U posthog -d postgres -c "CREATE DATABASE $pdb_persons TEMPLATE test_posthog_persons;" >/dev/null 2>&1 || true
         fi
         curl -s --data-binary "CREATE DATABASE IF NOT EXISTS posthog_test_gw${w}" "http://127.0.0.1:${CLICKHOUSE_HTTP_PORT}/" >/dev/null 2>&1 || true
@@ -164,7 +164,7 @@ touch frontend/dist/index.html frontend/dist/layout.html frontend/dist/exporter.
 
 echo ""
 echo "----------------------------------------------------------------------"
-echo "▶ Executing ${TARGET_LABEL} (${XDIST_ARGS}) on Live tmpfs Service Tier..."
+log_info "Executing ${TARGET_LABEL} (${XDIST_ARGS}) on Live tmpfs Service Tier..."
 echo "----------------------------------------------------------------------"
 PYTEST_OPTS="-q --no-header"
 if [[ "${EXTRA_PYTEST_ARGS:-}" =~ -x ]]; then
@@ -179,14 +179,14 @@ RUN_MS=$(( (END_RUN - START_RUN) / 1000000 ))
 RUN_SEC=$(awk "BEGIN {printf \"%.2f\", $RUN_MS / 1000}")
 
 # Capture real-time RSS of running services before cleanup
-MEASURED_RSS_MB=$( (ps -eo pid,rss,args 2>/dev/null || true) | grep -E "(${SHOWCASE_TMPFS}|:${OBJECT_STORAGE_PORT}|:${PG_PORT}|:${REDIS_PORT}|:${CLICKHOUSE_HTTP_PORT}|:${TEMPORAL_PORT})" | grep -v grep | awk '{sum+=$2} END {printf "%.1f", sum/1024}')
+MEASURED_RSS_MB=$( (ps -eo pid,rss,args 2>/dev/null || true) | rg "(${SHOWCASE_TMPFS}|:${OBJECT_STORAGE_PORT}|:${PG_PORT}|:${REDIS_PORT}|:${CLICKHOUSE_HTTP_PORT}|:${TEMPORAL_PORT})" | rg -v "rg" | awk '{sum+=$2} END {printf "%.1f", sum/1024}')
 if [[ -z "$MEASURED_RSS_MB" || "$MEASURED_RSS_MB" == "0.0" ]]; then
     MEASURED_RSS_MB="528.4"
 fi
 
 echo ""
 echo "======================================================================"
-echo "📊 Results: Shard Execution (${TARGET_LABEL})"
+log_info "Results: Shard Execution (${TARGET_LABEL})"
 echo "======================================================================"
 echo "  • Strategy          : Multi-Worker Sharding (${XDIST_ARGS})"
 echo "  • Wall-Clock Time   : ${RUN_SEC}s (${RUN_MS}ms)"

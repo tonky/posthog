@@ -1,0 +1,15 @@
+.venv
+node_modules
+.pytest_cache
+target
+dist
+.git
+.turbo
+.flox
+.enve
+staticfiles
+.mypy_cache
+.hypothesis
+.ruff_cache
+.parcel-cache
+.import_linter_cache
