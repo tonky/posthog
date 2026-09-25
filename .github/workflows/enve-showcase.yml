@@ -86,6 +86,15 @@ jobs:
             fi
           fi
 
+          # Ubuntu 24.04 restricts unprivileged user namespaces via AppArmor by default
+          if command -v sudo >/dev/null 2>&1; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 2>/dev/null || true
+            sudo mkdir -p /nix 2>/dev/null && sudo chmod 777 /nix 2>/dev/null || true
+          elif command -v sysctl >/dev/null 2>&1; then
+            sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 2>/dev/null || true
+            mkdir -p /nix 2>/dev/null && chmod 777 /nix 2>/dev/null || true
+          fi
+
       - name: Set up uv
         uses: astral-sh/setup-uv@v5
         with:
@@ -132,6 +141,16 @@ jobs:
             chmod 755 /root || true
             mkdir -p "$HOME/.local/share/enve/store"
             chmod -R a+rX "$HOME/.local" 2>/dev/null || true
+          fi
+
+          # Link /nix/store if /nix is present to eliminate namespace remapping overhead
+          if [ -d "/nix" ] && [ ! -e "/nix/store" ]; then
+            mkdir -p "$HOME/.local/share/enve/store"
+            if command -v sudo >/dev/null 2>&1 && [ ! -w "/nix" ]; then
+              sudo ln -sfn "$HOME/.local/share/enve/store" /nix/store 2>/dev/null || true
+            else
+              ln -sfn "$HOME/.local/share/enve/store" /nix/store 2>/dev/null || true
+            fi
           fi
 
           CACHE_URL="s3://${R2_BUCKET}?endpoint=${R2_ENDPOINT}&region=auto"
