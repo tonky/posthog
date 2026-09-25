@@ -45,6 +45,7 @@ STATIC_COLLECTION=1 \
 STATIC_PRECOMPRESS=0 \
 DATABASE_URL='postgres:///' \
 REDIS_URL='redis:///' \
+PYTHONPYCACHEPREFIX="${SHOWCASE_TMPFS}/pycache" \
 uv run --no-dev python manage.py collectstatic --noinput >/dev/null 2>&1 || true
 
 echo "----------------------------------------------------------------------"
@@ -132,6 +133,12 @@ fi
 
 APP_FILES=$(fd -t f . "$APP_STAGING_DIR" 2>/dev/null | wc -l || ls -1R "$APP_STAGING_DIR" | wc -l)
 APP_UNCOMPRESSED=$(du -sh "$APP_STAGING_DIR" | awk '{print $1}')
+
+# Save staged summary for instant retrieval without rescanning 133k files
+cat << STAGED > "$APP_STAGING_DIR/.staged_summary"
+APP_FILES=$APP_FILES
+APP_UNCOMPRESSED=$APP_UNCOMPRESSED
+STAGED
 
 # Mark as completely staged
 touch "$APP_STAGING_DIR/.staged"

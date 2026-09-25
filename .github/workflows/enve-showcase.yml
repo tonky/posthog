@@ -213,7 +213,7 @@ jobs:
                   # 4. Filtered frontend workspace installation (skip backend nodejs/node-rdkafka)
                   if [ ! -d "node_modules" ] || [ ! -d "packages/quill/packages/components/node_modules" ]; then
                     echo "Installing Quill frontend workspace dependencies (filtering out backend nodejs/node-rdkafka)..."
-                    pnpm install --frozen-lockfile --filter=@posthog/quill-components...
+                    HUSKY=0 pnpm install --frozen-lockfile --prefer-offline --filter=@posthog/quill-components...
                   fi
 
             - name: Run DevEx Showcase Suite

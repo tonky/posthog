@@ -51,8 +51,12 @@ echo ""
 # 2. Application & Assets Staging (Concurrent or Standalone)
 if [ -f "$APP_STAGING_DIR/.staged" ]; then
     log_info "Application rootfs pre-staged concurrently during test execution."
-    APP_FILES=$(fd -t f . "$APP_STAGING_DIR" 2>/dev/null | wc -l || ls -1R "$APP_STAGING_DIR" | wc -l)
-    APP_UNCOMPRESSED=$(du -sh "$APP_STAGING_DIR" | awk '{print $1}')
+    if [ -f "$APP_STAGING_DIR/.staged_summary" ]; then
+        source "$APP_STAGING_DIR/.staged_summary"
+    else
+        APP_FILES=$(fd -t f . "$APP_STAGING_DIR" 2>/dev/null | wc -l || ls -1R "$APP_STAGING_DIR" | wc -l)
+        APP_UNCOMPRESSED=$(du -sh "$APP_STAGING_DIR" | awk '{print $1}')
+    fi
     log_ok "Using pre-staged application rootfs: ${APP_FILES} files (${APP_UNCOMPRESSED})"
 else
     "$SCRIPT_DIR/stage_layered_app.sh" "$APP_STAGING_DIR"
@@ -107,6 +111,7 @@ if [ "$USE_BWRAP" -eq 1 ]; then
             --setenv DEBUG 0 \
             --setenv TEST 0 \
             --setenv STATIC_COLLECTION 1 \
+            --setenv PYTHONPYCACHEPREFIX /tmp/pycache \
             --setenv PYTHONUNBUFFERED 1 \
             --setenv PYTHONUTF8 1 \
             --setenv LANG C.UTF-8 \
@@ -124,10 +129,12 @@ if [ "$USE_BWRAP" -eq 1 ]; then
     }
 else
     log_info "Sandbox Runtime: Containerized Host (Docker / CI runner environment detected)"
+    mkdir -p "${SHOWCASE_TMPFS}/pycache"
     run_container_cmd() {
         DEBUG=0 \
         TEST=0 \
         STATIC_COLLECTION=1 \
+        PYTHONPYCACHEPREFIX="${SHOWCASE_TMPFS}/pycache" \
         PYTHONUNBUFFERED=1 \
         PYTHONUTF8=1 \
         LANG=C.UTF-8 \
@@ -145,30 +152,34 @@ else
     }
 fi
 
-log_info "Executing Live Container Check: Django system check..."
-if [ "$USE_BWRAP" -eq 1 ]; then
-    log_cmd "bwrap [...] python3 /code/manage.py check"
-    run_container_cmd /code/manage.py check
-else
-    log_cmd "python3 $APP_STAGING_DIR/code/manage.py check"
-    run_container_cmd "$(pwd)/$APP_STAGING_DIR/code/manage.py" check
-fi
-log_ok "Live Container Django Check: System checks OK"
-echo ""
+log_info "Executing Live Container Check & Functional Probes (system check, Celery, ASGI, Temporal)..."
+PROBE_SCRIPT="
+import os, sys
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'posthog.settings')
+import django
+django.setup()
+from django.core.management import call_command
 
-log_info "Executing Live Container Functional Probe: ASGI, Celery, Temporal..."
-if [ "$USE_BWRAP" -eq 1 ]; then
-    log_cmd "bwrap [...] python3 -c \"import posthog, celery, asgi, temporal...\""
-else
-    log_cmd "python3 -c \"import posthog, celery, asgi, temporal...\""
-fi
-run_container_cmd -W "ignore:pkg_resources is deprecated:UserWarning" -W "ignore::UserWarning:infi.clickhouse_orm" -c "
+# 1. Django system check
+print('  [INFO] Running Django system check...')
+call_command('check')
+print('  [OK] Live Container Django Check: System checks OK')
+
+# 2. Functional entrypoints probe
+print('  [INFO] Probing core service entrypoints...')
 import posthog; print('  [OK] Core Module: posthog namespace OK')
 from posthog.celery import app; print('  [OK] Celery Worker: task queues & brokers OK')
 import posthog.asgi; print('  [OK] Web Gateway: ASGI application & routers OK')
 import posthog.management.commands.start_temporal_worker; print('  [OK] Temporal Worker: background worker OK')
 print('  [OK] Live Container Functional Probe PASSED!')
 "
+
+if [ "$USE_BWRAP" -eq 1 ]; then
+    log_cmd "bwrap [...] python3 -c \"<system check + celery + asgi + temporal>\""
+else
+    log_cmd "python3 -c \"<system check + celery + asgi + temporal>\""
+fi
+run_container_cmd -W "ignore:pkg_resources is deprecated:UserWarning" -W "ignore::UserWarning:infi.clickhouse_orm" -c "$PROBE_SCRIPT"
 
 END_GATE=$(date +%s%N)
 GATE_MS=$(( (END_GATE - START_GATE) / 1000000 ))
