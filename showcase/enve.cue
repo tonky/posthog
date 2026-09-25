@@ -69,7 +69,7 @@ profiles: dev: schema.#Profile & {
 			name:     "postgres"
 			database: "posthog"
 			user:     "posthog"
-			command:  "postgres -D /tmp/posthog_pg_15432 -h 127.0.0.1 -p 15432 -k /tmp -c listen_addresses=127.0.0.1 -c fsync=off -c synchronous_commit=off -c full_page_writes=off -c wal_level=minimal"
+			command:  "postgres -D /tmp/posthog_pg_15432 -h 127.0.0.1 -p 15432 -k /tmp -c listen_addresses=127.0.0.1 -c fsync=off -c synchronous_commit=off"
 			port:     15432
 			dataDir:  "/tmp/posthog_pg_15432"
 			environment: {
