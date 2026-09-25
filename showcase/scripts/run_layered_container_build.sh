@@ -54,8 +54,15 @@ if [ -f "$APP_STAGING_DIR/.staged" ]; then
     if [ -f "$APP_STAGING_DIR/.staged_summary" ]; then
         source "$APP_STAGING_DIR/.staged_summary"
     else
-        APP_FILES=$(fd -t f . "$APP_STAGING_DIR" 2>/dev/null | wc -l || ls -1R "$APP_STAGING_DIR" | wc -l)
-        APP_UNCOMPRESSED=$(du -sh "$APP_STAGING_DIR" | awk '{print $1}')
+        if command -v fd >/dev/null 2>&1; then
+            APP_FILES="$(fd -t f . "$APP_STAGING_DIR" 2>/dev/null | wc -l | tr -dc '0-9')"
+        elif command -v fdfind >/dev/null 2>&1; then
+            APP_FILES="$(fdfind -t f . "$APP_STAGING_DIR" 2>/dev/null | wc -l | tr -dc '0-9')"
+        else
+            APP_FILES="$(ls -1R "$APP_STAGING_DIR" 2>/dev/null | wc -l | tr -dc '0-9')"
+        fi
+        APP_FILES="${APP_FILES:-0}"
+        APP_UNCOMPRESSED="$(du -sh "$APP_STAGING_DIR" | awk '{print $1}')"
     fi
     log_ok "Using pre-staged application rootfs: ${APP_FILES} files (${APP_UNCOMPRESSED})"
 else
