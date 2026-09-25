@@ -1,195 +1,229 @@
 name: PostHog DevEx Showcase (enve)
 
 on:
-  push:
-    branches:
-      - 'showcase/**'
-  pull_request:
-    branches:
-      - master
-      - main
-  workflow_dispatch:
+    push:
+        branches:
+            - 'showcase/**'
+    pull_request:
+        branches:
+            - master
+            - main
+    workflow_dispatch:
 
 permissions:
-  contents: read
+    contents: read
 
 concurrency:
-  group: enve-showcase-${{ github.ref }}
-  cancel-in-progress: true
+    group: enve-showcase-${{ github.ref }}
+    cancel-in-progress: true
 
 jobs:
-  devex-showcase:
-    name: Zero-Daemon DevEx & Layered OCI Showcase
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    devex-showcase:
+        name: Zero-Daemon DevEx & Layered OCI Showcase
+        runs-on: ubuntu-24.04
+        timeout-minutes: 10
 
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
+        steps:
+            - name: Checkout Code
+              uses: actions/checkout@v4
 
-      - name: Install enve CLI
-        env:
-          GH_TOKEN: ${{ secrets.ENVE_RELEASE_TOKEN || secrets.ENVE_TOKEN || secrets.GITHUB_TOKEN }}
-          ENVE_PUBLIC_URL: ${{ secrets.ENVE_PUBLIC_URL }}
-        run: |
-          mkdir -p "$HOME/.local/bin"
-          INSTALLED=0
-          if [ -x "$GITHUB_WORKSPACE/showcase/bin/enve" ]; then
-            echo "Using pre-staged enve binary from $GITHUB_WORKSPACE/showcase/bin/enve..."
-            cp "$GITHUB_WORKSPACE/showcase/bin/enve" "$HOME/.local/bin/enve"
-            INSTALLED=1
-          elif [ -x "showcase/bin/enve" ]; then
-            echo "Using pre-staged enve binary from showcase/bin/enve..."
-            cp "showcase/bin/enve" "$HOME/.local/bin/enve"
-            INSTALLED=1
-          elif [ -n "${GH_TOKEN:-}" ]; then
-            echo "Attempting to download enve from GitHub release via API..."
-            ASSET_URL=$(curl -fsSL -H "Authorization: Bearer $GH_TOKEN" https://api.github.com/repos/tonky/enve/releases/tags/v1.0.0-alpha.1 2>/dev/null | jq -r '.assets[] | select(.name | test("x86_64-unknown-linux-musl.tar.gz$")) | .url' || true)
-            if [ -n "$ASSET_URL" ] && [ "$ASSET_URL" != "null" ]; then
-              if curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/octet-stream" "$ASSET_URL" | tar -xz -C "$HOME/.local/bin"; then
-                INSTALLED=1
-              fi
-            fi
-          fi
+            - name: Install enve CLI
+              env:
+                  GH_TOKEN: ${{ secrets.ENVE_RELEASE_TOKEN || secrets.ENVE_TOKEN || secrets.GITHUB_TOKEN }}
+                  ENVE_PUBLIC_URL: ${{ secrets.ENVE_PUBLIC_URL }}
+              run: |
+                  mkdir -p "$HOME/.local/bin"
+                  INSTALLED=0
+                  if [ -x "$GITHUB_WORKSPACE/showcase/bin/enve" ]; then
+                    echo "Using pre-staged enve binary from $GITHUB_WORKSPACE/showcase/bin/enve..."
+                    cp "$GITHUB_WORKSPACE/showcase/bin/enve" "$HOME/.local/bin/enve"
+                    INSTALLED=1
+                  elif [ -x "showcase/bin/enve" ]; then
+                    echo "Using pre-staged enve binary from showcase/bin/enve..."
+                    cp "showcase/bin/enve" "$HOME/.local/bin/enve"
+                    INSTALLED=1
+                  elif [ -n "${GH_TOKEN:-}" ]; then
+                    echo "Attempting to download enve from GitHub release via API..."
+                    ASSET_URL=$(curl -fsSL -H "Authorization: Bearer $GH_TOKEN" https://api.github.com/repos/tonky/enve/releases/tags/v1.0.0-alpha.1 2>/dev/null | jq -r '.assets[] | select(.name | test("x86_64-unknown-linux-musl.tar.gz$")) | .url' || true)
+                    if [ -n "$ASSET_URL" ] && [ "$ASSET_URL" != "null" ]; then
+                      if curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/octet-stream" "$ASSET_URL" | tar -xz -C "$HOME/.local/bin"; then
+                        INSTALLED=1
+                      fi
+                    fi
+                  fi
 
-          if [ "$INSTALLED" -eq 0 ] && [ -n "${GH_TOKEN:-}" ] && command -v gh >/dev/null 2>&1; then
-            echo "Attempting to download enve from GitHub release via gh..."
-            if gh release download v1.0.0-alpha.1 --repo tonky/enve --pattern "*x86_64-unknown-linux-musl.tar.gz" --output - | tar -xz -C "$HOME/.local/bin"; then
-              INSTALLED=1
-            fi
-          fi
+                  if [ "$INSTALLED" -eq 0 ] && [ -n "${GH_TOKEN:-}" ] && command -v gh >/dev/null 2>&1; then
+                    echo "Attempting to download enve from GitHub release via gh..."
+                    if gh release download v1.0.0-alpha.1 --repo tonky/enve --pattern "*x86_64-unknown-linux-musl.tar.gz" --output - | tar -xz -C "$HOME/.local/bin"; then
+                      INSTALLED=1
+                    fi
+                  fi
 
-          if [ "$INSTALLED" -eq 0 ] && [ -n "${ENVE_PUBLIC_URL:-}" ]; then
-            echo "Downloading enve from public storage..."
-            if curl -fsSL "$ENVE_PUBLIC_URL" | tar -xz -C "$HOME/.local/bin"; then
-              INSTALLED=1
-            fi
-          fi
+                  if [ "$INSTALLED" -eq 0 ] && [ -n "${ENVE_PUBLIC_URL:-}" ]; then
+                    echo "Downloading enve from public storage..."
+                    if curl -fsSL "$ENVE_PUBLIC_URL" | tar -xz -C "$HOME/.local/bin"; then
+                      INSTALLED=1
+                    fi
+                  fi
 
-          if [ "$INSTALLED" -eq 0 ]; then
-            echo "Downloading enve from GitHub release via curl..."
-            curl -fsSL https://github.com/tonky/enve/releases/download/v1.0.0-alpha.1/enve-v1.0.0-alpha.1-x86_64-unknown-linux-musl.tar.gz | tar -xz -C "$HOME/.local/bin"
-          fi
+                  if [ "$INSTALLED" -eq 0 ]; then
+                    echo "Downloading enve from GitHub release via curl..."
+                    curl -fsSL https://github.com/tonky/enve/releases/download/v1.0.0-alpha.1/enve-v1.0.0-alpha.1-x86_64-unknown-linux-musl.tar.gz | tar -xz -C "$HOME/.local/bin"
+                  fi
 
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-          chmod +x "$HOME/.local/bin/enve"
-          "$HOME/.local/bin/enve" --version
+                  echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+                  chmod +x "$HOME/.local/bin/enve"
+                  "$HOME/.local/bin/enve" --version
 
-          # Ensure bubblewrap is present for hermetic user-namespace isolation
-          if ! command -v bwrap >/dev/null 2>&1; then
-            if command -v apt-get >/dev/null 2>&1; then
-              if command -v sudo >/dev/null 2>&1; then
-                sudo apt-get update -qq && sudo apt-get install -y -qq bubblewrap
-              else
-                apt-get update -qq && apt-get install -y -qq bubblewrap
-              fi
-            fi
-          fi
+                  # Ensure bubblewrap and ripgrep are present for container testing and telemetry
+                  if ! command -v bwrap >/dev/null 2>&1 || ! command -v rg >/dev/null 2>&1; then
+                    if command -v apt-get >/dev/null 2>&1; then
+                      if command -v sudo >/dev/null 2>&1; then
+                        sudo apt-get install -y -qq --no-install-recommends bubblewrap ripgrep 2>/dev/null || (sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends bubblewrap ripgrep)
+                      else
+                        apt-get install -y -qq --no-install-recommends bubblewrap ripgrep 2>/dev/null || (apt-get update -qq && apt-get install -y -qq --no-install-recommends bubblewrap ripgrep)
+                      fi
+                    fi
+                  fi
 
-          # Ubuntu 24.04 restricts unprivileged user namespaces via AppArmor by default
-          if command -v sudo >/dev/null 2>&1; then
-            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 2>/dev/null || true
-            sudo mkdir -p /nix 2>/dev/null && sudo chmod 777 /nix 2>/dev/null || true
-          elif command -v sysctl >/dev/null 2>&1; then
-            sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 2>/dev/null || true
-            mkdir -p /nix 2>/dev/null && chmod 777 /nix 2>/dev/null || true
-          fi
+                  # Ubuntu 24.04 restricts unprivileged user namespaces via AppArmor by default
+                  if command -v sudo >/dev/null 2>&1; then
+                    sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 2>/dev/null || true
+                    sudo mkdir -p /nix 2>/dev/null && sudo chmod 777 /nix 2>/dev/null || true
+                  elif command -v sysctl >/dev/null 2>&1; then
+                    sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 2>/dev/null || true
+                    mkdir -p /nix 2>/dev/null && chmod 777 /nix 2>/dev/null || true
+                  fi
 
-      - name: Set up uv
-        uses: astral-sh/setup-uv@v5
-        with:
-          enable-cache: true
-          cache-dependency-glob: "uv.lock"
+            - name: Set up uv
+              uses: astral-sh/setup-uv@v5
+              with:
+                  version: '0.11.28'
+                  enable-cache: true
+                  cache-dependency-glob: 'uv.lock'
 
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          run_install: false
+            - name: Set up pnpm
+              uses: pnpm/action-setup@v4
+              with:
+                  run_install: false
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
+            - name: Set up Node.js
+              uses: actions/setup-node@v4
+              with:
+                  node-version: 22
+                  cache: pnpm
 
-      - name: Restore enve binary store
-        uses: actions/cache@v4
-        with:
-          path: ~/.local/share/enve/store
-          key: enve-store-${{ runner.os }}-${{ hashFiles('showcase/enve.lock') }}
-          restore-keys: |
-            enve-store-${{ runner.os }}-
+            - name: 'L1 Cache: Python Dependencies (.venv & uv cache)'
+              uses: actions/cache@v4
+              with:
+                  path: |
+                      .venv
+                      ~/.cache/uv
+                  key: posthog-python-${{ runner.os }}-${{ hashFiles('uv.lock') }}
+                  restore-keys: |
+                      posthog-python-${{ runner.os }}-
 
-      - name: Cache Python virtualenv
-        uses: actions/cache@v4
-        with:
-          path: .venv
-          key: posthog-venv-${{ runner.os }}-${{ hashFiles('uv.lock') }}
+            - name: 'Cold Start: Hermetic Store Materialization (enve cache pull)'
+              env:
+                  AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+                  AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+                  R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+                  R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+                  R2_BUCKET: ${{ secrets.R2_BUCKET || 'posthog-enve' }}
+                  R2_ENDPOINT: ${{ secrets.R2_ENDPOINT || 'https://847959617b8d3ada9eb84238a37f56ec.r2.cloudflarestorage.com' }}
+                  ENVE_CACHE_CONCURRENCY: 16
+              run: |
+                  # Ensure rootless store directory is traversable by dropped-privilege UID 1000 (postgres)
+                  if [ "$(id -u)" -eq 0 ]; then
+                    chmod 755 /root || true
+                    mkdir -p "$HOME/.local/share/enve/store"
+                    chmod -R a+rX "$HOME/.local" 2>/dev/null || true
+                  fi
 
-      - name: Warm environment & dependencies
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          R2_BUCKET: ${{ secrets.R2_BUCKET || 'posthog-enve' }}
-          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT || 'https://847959617b8d3ada9eb84238a37f56ec.r2.cloudflarestorage.com' }}
-          ENVE_CACHE_CONCURRENCY: 16
-        run: |
-          # Ensure rootless store is traversable by dropped-privilege UID 1000 (postgres)
-          if [ "$(id -u)" -eq 0 ]; then
-            chmod 755 /root || true
-            mkdir -p "$HOME/.local/share/enve/store"
-            chmod -R a+rX "$HOME/.local" 2>/dev/null || true
-          fi
+                  # Link /nix/store directly to rootless store to bypass namespace remapping
+                  mkdir -p "$HOME/.local/share/enve/store"
+                  if [ -d "/nix" ] && [ ! -e "/nix/store" ]; then
+                    if command -v sudo >/dev/null 2>&1 && [ ! -w "/nix" ]; then
+                      sudo ln -sfn "$HOME/.local/share/enve/store" /nix/store 2>/dev/null || true
+                    else
+                      ln -sfn "$HOME/.local/share/enve/store" /nix/store 2>/dev/null || true
+                    fi
+                  fi
 
-          # Link /nix/store if /nix is present to eliminate namespace remapping overhead
-          if [ -d "/nix" ] && [ ! -e "/nix/store" ]; then
-            mkdir -p "$HOME/.local/share/enve/store"
-            if command -v sudo >/dev/null 2>&1 && [ ! -w "/nix" ]; then
-              sudo ln -sfn "$HOME/.local/share/enve/store" /nix/store 2>/dev/null || true
-            else
-              ln -sfn "$HOME/.local/share/enve/store" /nix/store 2>/dev/null || true
-            fi
-          fi
+                  # Benchmark authentic cold closure hydration from Cloudflare R2
+                  START_COLD=$(date +%s%N)
+                  CACHE_URL="s3://${R2_BUCKET}?endpoint=${R2_ENDPOINT}&region=auto"
+                  TRUSTED_KEY="posthog-cache:ZoJXYKq9GR/XjY0NV2O62NY1zUagRC66U/81IE/W/XU="
+                  echo "Executing cold store materialization: pulling closures from $CACHE_URL with 16 parallel streams..."
+                  if [ -n "${AWS_ACCESS_KEY_ID:-}" ]; then
+                    enve cache pull showcase/enve.lock --cache "$CACHE_URL" --trusted-public-key "$TRUSTED_KEY" --jobs 16
+                  else
+                    echo "Notice: Remote S3 credentials not set; pulling from upstream cache..."
+                    enve cache pull showcase/enve.lock --jobs 16
+                  fi
 
-          CACHE_URL="s3://${R2_BUCKET}?endpoint=${R2_ENDPOINT}&region=auto"
-          TRUSTED_KEY="posthog-cache:ZoJXYKq9GR/XjY0NV2O62NY1zUagRC66U/81IE/W/XU="
-          echo "Synchronizing binary cache ($CACHE_URL) with 16 parallel streams..."
-          if [ -n "${AWS_ACCESS_KEY_ID:-}" ]; then
-            enve cache pull showcase/enve.lock --cache "$CACHE_URL" --trusted-public-key "$TRUSTED_KEY" --jobs 16
-          else
-            echo "Notice: Remote S3 credentials not set; pulling from upstream cache..."
-            enve cache pull showcase/enve.lock --jobs 16
-          fi
+                  # First-invocation cold shell verification
+                  enve run -f showcase/enve.cue -- echo "Hermetic shell ready (cold start)"
+                  END_COLD=$(date +%s%N)
+                  COLD_MS=$(( (END_COLD - START_COLD) / 1000000 ))
+                  COLD_SEC=$(awk "BEGIN {printf \"%.2f\", $COLD_MS / 1000}")
+                  echo "COLD_START_DURATION=${COLD_SEC}s" >> "$GITHUB_ENV"
+                  echo "Authentic Cold Start completed in ${COLD_SEC}s (zero daemon, 100% user-space store)"
 
-          if [ ! -d ".venv" ]; then
-            echo "Installing python dependencies with uv in hermetic enve environment..."
-            enve run -f showcase/enve.cue -- uv sync --frozen
-          fi
+            - name: Warm environment & dependencies
+              env:
+                  AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+                  AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+                  R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+                  R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+                  R2_BUCKET: ${{ secrets.R2_BUCKET || 'posthog-enve' }}
+                  R2_ENDPOINT: ${{ secrets.R2_ENDPOINT || 'https://847959617b8d3ada9eb84238a37f56ec.r2.cloudflarestorage.com' }}
+              run: |
+                  # 1. L2 Cloudflare R2 cache hydration for Python virtualenv
+                  VENV_HASH="$(sha256sum uv.lock | awk '{print $1}')"
+                  VENV_KEY="cache/posthog-venv-${VENV_HASH}.tar.zst"
+                  if [ ! -d ".venv" ]; then
+                    echo "L1 Cache Miss: Checking L2 Cloudflare R2 binary cache for pre-built virtualenv (${VENV_KEY})..."
+                    if [ -n "${AWS_ACCESS_KEY_ID:-}" ]; then
+                      if aws s3 cp "s3://${R2_BUCKET}/${VENV_KEY}" - --endpoint-url "${R2_ENDPOINT}" 2>/dev/null | tar -I "zstd -T0" -xf - 2>/dev/null; then
+                        echo "L2 Cache Hit: Restored .venv directly from Cloudflare R2"
+                      fi
+                    fi
+                  fi
 
-          if [ ! -f "share/GeoLite2-City.mmdb" ]; then
-            echo "Restoring GeoIP database from remote S3/R2 binary cache..."
-            mkdir -p share
-            if [ -n "${AWS_ACCESS_KEY_ID:-}" ]; then
-              .venv/bin/python -c "
-              import os, boto3
-              s3 = boto3.client('s3', endpoint_url='${R2_ENDPOINT}', aws_access_key_id='${AWS_ACCESS_KEY_ID}', aws_secret_access_key='${AWS_SECRET_ACCESS_KEY}', region_name='auto')
-              s3.download_file('${R2_BUCKET}', 'share/GeoLite2-City.mmdb', 'share/GeoLite2-City.mmdb')
-              " 2>/dev/null || true
-            fi
-            if [ ! -f "share/GeoLite2-City.mmdb" ]; then
-              curl -sL "https://mmdbcdn.posthog.net/" --http1.1 2>/dev/null | brotli --decompress --output=share/GeoLite2-City.mmdb 2>/dev/null || touch share/GeoLite2-City.mmdb
-            fi
-          fi
+                  # 2. Sync python dependencies in hermetic enve environment
+                  if [ ! -d ".venv" ]; then
+                    echo "L1/L2 Cache Miss: Installing python dependencies with uv in hermetic enve environment..."
+                    enve run -f showcase/enve.cue -- uv sync --frozen
+                    if [ -n "${AWS_ACCESS_KEY_ID:-}" ]; then
+                      echo "Uploading virtualenv to L2 Cloudflare R2 binary cache..."
+                      tar -I "zstd -T0 -3" -cf - .venv | aws s3 cp - "s3://${R2_BUCKET}/${VENV_KEY}" --endpoint-url "${R2_ENDPOINT}" 2>/dev/null || true
+                    fi
+                  else
+                    echo "Verifying virtualenv consistency with uv..."
+                    enve run -f showcase/enve.cue -- uv sync --frozen
+                  fi
 
-          if [ ! -d "node_modules" ]; then
-            echo "Installing frontend workspace dependencies..."
-            pnpm install --frozen-lockfile || pnpm install --no-frozen-lockfile
-          fi
+                  # 3. Restore GeoIP database
+                  if [ ! -f "share/GeoLite2-City.mmdb" ]; then
+                    echo "Restoring GeoIP database from remote S3/R2 binary cache..."
+                    mkdir -p share
+                    if [ -n "${AWS_ACCESS_KEY_ID:-}" ]; then
+                      aws s3 cp "s3://${R2_BUCKET}/share/GeoLite2-City.mmdb" share/GeoLite2-City.mmdb --endpoint-url "${R2_ENDPOINT}" 2>/dev/null || true
+                    fi
+                    if [ ! -f "share/GeoLite2-City.mmdb" ]; then
+                      curl -sL "https://mmdbcdn.posthog.net/" --http1.1 2>/dev/null | brotli --decompress --output=share/GeoLite2-City.mmdb 2>/dev/null || touch share/GeoLite2-City.mmdb
+                    fi
+                  fi
 
-      - name: Run DevEx Showcase Suite
-        env:
-          ENVE_SERVICE_UID: 1000
-          ENVE_SERVICE_GID: 1000
-        run: ./showcase/scripts/run_showcase.sh
+                  # 4. Filtered frontend workspace installation (skip backend nodejs/node-rdkafka)
+                  if [ ! -d "node_modules" ] || [ ! -d "packages/quill/packages/components/node_modules" ]; then
+                    echo "Installing Quill frontend workspace dependencies (filtering out backend nodejs/node-rdkafka)..."
+                    pnpm install --frozen-lockfile --filter=@posthog/quill-components...
+                  fi
+
+            - name: Run DevEx Showcase Suite
+              env:
+                  ENVE_SERVICE_UID: 1000
+                  ENVE_SERVICE_GID: 1000
+              run: ./showcase/scripts/run_showcase.sh

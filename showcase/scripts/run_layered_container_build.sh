@@ -184,7 +184,7 @@ START_IMAGE=$(date +%s%N)
 
 log_cmd "enve container image -f showcase/enve.cue --app-dir $APP_STAGING_DIR -o $OCI_IMAGE_ARCHIVE -t posthog:${APP_HASH}"
 IMAGE_ARGS=(-f showcase/enve.cue --app-dir "$APP_STAGING_DIR" -o "$OCI_IMAGE_ARCHIVE" -t "posthog:${APP_HASH}")
-if enve container image --help 2>&1 | rg -q -- "--tools"; then
+if enve container image --help 2>&1 | awk '/--tools/ {found=1} END {exit !found}'; then
     IMAGE_ARGS+=(--tools python3,uv --compression zstd)
 fi
 enve container image "${IMAGE_ARGS[@]}"

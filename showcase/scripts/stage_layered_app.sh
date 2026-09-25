@@ -85,7 +85,8 @@ fi
 
 # Include lightweight server entrypoints, staticfiles, frontend distribution, and commit hash
 [ -d "bin" ] && cp -r bin/* "$APP_STAGING_DIR/code/bin/" 2>/dev/null || true
-[ -d "staticfiles" ] && cp -r staticfiles "$APP_STAGING_DIR/code/staticfiles" 2>/dev/null || true
+mkdir -p "$APP_STAGING_DIR/code/staticfiles"
+[ -d "staticfiles" ] && cp -r staticfiles/* "$APP_STAGING_DIR/code/staticfiles/" 2>/dev/null || true
 if [ -d "frontend/dist" ]; then
     mkdir -p "$APP_STAGING_DIR/code/frontend"
     cp -r frontend/dist "$APP_STAGING_DIR/code/frontend/dist" 2>/dev/null || true
@@ -93,12 +94,8 @@ fi
 # Fetch GeoIP database if missing from cache
 if [ ! -f "share/GeoLite2-City.mmdb" ]; then
     mkdir -p share
-    if [ -f ".venv/bin/python" ] && [ -n "${AWS_ACCESS_KEY_ID:-}" ]; then
-        .venv/bin/python -c "
-import os, boto3
-s3 = boto3.client('s3', endpoint_url=os.environ.get('R2_ENDPOINT', 'https://847959617b8d3ada9eb84238a37f56ec.r2.cloudflarestorage.com'), aws_access_key_id=os.environ.get('AWS_ACCESS_KEY_ID'), aws_secret_access_key=os.environ.get('AWS_SECRET_ACCESS_KEY'), region_name='auto')
-s3.download_file(os.environ.get('R2_BUCKET', 'posthog-enve'), 'share/GeoLite2-City.mmdb', 'share/GeoLite2-City.mmdb')
-" 2>/dev/null || true
+    if command -v aws >/dev/null 2>&1 && [ -n "${AWS_ACCESS_KEY_ID:-}" ]; then
+        aws s3 cp "s3://${R2_BUCKET:-posthog-enve}/share/GeoLite2-City.mmdb" share/GeoLite2-City.mmdb --endpoint-url "${R2_ENDPOINT:-https://847959617b8d3ada9eb84238a37f56ec.r2.cloudflarestorage.com}" 2>/dev/null || true
     fi
     if [ ! -f "share/GeoLite2-City.mmdb" ]; then
         curl -sL "https://mmdbcdn.posthog.net/" --http1.1 2>/dev/null | brotli --decompress --output=share/GeoLite2-City.mmdb 2>/dev/null || touch share/GeoLite2-City.mmdb
