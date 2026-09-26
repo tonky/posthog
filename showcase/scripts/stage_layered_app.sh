@@ -39,14 +39,14 @@ git checkout packages/quill/packages/charts/src/index.ts 2>/dev/null || true
 
 # Headless Django collectstatic (WhiteNoise, zero DB or Redis contention)
 log_info "Executing headless Django collectstatic..."
-log_cmd "SKIP_SERVICE_VERSION_REQUIREMENTS=1 STATIC_COLLECTION=1 STATIC_PRECOMPRESS=0 DATABASE_URL='postgres:///' REDIS_URL='redis:///' uv run --no-dev python manage.py collectstatic --noinput"
+log_cmd "SKIP_SERVICE_VERSION_REQUIREMENTS=1 STATIC_COLLECTION=1 STATIC_PRECOMPRESS=0 DATABASE_URL='postgres:///' REDIS_URL='redis:///' enve run -f showcase/enve.cue -- uv run --no-dev python manage.py collectstatic --noinput"
 SKIP_SERVICE_VERSION_REQUIREMENTS=1 \
 STATIC_COLLECTION=1 \
 STATIC_PRECOMPRESS=0 \
 DATABASE_URL='postgres:///' \
 REDIS_URL='redis:///' \
 PYTHONPYCACHEPREFIX="${SHOWCASE_TMPFS}/pycache" \
-uv run --no-dev python manage.py collectstatic --noinput >/dev/null 2>&1 || true
+enve run -f showcase/enve.cue -- uv run --no-dev python manage.py collectstatic --noinput >/dev/null 2>&1 || true
 
 echo "----------------------------------------------------------------------"
 log_step "Staging Application Source & Static Assets"
