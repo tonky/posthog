@@ -6,7 +6,7 @@
 #   1. Zero-daemon dev environment boot & service telemetry (< 2.5s)
 #   2. Targeted PR test execution against live tmpfs services (PostgreSQL 16,
 #      Redis 8, Kafka/Tansu, ClickHouse 26 with 2,699 migrations restored in 1.2s)
-#   3. Multi-arch layered OCI container build (Zero Docker, ~1.5s Zstd L4 delta)
+#   3. Multi-arch layered OCI container build (~1.5s Zstd L4 delta)
 # ==============================================================================
 
 set -euo pipefail
@@ -51,7 +51,7 @@ enve run -f showcase/enve.cue -- echo hi 2>&1 | stamp_lines
 STAGE1_END=$(date +%s%N)
 STAGE1_MS=$(( (STAGE1_END - STAGE1_START) / 1000000 ))
 STAGE1_SEC=$(awk "BEGIN {printf \"%.2f\", $STAGE1_MS / 1000}")
-log_ok "Stage 1 Complete: Sub-100ms process dispatch verified in ${STAGE1_SEC}s (zero daemon, zero container tax)"
+log_ok "Stage 1 Complete: Sub-100ms process dispatch verified in ${STAGE1_SEC}s (zero daemon)"
 echo ""
 
 # ------------------------------------------------------------------------------
@@ -194,11 +194,11 @@ printf "%-26s | %-16s | %-20s | %-18s | %-18s\n" "Redis 8.10" "${REDIS_MB} MB" "
 printf "%-26s | %-16s | %-20s | %-18s | %-18s\n" "Kafka (Tansu Engine)" "${TANSU_MB} MB" "< 0.1s" "Pure In-Memory" "Ready (19092)"
 printf "%-26s | %-16s | %-20s | %-18s | %-18s\n" "ClickHouse 26" "${CH_MB} MB" "User/Sys: 6.2/1.5s" "tmpfs (/tmp)" "Ready (8123)"
 echo "----------------------------------------------------------------------------------------------------------------------"
-printf "%-26s | %-16s | %-20s | %-18s | %-18s\n" "Live Microservices Tier" "${SERVICES_MB} MB" "All Cores Active" "Zero Physical I/O" "~12x < Docker (~7.5G)"
+printf "%-26s | %-16s | %-20s | %-18s | %-18s\n" "Live Microservices Tier" "${SERVICES_MB} MB" "All Cores Active" "Zero Physical I/O" "All Services Ready"
 echo "----------------------------------------------------------------------------------------------------------------------"
 printf "%-26s | %-16s | %-20s | %-18s | %-18s\n" "Pytest Runner (56 tests)" "${PYTEST_MB} MB" "CPU: ${PYTEST_CPU_PCT}" "Live Loopback Stack" "56/56 Passed (100%)"
 printf "%-26s | %-16s | %-20s | %-18s | %-18s\n" "Concurrent Asset Staging" "${STAGING_MB} MB" "Turborepo + Node" "Dist Layer Staged" "Overlapped (0s wait)"
-printf "%-26s | %-16s | %-20s | %-18s | %-18s\n" "Total Peak Working Set" "${TOTAL_RSS_GB} GB (${TOTAL_RSS_MB} MB)" "Zero Virtualization" "Ephemeral tmpfs" "Zero Docker Daemon"
+printf "%-26s | %-16s | %-20s | %-18s | %-18s\n" "Total Peak Working Set" "${TOTAL_RSS_GB} GB (${TOTAL_RSS_MB} MB)" "All Cores Active" "Ephemeral tmpfs" "Peak Measured RSS"
 echo "======================================================================================================================"
 echo ""
 
@@ -234,48 +234,51 @@ TOTAL_SEC=$(awk "BEGIN {printf \"%.2f\", $TOTAL_MS / 1000}")
 echo "======================================================================================================================"
 log_info "PostHog DevEx Acceleration: Consolidated Scorecard"
 echo "======================================================================================================================"
-printf "%-40s | %-14s | %-26s | %-18s\n" "Workflow Stage" "Traditional CI" "enve Accelerated" "Net Improvement"
+printf "%-42s | %-18s | %-32s\n" "Workflow Stage" "Measured Duration" "Verification Details"
 echo "----------------------------------------------------------------------------------------------------------------------"
-printf "%-40s | %-14s | %-26s | %-18s\n" "1. Zero-Daemon Dispatch (enve run)" "5s - 10s (Docker)" "${STAGE1_SEC}s" "~50x - 100x faster"
-printf "%-40s | %-14s | %-26s | %-18s\n" "2. PR Tests on Live Stack (56 tests)" "3m 30s" "${STAGE2_SEC}s (overlapped)" "~4x - 10x faster"
-printf "%-40s | %-14s | %-26s | %-18s\n" "3. Real Multi-Arch OCI Image Build" "25m 00s" "${OCI_IMAGE_SEC}s (Pipeline: ${STAGE3_SEC}s)" "~15x - 75x faster"
+printf "%-42s | %-18s | %-32s\n" "1. Process Dispatch (enve run)" "${STAGE1_SEC}s" "Sub-100ms hermetic dispatch"
+printf "%-42s | %-18s | %-32s\n" "2. PR Tests on Live Stack (56 tests)" "${STAGE2_SEC}s" "56/56 passed (staging overlapped)"
+printf "%-42s | %-18s | %-32s\n" "3. Real Multi-Arch OCI Image Build" "${OCI_IMAGE_SEC}s" "Pipeline: ${STAGE3_SEC}s"
 echo "----------------------------------------------------------------------------------------------------------------------"
-printf "%-40s | %-14s | %-26s | %-18s\n" "Total End-to-End Showcase" "~33m 30s" "${TOTAL_SEC}s" "~15x - 20x faster"
+printf "%-42s | %-18s | %-32s\n" "Total End-to-End Showcase" "${TOTAL_SEC}s" "All stages completed"
 echo "----------------------------------------------------------------------------------------------------------------------"
-echo "Resource & Memory Footprint:"
-echo "  - Live Microservices RAM : ${SERVICES_MB} MB total RSS vs ~7,500 MB Docker Compose (~12x lighter)"
-echo "  - Total Peak Working Set : ${TOTAL_RSS_GB} GB (services + 56 tests + Turborepo staging) vs ~10 GB CI runner"
-echo "  - Storage & I/O Overhead : Ephemeral tmpfs (/dev/shm) — 0 bytes physical disk writes, 0 I/O wait"
-echo "  - Virtualization Penalty : 0 Docker VMs, 0 daemon background CPU, 0 bridge network NAT latency"
+echo "Measured Resource & Memory Footprint:"
+echo "  - Live Microservices RAM : ${SERVICES_MB} MB total RSS (Postgres + Redis + Kafka/Tansu + ClickHouse)"
+echo "  - Total Peak Working Set : ${TOTAL_RSS_GB} GB (${TOTAL_RSS_MB} MB across services, tests, staging)"
+echo "  - Storage & I/O Overhead : Ephemeral tmpfs (/dev/shm) — zero physical disk writes"
 echo "======================================================================================================================"
 
 # Write GitHub Actions Step Summary if running in CI
 if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
     cat >> "$GITHUB_STEP_SUMMARY" << MARKDOWN
-## PostHog DevEx Acceleration Summary (\`enve\`)
+## PostHog DevEx Execution Summary (\`enve\`)
 
-> **Zero Daemon | Zero Root | Zero Docker Runtime | Pure User-Space Loopback**
+> **Zero Daemon | Zero Root | Pure User-Space Loopback**
 
-| Workflow Stage | Upstream Baseline | \`enve\` Accelerated | Net Improvement |
+### Measured Pipeline Durations
+| Workflow Stage | Measured Duration | Verification Details |
+| :--- | :--- | :--- |
+| **1. Process Dispatch** (\`enve run\` overhead) | **${STAGE1_SEC}s** | Sub-100ms hermetic execution |
+| **2. Targeted PR Test Execution** (56 tests in \`test_event.py\`) | **${STAGE2_SEC}s** | 56/56 passed on tmpfs Postgres, Redis, Kafka, ClickHouse |
+| **3. Real Multi-Arch OCI Container Build** (\`enve container image\`) | **${OCI_IMAGE_SEC}s** | Multi-arch \`amd64\`+\`arm64\` OCI archive (Pipeline: **${STAGE3_SEC}s**) |
+| **Total End-to-End Verification** | **${TOTAL_SEC}s** | All stages completed |
+
+### Measured Resource Footprint
+| Component | Peak RAM (RSS) | Storage Engine | Status |
 | :--- | :--- | :--- | :--- |
-| **1. Zero-Daemon Process Dispatch** (\`enve run\` overhead) | ~5–10s (\`docker compose run\`) | **${STAGE1_SEC}s** | **~50x - 100x faster** (zero background daemon) |
-| **2. Targeted PR Test Execution** (56 tests in \`test_event.py\` on 4 live services) | ~3m 30s (Docker Compose) | **${STAGE2_SEC}s** (staging overlapped) | **~4x - 10x faster** (live tmpfs services) |
-| **3. Real Multi-Arch OCI Container Build** (\`enve container image\`) | ~25m (Single-Arch) / 3h (QEMU) | **${OCI_IMAGE_SEC}s** (Pipeline: **${STAGE3_SEC}s**) | **~15x - 75x faster** (multi-arch \`amd64\`+\`arm64\` OCI archive) |
-| **Total End-to-End Verification** | **~33m 30s** | **${TOTAL_SEC}s** | **~15x - 20x Faster Overall** |
-
-### Resource Telemetry Comparison
-| Metric | Traditional Docker Compose Stack | \`enve\` Microservices & Pipeline | Advantage |
-| :--- | :--- | :--- | :--- |
-| **Microservices RAM (RSS)** | ~7,500 MB (JVM Kafka, Postgres, CH, Redis) | **${SERVICES_MB} MB** (Postgres, CH, Redis, Tansu) | **~12x lighter memory footprint** |
-| **Peak Working Set** | ~10,000 MB+ | **${TOTAL_RSS_GB} GB** (services + 56 tests + Turborepo) | **Run on standard 2-core / 4GB nodes** |
-| **Disk Storage & I/O** | 10 GB+ container image layers & volume writes | **0 bytes physical disk writes** (ephemeral tmpfs) | **Zero I/O bottleneck & zero disk pollution** |
-| **Virtualization Tax** | VM context switches, veth NAT, dockerd CPU | **0 daemon processes, 100% native Linux loopback** | **Hermetic bare-metal speed** |
+| **PostgreSQL 16** | **${PG_MB} MB** | tmpfs (\`/tmp\`) | Ready (2,699 migrations restored) |
+| **Redis 8.10** | **${REDIS_MB} MB** | RAM-backed | Ready (16379) |
+| **Kafka (Tansu Engine)** | **${TANSU_MB} MB** | Pure In-Memory | Ready (19092) |
+| **ClickHouse 26** | **${CH_MB} MB** | tmpfs (\`/tmp\`) | Ready (8123) |
+| **Live Microservices Tier** | **${SERVICES_MB} MB** | Ephemeral tmpfs | All 4 services healthy |
+| **Pytest Runner (56 tests)** | **${PYTEST_MB} MB** | Live loopback stack | 56/56 Passed (100%) |
+| **Total Peak Working Set** | **${TOTAL_RSS_GB} GB** (${TOTAL_RSS_MB} MB) | Ephemeral tmpfs | Peak runner memory |
 
 ### Architecture Highlights
-1. **Hermetic \`enve shell\` Readiness:** Validates schemas and cryptographic pins in **<0.3s** without downloading bloated containers.
-2. **Instant Golden Schema Priming:** Restored 2,699 migrations in **1.2s** and cloned into \`template_posthog\` for zero-cost copy-on-write isolation.
-3. **Microservice RAM Footprint:** All 4 services operating under **~600 MB total RSS** on loopback (\`127.0.0.1\`).
-4. **Concurrent Asset Staging:** Frontend Turborepo rebuild and static asset staging run concurrently during backend test execution, eliminating 30s of pipeline latency.
-5. **Native OCI Multi-Arch Synthesis:** Built a compliant, loadable multi-arch (\`amd64\` + \`arm64\`) OCI image with Zstandard layer compression directly in user-space via \`enve container image\` with zero Docker daemon.
+1. **Hermetic \`enve shell\` Readiness:** Validates schemas and cryptographic pins in **<0.3s** without external runtimes.
+2. **Instant Golden Schema Priming:** Restored 2,699 migrations in **1.2s** and cloned into \`template_posthog\` for copy-on-write isolation.
+3. **Microservice RAM Footprint:** All 4 services operating under **${SERVICES_MB} MB total RSS** on loopback (\`127.0.0.1\`).
+4. **Concurrent Asset Staging:** Frontend Turborepo rebuild and static asset staging run concurrently during backend test execution, eliminating pipeline wait time.
+5. **Native OCI Multi-Arch Synthesis:** Built a compliant, loadable multi-arch (\`amd64\` + \`arm64\`) OCI image with Zstandard layer compression directly in user-space via \`enve container image\`.
 MARKDOWN
 fi

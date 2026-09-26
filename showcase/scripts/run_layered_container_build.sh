@@ -135,7 +135,7 @@ if [ "$USE_BWRAP" -eq 1 ]; then
             "$PYTHON_BIN" "$@"
     }
 else
-    log_info "Sandbox Runtime: Containerized Host (Docker / CI runner environment detected)"
+    log_info "Sandbox Runtime: Host Runner Environment"
     mkdir -p "${SHOWCASE_TMPFS}/pycache"
     run_container_cmd() {
         DEBUG=0 \
@@ -223,15 +223,12 @@ TOTAL_MS=$(( (END_TOTAL - START_TOTAL) / 1000000 ))
 TOTAL_SEC=$(awk "BEGIN {printf \"%.2f\", $TOTAL_MS / 1000}")
 
 echo "======================================================================"
-log_info "Results: Typical PR Layered Build Performance"
+log_info "Results: Layered Container Synthesis Performance"
 echo "======================================================================"
-printf "%-32s | %-16s | %-16s | %-16s\n" "Build Strategy" "Build Duration" "Registry Transfer" "K8s Pull Latency"
+printf "%-32s | %-16s | %-16s | %-16s\n" "Build Strategy" "Total Duration" "Image Synthesis" "Archive Size"
 echo "------------------------------------------------------------------------------------------------------"
-printf "%-32s | %-16s | %-16s | %-16s\n" "Upstream QEMU Monolithic" "193m (3h 13m)" "5.1 GB (all)" "65s"
-printf "%-32s | %-16s | %-16s | %-16s\n" "Upstream Single-Arch CI" "25m 00s" "4.2 GB (all)" "45s"
-printf "%-32s | %-16s | %-16s | %-16s\n" "enve container image" "${TOTAL_SEC}s (OCI: ${IMAGE_SEC}s)" "${IMAGE_SIZE}" "< 1.5s"
+printf "%-32s | %-16s | %-16s | %-16s\n" "enve container image" "${TOTAL_SEC}s" "${IMAGE_SEC}s" "${IMAGE_SIZE}"
 echo "------------------------------------------------------------------------------------------------------"
-echo "Net PR Speedup:      ~75x faster vs upstream single-arch, ~550x faster vs QEMU multi-arch"
-echo "Real OCI Compliance: Valid OCI v1.1 index.json, multi-arch manifests (amd64 + arm64), Zstandard layers"
-echo "Daemonless Mandate:  Zero Docker daemon, zero root, pure Rust user-space synthesis"
+echo "OCI Specification:   Valid OCI v1.1 index.json, multi-arch manifests (amd64 + arm64), Zstandard layers"
+echo "Execution Mandate:   Zero daemon, zero root, user-space OCI synthesis"
 echo "======================================================================"
