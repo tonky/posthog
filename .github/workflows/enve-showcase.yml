@@ -142,112 +142,83 @@ jobs:
                   echo "COLD_START_DURATION=${COLD_SEC}s" >> "$GITHUB_ENV"
                   echo "Authentic Cold Start completed in ${COLD_SEC}s (zero daemon, 100% user-space store)"
 
-            - name: Warm environment & dependencies
-              run: |
-                  START_WARM=$(date +%s%N)
-                  echo "Starting concurrent hydration across 3 streams: Python venv, GeoIP database, Quill dependencies..."
-
-                  # Stream 1: Python Virtualenv L2 Cache Hydration & Hermetic Sync
-                  restore_venv() {
-                    set -euo pipefail
-                    VENV_HASH="$(sha256sum uv.lock | awk '{print $1}')"
-                    VENV_KEY="cache/posthog-venv-${VENV_HASH}.tar.zst"
-                    echo "VENV_KEY=${VENV_KEY}" >> "$GITHUB_ENV"
-                    if [ ! -d ".venv" ]; then
-                      echo "[venv] Checking L2 Cloudflare R2 binary cache for pre-built virtualenv (${VENV_KEY})..."
-                      if [ -n "${AWS_ACCESS_KEY_ID:-}" ]; then
-                        START_VENV=$(date +%s%N)
-                        if aws s3 cp "s3://${R2_BUCKET}/${VENV_KEY}" - --endpoint-url "${R2_ENDPOINT}" 2>/dev/null | tar -I "zstd -d -T0" -xf - 2>/dev/null; then
-                          END_VENV=$(date +%s%N)
-                          VENV_SEC=$(awk "BEGIN {printf \"%.2f\", ($END_VENV - $START_VENV) / 1000000000}")
-                          echo "[venv] L2 Cache Hit: Restored .venv directly from Cloudflare R2 in ${VENV_SEC}s"
+            - parallel:
+                  - name: Warm Python Virtualenv & uv Dependencies
+                    run: |
+                        set -euo pipefail
+                        VENV_HASH="$(sha256sum uv.lock | awk '{print $1}')"
+                        VENV_KEY="cache/posthog-venv-${VENV_HASH}.tar.zst"
+                        echo "VENV_KEY=${VENV_KEY}" >> "$GITHUB_ENV"
+                        if [ ! -d ".venv" ]; then
+                          echo "[venv] Checking L2 Cloudflare R2 binary cache for pre-built virtualenv (${VENV_KEY})..."
+                          if [ -n "${AWS_ACCESS_KEY_ID:-}" ]; then
+                            START_VENV=$(date +%s%N)
+                            if aws s3 cp "s3://${R2_BUCKET}/${VENV_KEY}" - --endpoint-url "${R2_ENDPOINT}" 2>/dev/null | tar -I "zstd -d -T0" -xf - 2>/dev/null; then
+                              END_VENV=$(date +%s%N)
+                              VENV_SEC=$(awk "BEGIN {printf \"%.2f\", ($END_VENV - $START_VENV) / 1000000000}")
+                              echo "[venv] L2 Cache Hit: Restored .venv directly from Cloudflare R2 in ${VENV_SEC}s"
+                            fi
+                          fi
                         fi
-                      fi
-                    fi
 
-                    if [ ! -d ".venv" ]; then
-                      echo "[venv] L2 Cache Miss: Installing python dependencies with uv in hermetic enve environment..."
-                      enve run -f showcase/enve.cue -- uv sync --frozen
-                      rm -rf .venv/lib/python*/site-packages/nvidia* 2>/dev/null || true
-                      echo "SAVE_VENV_CACHE=1" >> "$GITHUB_ENV"
-                    else
-                      echo "[venv] Verifying virtualenv consistency with uv..."
-                      enve run -f showcase/enve.cue -- uv sync --frozen
-                    fi
-                  }
-
-                  # Stream 2: Restore GeoIP database
-                  restore_geoip() {
-                    set -euo pipefail
-                    if [ ! -f "share/GeoLite2-City.mmdb" ]; then
-                      echo "[geoip] Restoring GeoIP database from remote S3/R2 binary cache..."
-                      mkdir -p share
-                      START_GEOIP=$(date +%s%N)
-                      RESTORED=0
-                      if [ -n "${AWS_ACCESS_KEY_ID:-}" ]; then
-                        if aws s3 cp "s3://${R2_BUCKET}/share/GeoLite2-City.mmdb" share/GeoLite2-City.mmdb --endpoint-url "${R2_ENDPOINT}" 2>/dev/null; then
-                          RESTORED=1
+                        if [ ! -d ".venv" ]; then
+                          echo "[venv] L2 Cache Miss: Installing python dependencies with uv in hermetic enve environment..."
+                          enve run -f showcase/enve.cue -- uv sync --frozen
+                          rm -rf .venv/lib/python*/site-packages/nvidia* 2>/dev/null || true
+                          echo "SAVE_VENV_CACHE=1" >> "$GITHUB_ENV"
+                        else
+                          echo "[venv] Verifying virtualenv consistency with uv..."
+                          enve run -f showcase/enve.cue -- uv sync --frozen
                         fi
-                      fi
-                      if [ "$RESTORED" -eq 0 ] || [ ! -s "share/GeoLite2-City.mmdb" ]; then
-                        curl -sL "https://mmdbcdn.posthog.net/" --http1.1 2>/dev/null | brotli --decompress --output=share/GeoLite2-City.mmdb 2>/dev/null || touch share/GeoLite2-City.mmdb
-                      fi
-                      END_GEOIP=$(date +%s%N)
-                      GEOIP_SEC=$(awk "BEGIN {printf \"%.2f\", ($END_GEOIP - $START_GEOIP) / 1000000000}")
-                      echo "[geoip] GeoIP database ready in ${GEOIP_SEC}s"
-                    fi
-                  }
 
-                  # Stream 3: Quill frontend workspace installation & L2 streaming cache
-                  restore_quill() {
-                    set -euo pipefail
-                    FE_HASH="$(sha256sum pnpm-lock.yaml | awk '{print $1}')"
-                    QUILL_KEY="cache/posthog-quill-${FE_HASH}.tar.zst"
-                    echo "QUILL_KEY=${QUILL_KEY}" >> "$GITHUB_ENV"
-                    if [ ! -d "node_modules" ] || [ ! -d "packages/quill/packages/components/node_modules" ]; then
-                      if [ -n "${AWS_ACCESS_KEY_ID:-}" ]; then
-                        echo "[quill] Checking L2 Cloudflare R2 binary cache for Quill dependencies (${QUILL_KEY})..."
-                        START_QUILL=$(date +%s%N)
-                        if aws s3 cp "s3://${R2_BUCKET}/${QUILL_KEY}" - --endpoint-url "${R2_ENDPOINT}" 2>/dev/null | tar -I "zstd -d" -xf - 2>/dev/null; then
-                          END_QUILL=$(date +%s%N)
-                          QUILL_SEC=$(awk "BEGIN {printf \"%.2f\", ($END_QUILL - $START_QUILL) / 1000000000}")
-                          echo "[quill] L2 Cache Hit: Restored Quill dependencies directly from Cloudflare R2 in ${QUILL_SEC}s"
+                  - name: Restore GeoIP Database
+                    run: |
+                        set -euo pipefail
+                        if [ ! -f "share/GeoLite2-City.mmdb" ]; then
+                          echo "[geoip] Restoring GeoIP database from remote S3/R2 binary cache..."
+                          mkdir -p share
+                          START_GEOIP=$(date +%s%N)
+                          RESTORED=0
+                          if [ -n "${AWS_ACCESS_KEY_ID:-}" ]; then
+                            if aws s3 cp "s3://${R2_BUCKET}/share/GeoLite2-City.mmdb" share/GeoLite2-City.mmdb --endpoint-url "${R2_ENDPOINT}" 2>/dev/null; then
+                              RESTORED=1
+                            fi
+                          fi
+                          if [ "$RESTORED" -eq 0 ] || [ ! -s "share/GeoLite2-City.mmdb" ]; then
+                            curl -sL "https://mmdbcdn.posthog.net/" --http1.1 2>/dev/null | brotli --decompress --output=share/GeoLite2-City.mmdb 2>/dev/null || touch share/GeoLite2-City.mmdb
+                          fi
+                          END_GEOIP=$(date +%s%N)
+                          GEOIP_SEC=$(awk "BEGIN {printf \"%.2f\", ($END_GEOIP - $START_GEOIP) / 1000000000}")
+                          echo "[geoip] GeoIP database ready in ${GEOIP_SEC}s"
                         fi
-                      fi
-                    fi
 
-                    if [ ! -d "node_modules" ] || [ ! -d "packages/quill/packages/components/node_modules" ]; then
-                      echo "[quill] L2 Cache Miss: Installing Quill frontend workspace dependencies (skipping lifecycle scripts)..."
-                      START_QUILL_INST=$(date +%s%N)
-                      HUSKY=0 pnpm install --frozen-lockfile --prefer-offline --ignore-scripts --filter=@posthog/quill-components...
-                      END_QUILL_INST=$(date +%s%N)
-                      QUILL_INST_SEC=$(awk "BEGIN {printf \"%.2f\", ($END_QUILL_INST - $START_QUILL_INST) / 1000000000}")
-                      echo "[quill] Quill dependencies installed via pnpm in ${QUILL_INST_SEC}s"
-                      echo "SAVE_QUILL_CACHE=1" >> "$GITHUB_ENV"
-                    fi
-                  }
+                  - name: Warm Quill Frontend Workspace
+                    run: |
+                        set -euo pipefail
+                        FE_HASH="$(sha256sum pnpm-lock.yaml | awk '{print $1}')"
+                        QUILL_KEY="cache/posthog-quill-${FE_HASH}.tar.zst"
+                        echo "QUILL_KEY=${QUILL_KEY}" >> "$GITHUB_ENV"
+                        if [ ! -d "node_modules" ] || [ ! -d "packages/quill/packages/components/node_modules" ]; then
+                          if [ -n "${AWS_ACCESS_KEY_ID:-}" ]; then
+                            echo "[quill] Checking L2 Cloudflare R2 binary cache for Quill dependencies (${QUILL_KEY})..."
+                            START_QUILL=$(date +%s%N)
+                            if aws s3 cp "s3://${R2_BUCKET}/${QUILL_KEY}" - --endpoint-url "${R2_ENDPOINT}" 2>/dev/null | tar -I "zstd -d" -xf - 2>/dev/null; then
+                              END_QUILL=$(date +%s%N)
+                              QUILL_SEC=$(awk "BEGIN {printf \"%.2f\", ($END_QUILL - $START_QUILL) / 1000000000}")
+                              echo "[quill] L2 Cache Hit: Restored Quill dependencies directly from Cloudflare R2 in ${QUILL_SEC}s"
+                            fi
+                          fi
+                        fi
 
-                  restore_venv &
-                  PID_VENV=$!
-
-                  restore_geoip &
-                  PID_GEOIP=$!
-
-                  restore_quill &
-                  PID_QUILL=$!
-
-                  FAILED=0
-                  wait "$PID_VENV" || { echo "Error: Python venv hydration failed" >&2; FAILED=1; }
-                  wait "$PID_GEOIP" || { echo "Error: GeoIP database restore failed" >&2; FAILED=1; }
-                  wait "$PID_QUILL" || { echo "Error: Quill frontend hydration failed" >&2; FAILED=1; }
-
-                  if [ "$FAILED" -ne 0 ]; then
-                    exit 1
-                  fi
-
-                  END_WARM=$(date +%s%N)
-                  WARM_SEC=$(awk "BEGIN {printf \"%.2f\", ($END_WARM - $START_WARM) / 1000000000}")
-                  echo "Concurrent hydration completed across all 3 streams in ${WARM_SEC}s"
+                        if [ ! -d "node_modules" ] || [ ! -d "packages/quill/packages/components/node_modules" ]; then
+                          echo "[quill] L2 Cache Miss: Installing Quill frontend workspace dependencies (skipping lifecycle scripts)..."
+                          START_QUILL_INST=$(date +%s%N)
+                          HUSKY=0 pnpm install --frozen-lockfile --prefer-offline --ignore-scripts --filter=@posthog/quill-components...
+                          END_QUILL_INST=$(date +%s%N)
+                          QUILL_INST_SEC=$(awk "BEGIN {printf \"%.2f\", ($END_QUILL_INST - $START_QUILL_INST) / 1000000000}")
+                          echo "[quill] Quill dependencies installed via pnpm in ${QUILL_INST_SEC}s"
+                          echo "SAVE_QUILL_CACHE=1" >> "$GITHUB_ENV"
+                        fi
 
             - name: Run DevEx Showcase Suite
               env:
@@ -255,44 +226,23 @@ jobs:
                   ENVE_SERVICE_GID: 1000
               run: ./showcase/scripts/run_showcase.sh
 
-            - name: Save remote binary caches (post-success)
-              if: success() && (env.SAVE_VENV_CACHE == '1' || env.SAVE_QUILL_CACHE == '1')
-              run: |
-                  if [ -z "${AWS_ACCESS_KEY_ID:-}" ]; then
-                    echo "Notice: Remote S3 credentials not set; skipping cache upload."
-                    exit 0
-                  fi
+            - parallel:
+                  - name: Upload Python Virtualenv Cache
+                    if: success() && env.SAVE_VENV_CACHE == '1' && env.AWS_ACCESS_KEY_ID != ''
+                    run: |
+                        set -euo pipefail
+                        if [ -d ".venv" ]; then
+                          echo "[venv] Uploading slimmed virtualenv to L2 Cloudflare R2 (${VENV_KEY})..."
+                          tar --exclude='__pycache__' --exclude='*.pyc' -I "zstd -1 -T0" -cf - .venv | aws s3 cp - "s3://${R2_BUCKET}/${VENV_KEY}" --endpoint-url "${R2_ENDPOINT}" 2>/dev/null || true
+                          echo "[venv] Upload complete."
+                        fi
 
-                  START_UPLOAD=$(date +%s%N)
-                  echo "Saving verified binary caches to Cloudflare R2 post-success..."
-
-                  upload_venv() {
-                    set -euo pipefail
-                    if [ "${SAVE_VENV_CACHE:-0}" = "1" ] && [ -d ".venv" ]; then
-                      echo "[venv] Uploading slimmed virtualenv to L2 Cloudflare R2 (${VENV_KEY})..."
-                      tar --exclude='__pycache__' --exclude='*.pyc' -I "zstd -1 -T0" -cf - .venv | aws s3 cp - "s3://${R2_BUCKET}/${VENV_KEY}" --endpoint-url "${R2_ENDPOINT}" 2>/dev/null || true
-                      echo "[venv] Upload complete."
-                    fi
-                  }
-
-                  upload_quill() {
-                    set -euo pipefail
-                    if [ "${SAVE_QUILL_CACHE:-0}" = "1" ] && [ -d "node_modules" ]; then
-                      echo "[quill] Uploading Quill dependencies to L2 Cloudflare R2 (${QUILL_KEY})..."
-                      tar --exclude='*.tsbuildinfo' -I "zstd -1 -T0" -cf - node_modules packages/quill/packages/*/node_modules 2>/dev/null | aws s3 cp - "s3://${R2_BUCKET}/${QUILL_KEY}" --endpoint-url "${R2_ENDPOINT}" 2>/dev/null || true
-                      echo "[quill] Upload complete."
-                    fi
-                  }
-
-                  upload_venv &
-                  PID_U_VENV=$!
-
-                  upload_quill &
-                  PID_U_QUILL=$!
-
-                  wait "$PID_U_VENV" 2>/dev/null || true
-                  wait "$PID_U_QUILL" 2>/dev/null || true
-
-                  END_UPLOAD=$(date +%s%N)
-                  UPLOAD_SEC=$(awk "BEGIN {printf \"%.2f\", ($END_UPLOAD - $START_UPLOAD) / 1000000000}")
-                  echo "Cache publication completed in ${UPLOAD_SEC}s"
+                  - name: Upload Quill Dependencies Cache
+                    if: success() && env.SAVE_QUILL_CACHE == '1' && env.AWS_ACCESS_KEY_ID != ''
+                    run: |
+                        set -euo pipefail
+                        if [ -d "node_modules" ]; then
+                          echo "[quill] Uploading Quill dependencies to L2 Cloudflare R2 (${QUILL_KEY})..."
+                          tar --exclude='*.tsbuildinfo' -I "zstd -1 -T0" -cf - node_modules packages/quill/packages/*/node_modules 2>/dev/null | aws s3 cp - "s3://${R2_BUCKET}/${QUILL_KEY}" --endpoint-url "${R2_ENDPOINT}" 2>/dev/null || true
+                          echo "[quill] Upload complete."
+                        fi
