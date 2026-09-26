@@ -137,6 +137,7 @@ profiles: dev: schema.#Profile & {
 				CLICKHOUSE_KEEPER_LOG_DIR:      "/tmp/clickhouse/keeper/log/"
 				CLICKHOUSE_KEEPER_SNAPSHOT_DIR: "/tmp/clickhouse/keeper/snapshots/"
 				CLICKHOUSE_USER_SCRIPTS_DIR:    "/tmp/clickhouse/data/user_scripts/"
+				CLICKHOUSE_UDF_CONFIG:          "config/user_defined_function.xml"
 				KAFKA_HOSTS:                    "127.0.0.1:19092"
 			}
 			lifecycle: {

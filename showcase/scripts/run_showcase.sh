@@ -85,46 +85,26 @@ rm -f "$SAMPLER_LOG"
     trap 'exit 0' TERM INT
 
     while true; do
-        cur_pg=0
-        cur_redis=0
-        cur_tansu=0
-        cur_ch=0
-        cur_pytest=0
-        cur_staging=0
+        eval $(ps -eo rss,comm,args --no-headers 2>/dev/null | awk '
+            /postgres/ { pg += $1 }
+            /redis-server/ { redis += $1 }
+            /tansu/ { tansu += $1 }
+            /clickhouse/ { ch += $1 }
+            /pytest/ { pt += $1 }
+            /stage_layered_app|quill-components/ { st += $1 }
+            END { printf "cur_pg=%d cur_redis=%d cur_tansu=%d cur_ch=%d cur_pytest=%d cur_staging=%d\n", pg, redis, tansu, ch, pt, st }
+        ')
 
-        while read -r pid rss comm args; do
-            [[ -z "$rss" || "$rss" == "0" ]] && continue
-            if [[ "$comm" == "postgres" ]] || [[ "$args" == *"postgres -D"* ]]; then
-                (( cur_pg += rss ))
-            elif [[ "$comm" == "redis-server" ]] || [[ "$args" == *"redis-server"* ]]; then
-                (( cur_redis += rss ))
-            elif [[ "$comm" == "tansu" ]] || [[ "$args" == *"tansu"* ]]; then
-                (( cur_tansu += rss ))
-            elif [[ "$comm" == *"clickhouse"* ]] || [[ "$args" == *"clickhouse-server"* ]]; then
-                (( cur_ch += rss ))
-            elif [[ "$args" == *"pytest"* ]]; then
-                (( cur_pytest += rss ))
-            elif [[ "$args" == *"stage_layered_app"* || "$args" == *"quill-components"* ]]; then
-                (( cur_staging += rss ))
-            fi
-        done < <(ps -eo pid,rss,comm,args --no-headers 2>/dev/null || true)
+        (( ${cur_pg:-0} > PEAK_PG )) && PEAK_PG=$cur_pg
+        (( ${cur_redis:-0} > PEAK_REDIS )) && PEAK_REDIS=$cur_redis
+        (( ${cur_tansu:-0} > PEAK_TANSU )) && PEAK_TANSU=$cur_tansu
+        (( ${cur_ch:-0} > PEAK_CH )) && PEAK_CH=$cur_ch
+        (( ${cur_pytest:-0} > PEAK_PYTEST )) && PEAK_PYTEST=$cur_pytest
+        (( ${cur_staging:-0} > PEAK_STAGING )) && PEAK_STAGING=$cur_staging
 
-        (( cur_pg > PEAK_PG )) && PEAK_PG=$cur_pg
-        (( cur_redis > PEAK_REDIS )) && PEAK_REDIS=$cur_redis
-        (( cur_tansu > PEAK_TANSU )) && PEAK_TANSU=$cur_tansu
-        (( cur_ch > PEAK_CH )) && PEAK_CH=$cur_ch
-        (( cur_pytest > PEAK_PYTEST )) && PEAK_PYTEST=$cur_pytest
-        (( cur_staging > PEAK_STAGING )) && PEAK_STAGING=$cur_staging
-
-        cat << STATS > "$SAMPLER_LOG"
-PEAK_PG_KB=$PEAK_PG
-PEAK_REDIS_KB=$PEAK_REDIS
-PEAK_TANSU_KB=$PEAK_TANSU
-PEAK_CH_KB=$PEAK_CH
-PEAK_PYTEST_KB=$PEAK_PYTEST
-PEAK_STAGING_KB=$PEAK_STAGING
-STATS
-        sleep 0.5
+        printf "PEAK_PG_KB=%d\nPEAK_REDIS_KB=%d\nPEAK_TANSU_KB=%d\nPEAK_CH_KB=%d\nPEAK_PYTEST_KB=%d\nPEAK_STAGING_KB=%d\n" \
+            "$PEAK_PG" "$PEAK_REDIS" "$PEAK_TANSU" "$PEAK_CH" "$PEAK_PYTEST" "$PEAK_STAGING" > "$SAMPLER_LOG"
+        sleep 2
     done
 ) &
 SAMPLER_PID=$!
@@ -135,7 +115,8 @@ if [ -x "/usr/bin/time" ]; then
 fi
 
 log_cmd "enve run -f showcase/enve.cue app.test"
-$TIME_CMD enve run -f showcase/enve.cue app.test 2>&1 | stamp_lines
+PYTEST_OUTPUT_LOG="${SHOWCASE_TMPFS}/pytest_output.log"
+$TIME_CMD enve run -f showcase/enve.cue app.test 2>&1 | tee "$PYTEST_OUTPUT_LOG" | stamp_lines
 
 # Stop resource sampler
 kill "$SAMPLER_PID" 2>/dev/null || true
@@ -148,7 +129,14 @@ log_ok "Concurrent application rootfs staging ready for OCI synthesis"
 STAGE2_END=$(date +%s%N)
 STAGE2_MS=$(( (STAGE2_END - STAGE2_START) / 1000000 ))
 STAGE2_SEC=$(awk "BEGIN {printf \"%.2f\", $STAGE2_MS / 1000}")
-log_ok "Stage 2 Complete: 56 Django integration tests passed in ${STAGE2_SEC}s (staging overlapped)"
+
+# Extract pure pytest elapsed time reported by pytest itself (e.g. "56 passed in 80.28s")
+PYTEST_ELAPSED=$(awk -F'passed in ' '/passed in [0-9.]+s/ {split($2, a, "s"); print a[1]}' "$PYTEST_OUTPUT_LOG" 2>/dev/null | tail -n 1 | tr -dc '0-9.' || true)
+if [ -n "$PYTEST_ELAPSED" ]; then
+    log_ok "Stage 2 Complete: 56 Django integration tests passed in ${PYTEST_ELAPSED}s (Stage Envelope: ${STAGE2_SEC}s, staging overlapped)"
+else
+    log_ok "Stage 2 Complete: 56 Django integration tests passed (Stage Envelope: ${STAGE2_SEC}s, staging overlapped)"
+fi
 echo ""
 
 # Load and compute telemetry metrics

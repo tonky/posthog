@@ -7,7 +7,7 @@
   "platforms": {
     "x86_64-linux": {
       "binding": {
-        "environment_sha256": "96f1a617ccadbdc41d85e7df270fd9a866f85b28a67af26ab798dc51c1fdb567",
+        "environment_sha256": "8cc392a49c48e6b2e25b135109344e783ee357c803f0ca082ff1cdec086d9817",
         "inventory_sha256": "5afbb87deddb65cdac2ee30ed4d226023b14ea2ee2cf96ea48a39e53ca4b1b2c",
         "profile": null,
         "version": 1
