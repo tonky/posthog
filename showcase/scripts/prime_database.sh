@@ -28,8 +28,12 @@ if [ -z "$DUMP" ]; then
     exit 0
 fi
 
-# Check migration count in test_posthog
-COUNT=$(psql -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" -d test_posthog -tAc "SELECT count(*) FROM django_migrations" 2>/dev/null || echo 0)
+# Check if test_posthog exists and has migrations
+DB_EXISTS=$(psql -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname = 'test_posthog'" 2>/dev/null || echo 0)
+COUNT=0
+if [ "${DB_EXISTS:-0}" = "1" ]; then
+    COUNT=$(psql -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" -d test_posthog -tAc "SELECT CASE WHEN to_regclass('public.django_migrations') IS NOT NULL THEN (SELECT count(*) FROM django_migrations) ELSE 0 END" 2>/dev/null || echo 0)
+fi
 
 if [ "${FORCE_PRIME:-0}" = "1" ] || [ "${1:-}" = "--force" ] || [ "${COUNT:-0}" -lt 2000 ]; then
     log_info "Priming test_posthog database from $DUMP (2,699 migrations)..."
@@ -42,7 +46,7 @@ if [ "${FORCE_PRIME:-0}" = "1" ] || [ "${1:-}" = "--force" ] || [ "${COUNT:-0}" 
     
     log_info "Registering template_posthog for instant copy-on-write isolation..."
     log_cmd "psql -h $PG_HOST -p $PG_PORT -U $PG_USER -d postgres -c 'CREATE DATABASE template_posthog TEMPLATE test_posthog;'"
-    psql -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" -d postgres -q -c "ALTER DATABASE template_posthog is_template false;" 2>/dev/null || true
+    psql -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" -d postgres -q -c "DO \$\$ BEGIN IF EXISTS (SELECT 1 FROM pg_database WHERE datname = 'template_posthog') THEN ALTER DATABASE template_posthog is_template false; END IF; END \$\$;"
     psql -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" -d postgres -q \
         -c "DROP DATABASE IF EXISTS template_posthog;" \
         -c "CREATE DATABASE template_posthog TEMPLATE test_posthog;" \

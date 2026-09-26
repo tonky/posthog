@@ -97,7 +97,7 @@ start_services() {
         fi
         if [ -n "$schema_gz" ]; then
             local mig_count
-            mig_count=$(psql -h localhost -p "$PG_PORT" -U posthog -d test_posthog -tAc "SELECT count(*) FROM django_migrations" 2>/dev/null || echo "0")
+            mig_count=$(psql -h localhost -p "$PG_PORT" -U posthog -d test_posthog -tAc "SELECT CASE WHEN to_regclass('public.django_migrations') IS NOT NULL THEN (SELECT count(*) FROM django_migrations) ELSE 0 END" 2>/dev/null || echo "0")
             if [ "${mig_count:-0}" -lt 2000 ]; then
                 gunzip -c "$schema_gz" | psql -h localhost -p "$PG_PORT" -U posthog -q -d test_posthog >/dev/null 2>&1 || true
             fi
