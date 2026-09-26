@@ -32,7 +32,10 @@ fi
 DB_EXISTS=$(psql -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname = 'test_posthog'" 2>/dev/null || echo 0)
 COUNT=0
 if [ "${DB_EXISTS:-0}" = "1" ]; then
-    COUNT=$(psql -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" -d test_posthog -tAc "SELECT CASE WHEN to_regclass('public.django_migrations') IS NOT NULL THEN (SELECT count(*) FROM django_migrations) ELSE 0 END" 2>/dev/null || echo 0)
+    HAS_MIGRATIONS_TABLE=$(psql -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" -d test_posthog -tAc "SELECT to_regclass('public.django_migrations')" 2>/dev/null || true)
+    if [ -n "$HAS_MIGRATIONS_TABLE" ]; then
+        COUNT=$(psql -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" -d test_posthog -tAc "SELECT count(*) FROM django_migrations" 2>/dev/null || echo 0)
+    fi
 fi
 
 if [ "${FORCE_PRIME:-0}" = "1" ] || [ "${1:-}" = "--force" ] || [ "${COUNT:-0}" -lt 2000 ]; then

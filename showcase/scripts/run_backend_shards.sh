@@ -115,7 +115,10 @@ if [ "$WORKER_COUNT" -gt 1 ]; then
     for ((w=0; w<WORKER_COUNT; w++)); do
         db="test_posthog_gw$w"
         if echo "$EXISTING_DBS" | rg -qx "$db"; then
-            gw_mig=$(psql -h localhost -p "$PG_PORT" -U posthog -d "$db" -tAc "SELECT CASE WHEN to_regclass('public.django_migrations') IS NOT NULL THEN (SELECT count(*) FROM django_migrations) ELSE 0 END" 2>/dev/null || echo "0")
+            gw_mig=0
+            if [ -n "$(psql -h localhost -p "$PG_PORT" -U posthog -d "$db" -tAc "SELECT to_regclass('public.django_migrations')" 2>/dev/null || true)" ]; then
+                gw_mig=$(psql -h localhost -p "$PG_PORT" -U posthog -d "$db" -tAc "SELECT count(*) FROM django_migrations" 2>/dev/null || echo "0")
+            fi
             if [ "${gw_mig:-0}" -lt 2000 ]; then
                 psql -h localhost -p "$PG_PORT" -U posthog -d postgres -c "DROP DATABASE IF EXISTS $db;" >/dev/null 2>&1 || true
                 psql -h localhost -p "$PG_PORT" -U posthog -d postgres -c "CREATE DATABASE $db TEMPLATE test_posthog;" >/dev/null 2>&1 || true
