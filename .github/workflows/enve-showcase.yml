@@ -152,7 +152,7 @@ jobs:
                           echo "[venv] Checking L2 Cloudflare R2 binary cache for pre-built virtualenv (${VENV_KEY})..."
                           if [ -n "${AWS_ACCESS_KEY_ID:-}" ]; then
                             START_VENV=$(date +%s%N)
-                            if aws s3 cp "s3://${R2_BUCKET}/${VENV_KEY}" - --endpoint-url "${R2_ENDPOINT}" 2>/dev/null | tar -I "zstd -d -T0" -xf - 2>/dev/null; then
+                            if enve cache cp "s3://${R2_BUCKET}/${VENV_KEY}" - --endpoint-url "${R2_ENDPOINT}" 2>/dev/null | tar -I "zstd -d -T0" -xf - 2>/dev/null; then
                               END_VENV=$(date +%s%N)
                               VENV_SEC=$(awk "BEGIN {printf \"%.2f\", ($END_VENV - $START_VENV) / 1000000000}")
                               echo "[venv] L2 Cache Hit: Restored .venv directly from Cloudflare R2 in ${VENV_SEC}s"
@@ -179,7 +179,7 @@ jobs:
                           START_GEOIP=$(date +%s%N)
                           RESTORED=0
                           if [ -n "${AWS_ACCESS_KEY_ID:-}" ]; then
-                            if aws s3 cp "s3://${R2_BUCKET}/share/GeoLite2-City.mmdb" share/GeoLite2-City.mmdb --endpoint-url "${R2_ENDPOINT}" 2>/dev/null; then
+                            if enve cache cp "s3://${R2_BUCKET}/share/GeoLite2-City.mmdb" share/GeoLite2-City.mmdb --endpoint-url "${R2_ENDPOINT}" 2>/dev/null; then
                               RESTORED=1
                             fi
                           fi
@@ -201,7 +201,7 @@ jobs:
                           if [ -n "${AWS_ACCESS_KEY_ID:-}" ]; then
                             echo "[quill] Checking L2 Cloudflare R2 binary cache for Quill dependencies (${QUILL_KEY})..."
                             START_QUILL=$(date +%s%N)
-                            if aws s3 cp "s3://${R2_BUCKET}/${QUILL_KEY}" - --endpoint-url "${R2_ENDPOINT}" 2>/dev/null | tar -I "zstd -d" -xf - 2>/dev/null; then
+                            if enve cache cp "s3://${R2_BUCKET}/${QUILL_KEY}" - --endpoint-url "${R2_ENDPOINT}" 2>/dev/null | tar -I "zstd -d" -xf - 2>/dev/null; then
                               END_QUILL=$(date +%s%N)
                               QUILL_SEC=$(awk "BEGIN {printf \"%.2f\", ($END_QUILL - $START_QUILL) / 1000000000}")
                               echo "[quill] L2 Cache Hit: Restored Quill dependencies directly from Cloudflare R2 in ${QUILL_SEC}s"
@@ -232,7 +232,7 @@ jobs:
                         set -euo pipefail
                         if [ -d ".venv" ]; then
                           echo "[venv] Uploading slimmed virtualenv to L2 Cloudflare R2 (${VENV_KEY})..."
-                          tar --exclude='__pycache__' --exclude='*.pyc' -I "zstd -1 -T0" -cf - .venv | aws s3 cp - "s3://${R2_BUCKET}/${VENV_KEY}" --endpoint-url "${R2_ENDPOINT}" 2>/dev/null || true
+                          tar --exclude='__pycache__' --exclude='*.pyc' -I "zstd -1 -T0" -cf - .venv | enve cache cp - "s3://${R2_BUCKET}/${VENV_KEY}" --endpoint-url "${R2_ENDPOINT}" 2>/dev/null || true
                           echo "[venv] Upload complete."
                         fi
 
@@ -242,6 +242,6 @@ jobs:
                         set -euo pipefail
                         if [ -d "node_modules" ]; then
                           echo "[quill] Uploading Quill dependencies to L2 Cloudflare R2 (${QUILL_KEY})..."
-                          tar --exclude='*.tsbuildinfo' -I "zstd -1 -T0" -cf - node_modules packages/quill/packages/*/node_modules 2>/dev/null | aws s3 cp - "s3://${R2_BUCKET}/${QUILL_KEY}" --endpoint-url "${R2_ENDPOINT}" 2>/dev/null || true
+                          tar --exclude='*.tsbuildinfo' -I "zstd -1 -T0" -cf - node_modules packages/quill/packages/*/node_modules 2>/dev/null | enve cache cp - "s3://${R2_BUCKET}/${QUILL_KEY}" --endpoint-url "${R2_ENDPOINT}" 2>/dev/null || true
                           echo "[quill] Upload complete."
                         fi
