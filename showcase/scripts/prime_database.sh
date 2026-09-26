@@ -50,19 +50,12 @@ if [ "${FORCE_PRIME:-0}" = "1" ] || [ "${1:-}" = "--force" ] || [ "${COUNT:-0}" 
     gunzip -c "$DUMP" | psql -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" -q -d test_posthog
     psql -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" -d test_posthog -q -c "DELETE FROM django_migrations WHERE app IN ('stamphog', 'visual_review');"
     
-    log_info "Registering template_posthog and priming development posthog database..."
-    psql -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" -d postgres -q <<'EOF'
-DO $$ BEGIN
-  IF EXISTS (SELECT 1 FROM pg_database WHERE datname = 'template_posthog') THEN
-    ALTER DATABASE template_posthog is_template false;
-  END IF;
-END $$;
-DROP DATABASE IF EXISTS template_posthog;
-CREATE DATABASE template_posthog TEMPLATE test_posthog;
-ALTER DATABASE template_posthog is_template true;
-DROP DATABASE IF EXISTS posthog;
-CREATE DATABASE posthog TEMPLATE template_posthog;
-EOF
+    log_info "Registering template_posthog for instant copy-on-write isolation..."
+    psql -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" -d postgres -q -c "DO \$\$ BEGIN IF EXISTS (SELECT 1 FROM pg_database WHERE datname = 'template_posthog') THEN ALTER DATABASE template_posthog is_template false; END IF; END \$\$;"
+    psql -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" -d postgres -q \
+        -c "DROP DATABASE IF EXISTS template_posthog;" \
+        -c "CREATE DATABASE template_posthog TEMPLATE test_posthog;" \
+        -c "ALTER DATABASE template_posthog is_template true;"
         
     log_ok "PostgreSQL databases primed & templated in <1.5s."
 else

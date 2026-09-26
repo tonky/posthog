@@ -7,8 +7,8 @@
   "platforms": {
     "x86_64-linux": {
       "binding": {
-        "environment_sha256": "518436775c842c808300a4040606b6f97ffaa0af91a4dc998343678280757e08",
-        "inventory_sha256": "ff09223da31dc7ed296ff047830ec612c91494be4aefbdb459bec8b91f45c445",
+        "environment_sha256": "96f1a617ccadbdc41d85e7df270fd9a866f85b28a67af26ab798dc51c1fdb567",
+        "inventory_sha256": "5afbb87deddb65cdac2ee30ed4d226023b14ea2ee2cf96ea48a39e53ca4b1b2c",
         "profile": null,
         "version": 1
       },
@@ -512,17 +512,6 @@
           ]
         },
         {
-          "hash_name": "9xh2i0lwlbn01k03188zx49zvm6bpgyc-seaweedfs-4.47",
-          "nar_hash": "sha256:0q0yz82k1222v9scy1y4r8cc020k127hdwqsa4yq5ni17zzk5pwn",
-          "nar_size": 229964456,
-          "references": [
-            "549nkjs10xhma2f9kx3rxw61kym0abjx-mailcap-2.1.54",
-            "9v00p4m9cdzn23gmy5m9d3a6c3gfwhl7-iana-etc-20251215",
-            "9xh2i0lwlbn01k03188zx49zvm6bpgyc-seaweedfs-4.47",
-            "fh8svr4ds87z84iarfnxrlfpjlbmc816-tzdata-2026c"
-          ]
-        },
-        {
           "hash_name": "adhjdycq6m1n6ljzm9ifp843y2my6zd8-krb5-1.22.2-lib",
           "nar_hash": "sha256:1phsi54ajwz94cj1bqvwvh226lphfa8s0hagq5pc5ailpb849rir",
           "nar_size": 2879776,
@@ -877,16 +866,6 @@
           "nar_size": 85792,
           "references": [
             "lm3pknxi0ipypy3lxh1wmm8wvvavdwrn-glibc-2.42-84"
-          ]
-        },
-        {
-          "hash_name": "h09kl2i5kgv10gs71s9kk0n250jvh284-sqlx-cli-0.9.0",
-          "nar_hash": "sha256:1jvwd1x6kdwcvr33awdxw5ql059lw8fals11x4kpvnlgmhc739rp",
-          "nar_size": 22318472,
-          "references": [
-            "604gsr59rj7dzd0nrhp143rpvf7gyiaz-gcc-15.3.0-lib",
-            "lm3pknxi0ipypy3lxh1wmm8wvvavdwrn-glibc-2.42-84",
-            "yj34vymbqf7mf4lmffipy8jqc4kwr1mc-openssl-3.6.4"
           ]
         },
         {
