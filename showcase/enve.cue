@@ -69,7 +69,7 @@ profiles: dev: schema.#Profile & {
 			name:     "postgres"
 			database: "posthog"
 			user:     "posthog"
-			command:  "postgres -D /tmp/posthog_pg_15432 -h 127.0.0.1 -p 15432 -k /tmp -c listen_addresses=127.0.0.1 -c fsync=off -c synchronous_commit=off"
+			command:  "postgres -D /tmp/posthog_pg_15432 -h 127.0.0.1 -p 15432 -k /tmp -c listen_addresses=127.0.0.1 -c fsync=off -c synchronous_commit=off -c full_page_writes=off -c wal_level=minimal -c max_wal_senders=0 -c checkpoint_timeout=1h -c max_wal_size=10GB -c shared_buffers=512MB -c wal_buffers=64MB"
 			port:     15432
 			dataDir:  "/tmp/posthog_pg_15432"
 			environment: {
@@ -81,7 +81,7 @@ profiles: dev: schema.#Profile & {
 			}
 			lifecycle: {
 				init: [
-					"sh -c 'test -f /tmp/posthog_pg_15432/PG_VERSION || { initdb -D /tmp/posthog_pg_15432 --auth=trust --username=posthog --no-sync && printf \"CREATE ROLE postgres SUPERUSER LOGIN;\\nCREATE DATABASE posthog;\\nCREATE DATABASE test_posthog;\\nCREATE DATABASE test_posthog_persons;\\n\" | postgres --single -D /tmp/posthog_pg_15432 template1; }'",
+					"sh -c 'test -f /tmp/posthog_pg_15432/PG_VERSION || { initdb -D /tmp/posthog_pg_15432 --auth=trust --username=posthog --no-sync && printf \"CREATE ROLE postgres SUPERUSER LOGIN;\\nCREATE DATABASE test_posthog_persons;\\n\" | postgres --single -D /tmp/posthog_pg_15432 template1; }'",
 				]
 				postStart: [
 					"sh -c 'test -f scripts/prime_database.sh && bash scripts/prime_database.sh || bash showcase/scripts/prime_database.sh'",
@@ -90,6 +90,10 @@ profiles: dev: schema.#Profile & {
 			readinessProbe: {
 				port:    15432
 				timeout: "5s"
+			}
+			healthCheck: {
+				command: "pg_isready -h 127.0.0.1 -p 15432 -U postgres -d postgres"
+				timeout: "3s"
 			}
 		}
 
