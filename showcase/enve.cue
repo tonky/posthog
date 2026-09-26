@@ -193,13 +193,14 @@ profiles: dev: schema.#Profile & {
 			directory: ".."
 			dependsOn: [postgres, redis, kafka, clickhouse]
 			environment: {
-				DATABASE_URL: "postgres://posthog:posthog@127.0.0.1:15432/posthog"
-				PGHOST:       "127.0.0.1"
-				PGUSER:       "posthog"
-				PGDATABASE:   "posthog"
-				PGPORT:       "15432"
+				DATABASE_URL:     "postgres://posthog:posthog@127.0.0.1:15432/posthog"
+				PGHOST:           "127.0.0.1"
+				PGUSER:           "posthog"
+				PGDATABASE:       "posthog"
+				PGPORT:           "15432"
+				PYTHONUNBUFFERED: "1"
 			}
-			test: "uv run pytest posthog/api/test/test_event.py --reuse-db -p no:icdiff -m 'not async_migrations' -W 'ignore:pkg_resources is deprecated:UserWarning' -W 'ignore::UserWarning:infi.clickhouse_orm'"
+			test: "uv run pytest posthog/api/test/test_event.py --reuse-db -p no:hypothesispytest -p no:pytest_cov -p no:xdist -p no:xdist.looponfail -p no:aiohttp -p no:pytest-split -p no:rerunfailures -p no:anyio -p no:icdiff -m 'not async_migrations' -W 'ignore:pkg_resources is deprecated:UserWarning' -W 'ignore::UserWarning:infi.clickhouse_orm'"
 		}
 	}
 

@@ -223,6 +223,7 @@ jobs:
               env:
                   ENVE_SERVICE_UID: 1000
                   ENVE_SERVICE_GID: 1000
+                  PYTHONUNBUFFERED: '1'
               run: ./showcase/scripts/run_showcase.sh
 
             - parallel:
