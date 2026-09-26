@@ -154,8 +154,8 @@ else
         DJANGO_SECRET_KEY=showcase_test_secret_key \
         LD_LIBRARY_PATH="$(pwd)/$APP_STAGING_DIR/python-runtime/lib/python3.13/site-packages/pyarrow:$ENVE_LD_LIBRARY_PATH:/usr/lib64:/lib64" \
         PYTHONPATH="$(pwd)/$APP_STAGING_DIR/code:$(pwd)/$APP_STAGING_DIR/python-runtime/lib/python3.13/site-packages:$(pwd)/$APP_STAGING_DIR/python-runtime" \
-        PATH="$(pwd)/$APP_STAGING_DIR/code/bin:$(pwd)/$APP_STAGING_DIR/python-runtime/bin:$STORE_BIN_DIR:${PATH}" \
-        python3 "$@"
+        PATH="$STORE_BIN_DIR:$(pwd)/$APP_STAGING_DIR/code/bin:$(pwd)/$APP_STAGING_DIR/python-runtime/bin:${PATH}" \
+        "$PYTHON_BIN" "$@"
     }
 fi
 
