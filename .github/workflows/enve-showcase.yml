@@ -34,113 +34,112 @@ jobs:
             - name: Checkout Code
               uses: actions/checkout@v7
 
-            - name: Install enve CLI
-              env:
-                  GH_TOKEN: ${{ secrets.ENVE_RELEASE_TOKEN || secrets.ENVE_TOKEN || secrets.GITHUB_TOKEN }}
-                  ENVE_PUBLIC_URL: ${{ secrets.ENVE_PUBLIC_URL }}
-              run: |
-                  mkdir -p "$HOME/.local/bin"
-                  INSTALLED=0
-                  if [ -x "$GITHUB_WORKSPACE/showcase/bin/enve" ]; then
-                    echo "Using pre-staged enve binary from $GITHUB_WORKSPACE/showcase/bin/enve..."
-                    cp "$GITHUB_WORKSPACE/showcase/bin/enve" "$HOME/.local/bin/enve"
-                    INSTALLED=1
-                  elif [ -x "showcase/bin/enve" ]; then
-                    echo "Using pre-staged enve binary from showcase/bin/enve..."
-                    cp "showcase/bin/enve" "$HOME/.local/bin/enve"
-                    INSTALLED=1
-                  elif [ -n "${GH_TOKEN:-}" ]; then
-                    echo "Attempting to download enve from GitHub release via API..."
-                    ASSET_URL=$(curl -fsSL -H "Authorization: Bearer $GH_TOKEN" https://api.github.com/repos/tonky/enve/releases/tags/v1.0.0-alpha.1 2>/dev/null | jq -r '.assets[] | select(.name | test("x86_64-unknown-linux-musl.tar.gz$")) | .url' || true)
-                    if [ -n "$ASSET_URL" ] && [ "$ASSET_URL" != "null" ]; then
-                      if curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/octet-stream" "$ASSET_URL" | tar -xz -C "$HOME/.local/bin"; then
-                        INSTALLED=1
-                      fi
-                    fi
-                  fi
+            - parallel:
+                  - name: Set up pnpm
+                    uses: pnpm/action-setup@v6
+                    with:
+                        run_install: false
 
-                  if [ "$INSTALLED" -eq 0 ] && [ -n "${GH_TOKEN:-}" ] && command -v gh >/dev/null 2>&1; then
-                    echo "Attempting to download enve from GitHub release via gh..."
-                    if gh release download v1.0.0-alpha.1 --repo tonky/enve --pattern "*x86_64-unknown-linux-musl.tar.gz" --output - | tar -xz -C "$HOME/.local/bin"; then
-                      INSTALLED=1
-                    fi
-                  fi
+                  - name: Set up Node.js
+                    uses: actions/setup-node@v7
+                    with:
+                        node-version: 24
 
-                  if [ "$INSTALLED" -eq 0 ] && [ -n "${ENVE_PUBLIC_URL:-}" ]; then
-                    echo "Downloading enve from public storage..."
-                    if curl -fsSL "$ENVE_PUBLIC_URL" | tar -xz -C "$HOME/.local/bin"; then
-                      INSTALLED=1
-                    fi
-                  fi
+                  - name: 'Install enve CLI & Cold Store Materialization (enve cache pull)'
+                    env:
+                        GH_TOKEN: ${{ secrets.ENVE_RELEASE_TOKEN || secrets.ENVE_TOKEN || secrets.GITHUB_TOKEN }}
+                        ENVE_PUBLIC_URL: ${{ secrets.ENVE_PUBLIC_URL }}
+                        ENVE_CACHE_CONCURRENCY: 16
+                    run: |
+                        mkdir -p "$HOME/.local/bin"
+                        export PATH="$HOME/.local/bin:$PATH"
+                        INSTALLED=0
+                        if [ -x "$GITHUB_WORKSPACE/showcase/bin/enve" ]; then
+                          echo "Using pre-staged enve binary from $GITHUB_WORKSPACE/showcase/bin/enve..."
+                          cp "$GITHUB_WORKSPACE/showcase/bin/enve" "$HOME/.local/bin/enve"
+                          INSTALLED=1
+                        elif [ -x "showcase/bin/enve" ]; then
+                          echo "Using pre-staged enve binary from showcase/bin/enve..."
+                          cp "showcase/bin/enve" "$HOME/.local/bin/enve"
+                          INSTALLED=1
+                        elif [ -n "${GH_TOKEN:-}" ]; then
+                          echo "Attempting to download enve from GitHub release via API..."
+                          ASSET_URL=$(curl -fsSL -H "Authorization: Bearer $GH_TOKEN" https://api.github.com/repos/tonky/enve/releases/tags/v1.0.0-alpha.1 2>/dev/null | jq -r '.assets[] | select(.name | test("x86_64-unknown-linux-musl.tar.gz$")) | .url' || true)
+                          if [ -n "$ASSET_URL" ] && [ "$ASSET_URL" != "null" ]; then
+                            if curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/octet-stream" "$ASSET_URL" | tar -xz -C "$HOME/.local/bin"; then
+                              INSTALLED=1
+                            fi
+                          fi
+                        fi
 
-                  if [ "$INSTALLED" -eq 0 ]; then
-                    echo "Downloading enve from GitHub release via curl..."
-                    curl -fsSL https://github.com/tonky/enve/releases/download/v1.0.0-alpha.1/enve-v1.0.0-alpha.1-x86_64-unknown-linux-musl.tar.gz | tar -xz -C "$HOME/.local/bin"
-                  fi
+                        if [ "$INSTALLED" -eq 0 ] && [ -n "${GH_TOKEN:-}" ] && command -v gh >/dev/null 2>&1; then
+                          echo "Attempting to download enve from GitHub release via gh..."
+                          if gh release download v1.0.0-alpha.1 --repo tonky/enve --pattern "*x86_64-unknown-linux-musl.tar.gz" --output - | tar -xz -C "$HOME/.local/bin"; then
+                            INSTALLED=1
+                          fi
+                        fi
 
-                  echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-                  chmod +x "$HOME/.local/bin/enve"
-                  "$HOME/.local/bin/enve" --version
+                        if [ "$INSTALLED" -eq 0 ] && [ -n "${ENVE_PUBLIC_URL:-}" ]; then
+                          echo "Downloading enve from public storage..."
+                          if curl -fsSL "$ENVE_PUBLIC_URL" | tar -xz -C "$HOME/.local/bin"; then
+                            INSTALLED=1
+                          fi
+                        fi
 
-                  # Ubuntu 24.04 restricts unprivileged user namespaces via AppArmor by default
-                  if command -v sudo >/dev/null 2>&1; then
-                    sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 2>/dev/null || true
-                    sudo mkdir -p /nix 2>/dev/null && sudo chmod 777 /nix 2>/dev/null || true
-                  elif command -v sysctl >/dev/null 2>&1; then
-                    sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 2>/dev/null || true
-                    mkdir -p /nix 2>/dev/null && chmod 777 /nix 2>/dev/null || true
-                  fi
+                        if [ "$INSTALLED" -eq 0 ]; then
+                          echo "Downloading enve from GitHub release via curl..."
+                          curl -fsSL https://github.com/tonky/enve/releases/download/v1.0.0-alpha.1/enve-v1.0.0-alpha.1-x86_64-unknown-linux-musl.tar.gz | tar -xz -C "$HOME/.local/bin"
+                        fi
 
-            - name: Set up pnpm
-              uses: pnpm/action-setup@v6
-              with:
-                  run_install: false
+                        echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+                        chmod +x "$HOME/.local/bin/enve"
+                        "$HOME/.local/bin/enve" --version
 
-            - name: Set up Node.js
-              uses: actions/setup-node@v7
-              with:
-                  node-version: 24
+                        # Ubuntu 24.04 restricts unprivileged user namespaces via AppArmor by default
+                        if command -v sudo >/dev/null 2>&1; then
+                          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 2>/dev/null || true
+                          sudo mkdir -p /nix 2>/dev/null && sudo chmod 777 /nix 2>/dev/null || true
+                        elif command -v sysctl >/dev/null 2>&1; then
+                          sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 2>/dev/null || true
+                          mkdir -p /nix 2>/dev/null && chmod 777 /nix 2>/dev/null || true
+                        fi
 
-            - name: 'Cold Start: Hermetic Store Materialization (enve cache pull)'
-              env:
-                  ENVE_CACHE_CONCURRENCY: 16
-              run: |
-                  # Ensure rootless store directory is traversable by dropped-privilege UID 1000 (postgres)
-                  if [ "$(id -u)" -eq 0 ]; then
-                    chmod 755 /root || true
-                    mkdir -p "$HOME/.local/share/enve/store"
-                    chmod -R a+rX "$HOME/.local" 2>/dev/null || true
-                  fi
+                        # Ensure rootless store directory is traversable by dropped-privilege UID 1000 (postgres)
+                        if [ "$(id -u)" -eq 0 ]; then
+                          chmod 755 /root || true
+                          mkdir -p "$HOME/.local/share/enve/store"
+                          chmod -R a+rX "$HOME/.local" 2>/dev/null || true
+                        fi
 
-                  # Link /nix/store directly to rootless store to bypass namespace remapping
-                  mkdir -p "$HOME/.local/share/enve/store"
-                  if [ -d "/nix" ] && [ ! -e "/nix/store" ]; then
-                    if command -v sudo >/dev/null 2>&1 && [ ! -w "/nix" ]; then
-                      sudo ln -sfn "$HOME/.local/share/enve/store" /nix/store 2>/dev/null || true
-                    else
-                      ln -sfn "$HOME/.local/share/enve/store" /nix/store 2>/dev/null || true
-                    fi
-                  fi
+                        # Link /nix/store directly to rootless store to bypass namespace remapping
+                        mkdir -p "$HOME/.local/share/enve/store"
+                        if [ -d "/nix" ] && [ ! -e "/nix/store" ]; then
+                          if command -v sudo >/dev/null 2>&1 && [ ! -w "/nix" ]; then
+                            sudo ln -sfn "$HOME/.local/share/enve/store" /nix/store 2>/dev/null || true
+                          else
+                            ln -sfn "$HOME/.local/share/enve/store" /nix/store 2>/dev/null || true
+                          fi
+                        fi
 
-                  # Benchmark authentic cold closure hydration from Cloudflare R2
-                  START_COLD=$(date +%s%N)
-                  CACHE_URL="s3://${R2_BUCKET}?endpoint=${R2_ENDPOINT}&region=auto"
-                  TRUSTED_KEY="posthog-cache:ZoJXYKq9GR/XjY0NV2O62NY1zUagRC66U/81IE/W/XU="
-                  echo "Executing cold store materialization: pulling closures from $CACHE_URL with 16 parallel streams..."
-                  if [ -n "${AWS_ACCESS_KEY_ID:-}" ]; then
-                    enve cache pull showcase/enve.lock --cache "$CACHE_URL" --trusted-public-key "$TRUSTED_KEY" --jobs 16
-                  else
-                    echo "Notice: Remote S3 credentials not set; pulling from upstream cache..."
-                    enve cache pull showcase/enve.lock --jobs 16
-                  fi
+                        # Benchmark authentic cold closure hydration from Cloudflare R2
+                        START_COLD=$(date +%s%N)
+                        CACHE_URL="s3://${R2_BUCKET}?endpoint=${R2_ENDPOINT}&region=auto"
+                        TRUSTED_KEY="posthog-cache:ZoJXYKq9GR/XjY0NV2O62NY1zUagRC66U/81IE/W/XU="
+                        echo "Executing cold store materialization: pulling closures from $CACHE_URL with 16 parallel streams..."
+                        if [ -n "${AWS_ACCESS_KEY_ID:-}" ]; then
+                          enve cache pull showcase/enve.lock --cache "$CACHE_URL" --trusted-public-key "$TRUSTED_KEY" --jobs 16
+                        else
+                          echo "Notice: Remote S3 credentials not set; pulling from upstream cache..."
+                          enve cache pull showcase/enve.lock --jobs 16
+                        fi
 
-                  # First-invocation cold shell verification
-                  enve run -f showcase/enve.cue -- echo "Hermetic shell ready (cold start)"
-                  END_COLD=$(date +%s%N)
-                  COLD_MS=$(( (END_COLD - START_COLD) / 1000000 ))
-                  COLD_SEC=$(awk "BEGIN {printf \"%.2f\", $COLD_MS / 1000}")
-                  echo "COLD_START_DURATION=${COLD_SEC}s" >> "$GITHUB_ENV"
-                  echo "Authentic Cold Start completed in ${COLD_SEC}s (zero daemon, 100% user-space store)"
+                        # First-invocation cold shell verification
+                        enve run -f showcase/enve.cue -- echo "Hermetic shell ready (cold start)"
+                        END_COLD=$(date +%s%N)
+                        COLD_MS=$(( (END_COLD - START_COLD) / 1000000 ))
+                        COLD_SEC=$(awk "BEGIN {printf \"%.2f\", $COLD_MS / 1000}")
+                        echo "COLD_START_DURATION=${COLD_SEC}s" >> "$GITHUB_ENV"
+                        echo "Authentic Cold Start completed in ${COLD_SEC}s (zero daemon, 100% user-space store)"
 
             - parallel:
                   - name: Warm Python Virtualenv & uv Dependencies
