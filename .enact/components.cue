@@ -9,9 +9,19 @@ pipeline: schema.#Pipeline & {
 	workspace_scope: {
 		include: [
 			".enact",
+			"bin",
 			"tools",
 			"showcase",
 			"patches",
+		]
+		ignore: [
+			".agents/**",
+			".github/**",
+			"docs/internal/**",
+			"docs/plans/**",
+			"docs/published/**",
+			"docs/superpowers/**",
+			"*.md",
 		]
 	}
 	triggers: {
@@ -170,6 +180,12 @@ pipeline: schema.#Pipeline & {
 				memory_mb: 5120
 			}
 			root: "."
+			workspace_scope: {
+				include: [
+					"frontend",
+					"docs/onboarding",
+				]
+			}
 			scoping: {
 				barrels: []
 				domain_roots: [
@@ -224,7 +240,7 @@ pipeline: schema.#Pipeline & {
 				"frontend/**",
 				"products/*/frontend/**",
 			]
-			worker: "depot-8"
+			worker: "standard"
 		}
 		"quill": {
 			build: "pnpm --filter=@posthog/quill* build"

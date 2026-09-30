@@ -268,6 +268,12 @@ jobs:
                   sparse-checkout-cone-mode: 'true'
                   submodules: 'false'
 
+            - name: Download Showcase Baseline Artifact
+              uses: actions/download-artifact@v8
+              with:
+                  name: showcase-baseline
+                  path: .enact/
+
             - name: Restore enact CLI binary cache
               id: enact_cli_cache
               if: hashFiles('bin/enact') == ''
@@ -377,11 +383,18 @@ jobs:
                   ENACT_R2_BUCKET: ${{ secrets.ENACT_R2_BUCKET || env.ENACT_R2_BUCKET }}
                   BASE_SHA: ${{ needs.detect.outputs.base_sha }}
               run: |-
+                  FILES_ARG=""
+                  if [ -f ".enact/changed-files.txt" ] && [ -s ".enact/changed-files.txt" ]; then
+                    FILES_CSV=$(paste -sd, .enact/changed-files.txt)
+                    if [ -n "$FILES_CSV" ]; then
+                      FILES_ARG="--files $FILES_CSV"
+                    fi
+                  fi
                   BASE_ARG=""
-                  if [ -n "$BASE_SHA" ]; then
+                  if [ -z "$FILES_ARG" ] && [ -n "$BASE_SHA" ]; then
                     BASE_ARG="--base $BASE_SHA"
                   fi
-                  enact run --pipeline .enact $BASE_ARG preflight
+                  enact run --pipeline .enact $FILES_ARG $BASE_ARG preflight
 
             - name: Upload Telemetry for [preflight]
               if: always()
