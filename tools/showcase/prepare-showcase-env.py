@@ -227,12 +227,40 @@ def main():
     ensure_commit(head_sha)
 
     # 4. Compute changed files between base and head
-    try:
-        changed_output = run_cmd(f"git diff --name-only {base_sha}...{head_sha}", cwd=repo_dir)
-        changed_files = [line.strip() for line in changed_output.splitlines() if line.strip()]
-    except Exception:
-        changed_output = run_cmd("git diff --name-only HEAD~1", cwd=repo_dir)
-        changed_files = [line.strip() for line in changed_output.splitlines() if line.strip()]
+    changed_files = []
+    if args.pr:
+        pr_id_clean = args.pr.strip().rstrip("/").split("/")[-1]
+        try:
+            gh_diff_cmd = ["gh", "pr", "diff", pr_id_clean, "--name-only"]
+            if upstream_repo:
+                gh_diff_cmd.extend(["--repo", upstream_repo])
+            out = run_cmd(gh_diff_cmd, cwd=repo_dir)
+            changed_files = [line.strip() for line in out.splitlines() if line.strip()]
+            if changed_files:
+                print(f"   ✓ Fetched {len(changed_files)} changed files directly via GitHub CLI for PR #{pr_id_clean}")
+        except Exception as e:
+            print(f"⚠️ Warning: Could not get PR diff via gh: {e}")
+
+    if not changed_files and base_sha and head_sha:
+        try:
+            changed_output = run_cmd(f"git diff --name-only {base_sha} {head_sha}", cwd=repo_dir)
+            changed_files = [line.strip() for line in changed_output.splitlines() if line.strip()]
+        except Exception as e:
+            print(f"⚠️ Warning: Could not get git diff between {base_sha} and {head_sha}: {e}")
+
+    if not changed_files and base_sha and head_sha:
+        try:
+            changed_output = run_cmd(f"git diff --name-only {base_sha}...{head_sha}", cwd=repo_dir)
+            changed_files = [line.strip() for line in changed_output.splitlines() if line.strip()]
+        except Exception:
+            pass
+
+    if not changed_files:
+        try:
+            changed_output = run_cmd("git diff --name-only HEAD~1", cwd=repo_dir)
+            changed_files = [line.strip() for line in changed_output.splitlines() if line.strip()]
+        except Exception:
+            pass
 
     print(f"📝 Changed files detected: {len(changed_files)}")
     for f in changed_files[:8]:

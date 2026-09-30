@@ -153,19 +153,14 @@ jobs:
                   if [ "$INPUT_NO_CACHE" = "true" ]; then
                     NO_CACHE_ARG="--no-cache"
                   fi
-                  BASE_ARG=""
-                  if [ -n "$BASE_SHA" ]; then
-                    BASE_ARG="--base $BASE_SHA"
-                  fi
                   FILES_ARG=""
                   if [ -f ".enact/changed-files.txt" ] && [ -s ".enact/changed-files.txt" ]; then
-                    FILES_CSV=$(paste -sd, .enact/changed-files.txt)
-                    if [ -n "$FILES_CSV" ]; then
-                      FILES_ARG="--files $FILES_CSV"
-                    fi
+                    FILES_ARG="--files @.enact/changed-files.txt"
+                  elif [ -n "$BASE_SHA" ]; then
+                    FILES_ARG="--base $BASE_SHA"
                   fi
                   # shellcheck disable=SC2086
-                  MATRIX=$(enact affected --pipeline .enact --workflow ci $BASE_ARG $FILES_ARG $UPDATED_ARG $NO_CACHE_ARG --format json)
+                  MATRIX=$(enact affected --pipeline .enact --workflow ci $FILES_ARG $UPDATED_ARG $NO_CACHE_ARG --format json)
                   echo "$MATRIX"
                   echo "matrix=$MATRIX" >> "$GITHUB_OUTPUT"
 
