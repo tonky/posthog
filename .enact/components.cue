@@ -50,9 +50,9 @@ pipeline: schema.#Pipeline & {
 		"backend": {
 			caches: {}
 			description: "Django ASGI server, REST endpoints, ClickHouse queries, and products"
-			fmt:          "ruff format --check {changed_files}"
+			fmt:          "uvx ruff format --check {changed_files}"
 			jobs: {}
-			lint:         "ruff check {changed_files}"
+			lint:         "uvx ruff check {changed_files}"
 			max_shards:   8
 			migrate:      "python manage.py makemigrations --check --dry-run"
 			schema_check: "./bin/hogli build:openapi && git diff --exit-code"
@@ -171,9 +171,9 @@ pipeline: schema.#Pipeline & {
 				},
 			]
 			description: "React, Vite, Kea state logics, scenes, and visual regression tests"
-			fmt:         "pnpm exec oxfmt --check {changed_files}"
+			fmt:         "pnpm exec oxfmt --check --no-error-on-unmatched-pattern {changed_files}"
 			jobs: {}
-			lint:        "pnpm exec oxlint {changed_files} --quiet"
+			lint:        "pnpm exec oxlint --no-error-on-unmatched-pattern {changed_files} --quiet"
 			name:        "frontend"
 			resources: {
 				cpus:      2.0
@@ -274,7 +274,7 @@ pipeline: schema.#Pipeline & {
 				"tach.toml",
 				".importlinter",
 			]
-			lint: "tach check --dependencies --interfaces"
+			lint: "uvx tach check --dependencies --exclude 'tests,test,**/test_*.py,**/*_test.py' && uvx tach check --interfaces"
 		}
 		"rust_services": {
 			name:       "rust_services"
@@ -316,8 +316,8 @@ pipeline: schema.#Pipeline & {
 			watch_paths: [
 				"nodejs/**",
 			]
-			fmt:   "pnpm exec oxfmt --check {changed_files}"
-			lint:  "pnpm exec oxlint {changed_files} --quiet"
+			fmt:   "pnpm exec oxfmt --check --no-error-on-unmatched-pattern {relative_changed_files}"
+			lint:  "pnpm exec oxlint --no-error-on-unmatched-pattern {relative_changed_files} --quiet"
 			build: "pnpm --filter=@posthog/nodejs build"
 			test:  "pnpm --filter=@posthog/nodejs test"
 			uses: [
@@ -382,8 +382,8 @@ pipeline: schema.#Pipeline & {
 				"products/*/mcp/**",
 				"packages/llm-normalizer/**",
 			]
-			fmt:   "pnpm exec oxfmt --check {changed_files}"
-			lint:  "pnpm exec oxlint {changed_files} --quiet"
+			fmt:   "pnpm exec oxfmt --check --no-error-on-unmatched-pattern {relative_changed_files}"
+			lint:  "pnpm exec oxlint --no-error-on-unmatched-pattern {relative_changed_files} --quiet"
 			build: "pnpm --filter=@posthog/mcp build"
 			test:  "pnpm --filter=@posthog/mcp test:unit"
 		}

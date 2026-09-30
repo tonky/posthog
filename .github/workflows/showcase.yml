@@ -387,17 +387,12 @@ jobs:
               run: |-
                   FILES_ARG=""
                   if [ -f ".enact/changed-files.txt" ] && [ -s ".enact/changed-files.txt" ]; then
-                    FILES_CSV=$(paste -sd, .enact/changed-files.txt)
-                    if [ -n "$FILES_CSV" ]; then
-                      FILES_ARG="--files $FILES_CSV"
-                    fi
-                  fi
-                  BASE_ARG=""
-                  if [ -z "$FILES_ARG" ] && [ -n "$BASE_SHA" ]; then
-                    BASE_ARG="--base $BASE_SHA"
+                    FILES_ARG="--files @.enact/changed-files.txt"
+                  elif [ -n "$BASE_SHA" ]; then
+                    FILES_ARG="--base $BASE_SHA"
                   fi
                   # shellcheck disable=SC2086
-                  enact run --pipeline .enact $FILES_ARG $BASE_ARG preflight
+                  enact run --pipeline .enact $FILES_ARG preflight
 
             - name: Upload Telemetry for [preflight]
               if: always()

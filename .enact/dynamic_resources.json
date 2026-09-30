@@ -8,12 +8,12 @@
             "adjusted_ram_mb": 512,
             "adjusted_cpus": 1.0,
             "suggested_worker": "standard",
-            "sample_count": 1,
+            "sample_count": 3,
             "peak_ram_mb": 133,
-            "avg_ram_mb": 66,
+            "avg_ram_mb": 34,
             "peak_cpus": 0.8618721461187214,
             "violations_count": 0,
-            "last_updated_rfc3339": "2026-09-15T07:36:36.937015221+00:00"
+            "last_updated_rfc3339": "2026-09-30T19:37:56.441311775+00:00"
         },
         "backend:lint": {
             "component": "backend",
@@ -81,16 +81,16 @@
             "job": "fmt",
             "configured_ram_mb": 512,
             "configured_cpus": 1.0,
-            "adjusted_ram_mb": 765,
+            "adjusted_ram_mb": 624,
             "adjusted_cpus": 1.8,
             "configured_worker": "depot-8",
             "suggested_worker": "standard",
-            "sample_count": 5,
+            "sample_count": 7,
             "peak_ram_mb": 1776,
-            "avg_ram_mb": 120,
+            "avg_ram_mb": 116,
             "peak_cpus": 6.160208506389142,
             "violations_count": 0,
-            "last_updated_rfc3339": "2026-09-19T07:01:19.198540498+00:00"
+            "last_updated_rfc3339": "2026-09-30T19:39:46.008470756+00:00"
         },
         "frontend:lint": {
             "component": "frontend",
@@ -125,19 +125,49 @@
             "last_violation_reason": "Host available memory critically low (1312 MB available, breached 1345 MB headroom threshold, process using 6680.2 MB)",
             "last_updated_rfc3339": "2026-09-15T13:46:40.910885849+00:00"
         },
+        "mcp:fmt": {
+            "component": "mcp",
+            "job": "fmt",
+            "configured_ram_mb": 512,
+            "configured_cpus": 1.0,
+            "adjusted_ram_mb": 710,
+            "adjusted_cpus": 1.2,
+            "suggested_worker": "standard",
+            "sample_count": 2,
+            "peak_ram_mb": 591,
+            "avg_ram_mb": 111,
+            "peak_cpus": 1.473087818696884,
+            "violations_count": 0,
+            "last_updated_rfc3339": "2026-09-30T19:41:02.558365450+00:00"
+        },
+        "product_structure:lint": {
+            "component": "product_structure",
+            "job": "lint",
+            "configured_ram_mb": 512,
+            "configured_cpus": 1.0,
+            "adjusted_ram_mb": 512,
+            "adjusted_cpus": 1.0,
+            "suggested_worker": "standard",
+            "sample_count": 2,
+            "peak_ram_mb": 134,
+            "avg_ram_mb": 64,
+            "peak_cpus": 0.9871602467900616,
+            "violations_count": 0,
+            "last_updated_rfc3339": "2026-09-30T19:43:12.883690723+00:00"
+        },
         "workflows:lint": {
             "component": "workflows",
             "job": "lint",
             "configured_ram_mb": 512,
             "configured_cpus": 1.0,
             "adjusted_ram_mb": 512,
-            "adjusted_cpus": 5.4,
-            "sample_count": 2,
-            "peak_ram_mb": 165,
-            "avg_ram_mb": 65,
-            "peak_cpus": 5.483870967741935,
+            "adjusted_cpus": 5.5,
+            "sample_count": 3,
+            "peak_ram_mb": 223,
+            "avg_ram_mb": 74,
+            "peak_cpus": 5.564516129032258,
             "violations_count": 0,
-            "last_updated_rfc3339": "2026-09-30T19:00:39.599620749+00:00"
+            "last_updated_rfc3339": "2026-09-30T19:37:14.910636847+00:00"
         }
     }
 }
