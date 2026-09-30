@@ -521,6 +521,19 @@ jobs:
                   restore-keys: |
                       ${{ runner.os }}-nix-store-
 
+            - name: Restore Python build & venv cache
+              id: python_l1_cache
+              if: hashFiles('pyproject.toml', 'requirements.txt') != ''
+              continue-on-error: true
+              uses: actions/cache/restore@v6
+              with:
+                  key: ${{ runner.os }}-python-${{ hashFiles('**/uv.lock', '**/pyproject.toml', '**/requirements.txt', '**/poetry.lock') }}
+                  path: |-
+                      /tmp/.cache/uv
+                      ~/.cache/pip
+                      .venv
+                  restore-keys: ${{ runner.os }}-python-
+
             - name: Pull Dependencies via enve
               env:
                   AWS_ACCESS_KEY_ID: ${{ secrets.ENACT_R2_ACCESS_KEY_ID || env.ENACT_R2_ACCESS_KEY_ID }}
@@ -556,6 +569,8 @@ jobs:
 
             - name: Install Project Dependencies
               env:
+                  CI_COMPONENT: ${{ matrix.component }}
+                  CI_TASK_ID: ${{ matrix.task_id }}
                   ENACT_MATRIX_FILTER_ARGS: ${{ matrix.filter_args }}
                   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
               run: |-
@@ -572,6 +587,13 @@ jobs:
                   # shellcheck disable=SC2086
                   $RUN_PREFIX pnpm install $FILTER_ARGS --frozen-lockfile --offline $PNPM_FLAGS 2>/dev/null || $RUN_PREFIX pnpm install $FILTER_ARGS --frozen-lockfile --prefer-offline $PNPM_FLAGS 2>/dev/null || $RUN_PREFIX pnpm install $FILTER_ARGS --no-frozen-lockfile --prefer-offline $PNPM_FLAGS
                   git checkout -- pnpm-lock.yaml 2>/dev/null || true
+                  if [ -f "pyproject.toml" ] && [[ "$CI_COMPONENT" == *"backend"* || "$CI_TASK_ID" == *"backend"* ]]; then
+                    if [ ! -d ".venv" ] || [ ! -f ".venv/pyvenv.cfg" ]; then
+                      echo "🐍 Provisioning Python virtual environment via uv..."
+                      $RUN_PREFIX uv sync --frozen --compile-bytecode 2>/dev/null || $RUN_PREFIX uv sync --compile-bytecode 2>/dev/null || true
+                      python3 showcase/scripts/backend_runtime.py record 2>/dev/null || true
+                    fi
+                  fi
 
             - name: Execute Component Task
               env:
@@ -582,13 +604,24 @@ jobs:
                   ENACT_TOPOLOGY: ${{ matrix.topology }}
               run: eval "$ENACT_MATRIX_COMMAND"
 
+            - name: Save Python build & venv cache
+              if: (github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch') && hashFiles('pyproject.toml', 'requirements.txt') != '' && steps.python_l1_cache.outputs.cache-hit != 'true'
+              continue-on-error: true
+              uses: actions/cache/save@v6
+              with:
+                  key: ${{ runner.os }}-python-${{ hashFiles('**/uv.lock', '**/pyproject.toml', '**/requirements.txt', '**/poetry.lock') }}
+                  path: |-
+                      /tmp/.cache/uv
+                      ~/.cache/pip
+                      .venv
+
             - name: Upload Telemetry for [${{ matrix.component }}]
               if: always()
               continue-on-error: true
               uses: actions/upload-artifact@v7
               with:
                   if-no-files-found: ignore
-                  name: telemetry-comp-${{ matrix.component }}
+                  name: telemetry-${{ matrix.task_id }}
                   path: |-
                       .enact/telemetry.json
                       .enact/summary.html

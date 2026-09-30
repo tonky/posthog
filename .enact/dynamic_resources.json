@@ -8,12 +8,12 @@
             "adjusted_ram_mb": 512,
             "adjusted_cpus": 1.0,
             "suggested_worker": "standard",
-            "sample_count": 3,
+            "sample_count": 5,
             "peak_ram_mb": 133,
             "avg_ram_mb": 34,
             "peak_cpus": 0.8618721461187214,
             "violations_count": 0,
-            "last_updated_rfc3339": "2026-09-30T19:37:56.441311775+00:00"
+            "last_updated_rfc3339": "2026-09-30T20:01:59.559032176+00:00"
         },
         "backend:lint": {
             "component": "backend",
@@ -81,16 +81,16 @@
             "job": "fmt",
             "configured_ram_mb": 512,
             "configured_cpus": 1.0,
-            "adjusted_ram_mb": 624,
-            "adjusted_cpus": 1.8,
+            "adjusted_ram_mb": 1196,
+            "adjusted_cpus": 2.0,
             "configured_worker": "depot-8",
             "suggested_worker": "standard",
-            "sample_count": 7,
+            "sample_count": 8,
             "peak_ram_mb": 1776,
-            "avg_ram_mb": 116,
+            "avg_ram_mb": 235,
             "peak_cpus": 6.160208506389142,
             "violations_count": 0,
-            "last_updated_rfc3339": "2026-09-30T19:39:46.008470756+00:00"
+            "last_updated_rfc3339": "2026-09-30T20:02:01.814328818+00:00"
         },
         "frontend:lint": {
             "component": "frontend",

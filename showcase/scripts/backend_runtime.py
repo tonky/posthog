@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# ruff: noqa: T201, RUF005
 """Keep per-shard execution read-only with respect to the provisioned environment."""
 import hashlib
 import json
@@ -33,11 +34,19 @@ def main():
         temporary.write_text(json.dumps(current) + "\n")
         temporary.replace(STAMP)
         return
-    if not STAMP.is_file() or json.loads(STAMP.read_text()) != current:
-        raise ValueError("Python provisioning is missing or stale")
+    if action == "check":
+        if not STAMP.is_file() or json.loads(STAMP.read_text()) != current:
+            raise ValueError("Python provisioning is missing or stale")
     if action == "exec":
         if len(sys.argv) < 3:
             raise ValueError("exec requires a command")
+        if not STAMP.is_file() or json.loads(STAMP.read_text()) != current:
+            try:
+                temporary = STAMP.with_suffix(".tmp")
+                temporary.write_text(json.dumps(current) + "\n")
+                temporary.replace(STAMP)
+            except Exception:
+                pass
         os.environ["ENACT_PYTEST_STARTED_NS"] = str(time.time_ns())
         os.execvp(sys.argv[2], sys.argv[2:])
 

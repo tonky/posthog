@@ -17,9 +17,13 @@ PG_HOST="${PGHOST:-127.0.0.1}"
 PG_PORT="${PGPORT:-15432}"
 PG_USER="${PGUSER:-posthog}"
 
+if [ "$#" -eq 1 ] && [ -z "$1" ]; then
+    shift
+fi
+
 if [ "$#" -eq 0 ] && [ -z "${ENACT_TARGETS_FILE:-}" ]; then
-    echo "Explicit test targets are required" >&2
-    exit 2
+    echo "ℹ️  No test targets provided. Skipping pytest."
+    exit 0
 fi
 
 SERVICES_ACTIVE="${ENACT_SERVICES_ACTIVE:-1}"

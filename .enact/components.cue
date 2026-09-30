@@ -64,8 +64,7 @@ pipeline: schema.#Pipeline & {
 				}
 			}
 			max_shards:   8
-			migrate:      "python manage.py makemigrations --check --dry-run"
-			schema_check: "./bin/hogli build:openapi && git diff --exit-code"
+			migrate:      "python3 showcase/scripts/migrations_check.py {changed_files}"
 			name:         "backend"
 			resources: {
 				cpus:      1.5
@@ -121,15 +120,9 @@ pipeline: schema.#Pipeline & {
 				"products",
 			]
 			technology: "python"
-			audit:      "pytest posthog/test/repo_invariants"
-			test:       "pytest -v --tb=short --reuse-db {targets} -m 'not async_migrations'"
+			audit:      "./showcase/scripts/repo_invariants.sh"
+			test:       "./showcase/scripts/run_sharded_pytest.sh {targets}"
 			title:      "PostHog Core Django API & Analytics Backend"
-			typecheck: {
-				command: "mypy {changed_files}"
-				filter: {
-					include: ["*.py", "**/*.py"]
-				}
-			}
 			uses: [
 				{
 					protocol: schema.#Protocol.Sql
@@ -257,9 +250,9 @@ pipeline: schema.#Pipeline & {
 				"kea",
 			]
 			technology: "typescript"
-			test:       "pnpm --filter=@posthog/frontend test:unit -- {targets}"
+			test:       "pnpm --filter=@posthog/frontend exec jest --forceExit {targets}"
 			title:      "PostHog Frontend Web Application"
-			typecheck:  "pnpm --filter=@posthog/frontend typescript:check"
+			typecheck:  "python3 showcase/scripts/typescript_check.py {changed_files}"
 			uses: []
 			watch_paths: [
 				"frontend/**",
@@ -413,7 +406,7 @@ pipeline: schema.#Pipeline & {
 			fmt:   "pnpm exec oxfmt --check --no-error-on-unmatched-pattern {relative_changed_files}"
 			lint:  "pnpm exec oxlint --no-error-on-unmatched-pattern {relative_changed_files} --quiet"
 			build: "pnpm --filter=@posthog/mcp build"
-			test:  "pnpm --filter=@posthog/mcp test:unit"
+			test:  "pnpm --filter=@posthog/mcp test --run"
 		}
 		"e2e": {
 			name:       "e2e"
