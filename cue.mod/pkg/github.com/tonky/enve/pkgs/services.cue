@@ -18,13 +18,17 @@ redis: {pname: "redis"}
 valkey: {pname: "valkey"}
 docker_compose: {pname: "docker-compose"}
 mysql: {pname: "mysql"}
+mariadb: {pname: "mariadb"}
 garage: {pname: "garage"}
 mailpit: {pname: "mailpit"}
 clickhouse: {pname: "clickhouse"}
-temporal: {pname: "temporal-cli"}
+temporal: {pname: "temporal"}
+temporal_server: {pname: "temporal"}
+temporal_cli: {pname: "temporal-cli"}
 seaweedfs: {pname: "seaweedfs"}
-tansu: {pname: "tansu"}
-kafka: {pname: "tansu"}
+nisshi: {pname: "nisshi"}
+tansu: {pname: "nisshi"}
+kafka: {pname: "nisshi"}
 
 // -------------------------------------------------------------
 // High-Level Microservice & Daemon Presets (#Service presets)
@@ -226,14 +230,14 @@ kafka: {pname: "tansu"}
 	timeout: schema.#Duration | *defaultTimeout
 	lifecycle: {
 		init: [
-			*"mysqld --initialize-insecure --datadir=\"$DATA_DIR\"" | string,
+			*"mysqld --no-defaults --initialize-insecure --datadir=\"$DATA_DIR\"" | string,
 		]
 	}
 	// Every path under the data directory: the socket and the pid file both default
 	// into a shared location (`/tmp/mysql.sock`), which a second instance would take
 	// from the first. `--mysqlx=OFF` closes the X protocol listener, whose own
 	// default port (33060) is not the one this service was given.
-	command: string | *"mysqld --datadir=\"\(dataDir)\" --port=\(port) --socket=\"\(dataDir)/mysql.sock\" --pid-file=\"\(dataDir)/mysqld.pid\" --mysqlx=OFF --bind-address=127.0.0.1"
+	command: string | *"mysqld --no-defaults --datadir=\"\(dataDir)\" --port=\(port) --socket=\"\(dataDir)/mysql.sock\" --pid-file=\"\(dataDir)/mysqld.pid\" --mysqlx=OFF --bind-address=127.0.0.1"
 	environment: {
 		MYSQL_TCP_PORT: "\(port)"
 	}
@@ -245,6 +249,38 @@ kafka: {pname: "tansu"}
 	readinessProbe: {
 		port:    schema.#Port | *servicePort
 		command: string | *"mysqladmin ping -h 127.0.0.1 -P \(servicePort) -u root"
+		timeout: schema.#Duration | *defaultTimeout
+	}
+}
+
+#MariaDBService: schema.#Service & {
+	package: schema.#PackageRef | *"mariadb"
+
+	let defaultPort = 3306
+	let defaultDataDir = ".enve/data/mariadb"
+	let defaultTimeout = "3500ms"
+
+	port:    schema.#Port | *defaultPort
+	dataDir: string | *defaultDataDir
+	timeout: schema.#Duration | *defaultTimeout
+	lifecycle: {
+		init: [
+			*"mariadb-install-db --no-defaults --datadir=\"$DATA_DIR\" --auth-root-authentication-method=normal" | string,
+		]
+	}
+	command: string | *"mariadbd --no-defaults --datadir=\"\(dataDir)\" --port=\(port) --socket=\"\(dataDir)/mysql.sock\" --pid-file=\"\(dataDir)/mariadbd.pid\" --bind-address=127.0.0.1"
+	environment: {
+		MYSQL_TCP_PORT: "\(port)"
+		MARIADB_PORT:   "\(port)"
+	}
+	let servicePort = port
+	healthCheck: {
+		port:    schema.#Port | *servicePort
+		timeout: schema.#Duration | *"1500ms"
+	}
+	readinessProbe: {
+		port:    schema.#Port | *servicePort
+		command: string | *"mariadb-admin ping -h 127.0.0.1 -P \(servicePort) -u root"
 		timeout: schema.#Duration | *defaultTimeout
 	}
 }
@@ -350,21 +386,21 @@ kafka: {pname: "tansu"}
 	}
 }
 
-#TansuService: schema.#Service & {
-	package: schema.#PackageRef | *"tansu"
+#NisshiService: schema.#Service & {
+	package: schema.#PackageRef | *"nisshi"
 
 	let defaultPort = 9092
-	let defaultDataDir = ".enve/data/tansu"
+	let defaultDataDir = ".enve/data/nisshi"
 	let defaultTimeout = "1500ms"
 
 	port:    schema.#Port | *defaultPort
 	dataDir: string | *defaultDataDir
-	// On disk rather than `memory://tansu/`, which lost every topic on restart. Tansu
+	// On disk rather than `memory://nisshi/`, which lost every topic on restart. Nisshi
 	// resolves the URL's path against its working directory, so the path stays relative
 	// and the `///` is load-bearing: `sqlite://<path>` reads `<path>` as the URL's host.
-	storageEngine: string | *"sqlite:///\(dataDir)/tansu.db"
+	storageEngine: string | *"sqlite:///\(dataDir)/nisshi.db"
 	timeout:       schema.#Duration | *defaultTimeout
-	command:       string | *"tansu --listener-url tcp://127.0.0.1:\(port) --advertised-listener-url tcp://127.0.0.1:\(port) --storage-engine \(storageEngine)"
+	command:       string | *"nisshi --listener-url tcp://127.0.0.1:\(port) --advertised-listener-url tcp://127.0.0.1:\(port) --storage-engine \(storageEngine)"
 	environment: {
 		KAFKA_PORT:    "\(port)"
 		KAFKA_BROKERS: "127.0.0.1:\(port)"
@@ -380,4 +416,5 @@ kafka: {pname: "tansu"}
 	}
 }
 
-#KafkaService: #TansuService
+#KafkaService: #NisshiService
+#TansuService: #NisshiService

@@ -4,6 +4,7 @@ package pkgs
 // Core Developer Utilities & CLI Tools
 // -------------------------------------------------------------
 
+bash: {pname: "bash"}
 ripgrep: {pname: "ripgrep"}
 rg: {pname: "ripgrep"}
 bat: {pname: "bat"}

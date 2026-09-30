@@ -1,55 +1,55 @@
 package schema
 
-// Specification for a task execution node (lint, fmt, typecheck, audit, test)
-#TaskSpec: {
-	phase?:   #TaskPhaseMode
-	command:  string
-	fix?:     string                  // In-place auto-fix (e.g. "ruff check --fix", "cargo fmt")
-	matcher?: #ProblemMatcherMode     // Automatically injects GHA problem matcher
-	env?:     [string]: string
-	timeout?: int                     // Timeout in seconds
+// Target file matching and empty set evaluation filter
+#FileFilter: {
+	include: [...string]
+	exclude?: [...string]
+	on_empty: *#EmptyPolicy.Skip | #EmptyPolicyMode
 }
 
-// Code generation and uncommitted drift verification specification
-#CodegenSpec: {
-	command:          string
-	checkUncommitted: bool | *true      // Enforces `git diff --exit-code <outputs>`
-	watchPaths?:      [...string]       // Source paths that invalidate this codegen
-	outputs?:         [...string]       // Generated paths to check
-}
-
-// Architectural contract and breaking change verification specification
-#ContractSpec: {
-	command:      string               // e.g. "buf breaking proto/"
-	againstRef:   string | *"origin/master"
-	failOnBreak:  bool | *true
-}
-
-// Database schema migration verification specification
-#MigrationSpec: {
-	engine:          #MigrationEngineMode // e.g. #MigrationEngine.Django
-	migrationsDir:   string
-	goldenDump?:     string               // e.g. "showcase/data/schema-latest.sql.gz"
-	checkDeletions:  bool | *true         // Flags removed or renamed migrations
-	targetDatabases?: [...string]          // Target databases to verify
+// One command a job runs
+#Task: {
+	name?: string
+	// e.g. "python tools/snob.py {changed_files}" or "go list -test {changed_files}"
+	command: string
+	shell?:  #ShellMode
+	env?: [string]: string
+	// Variables removed from the task's environment, e.g. the injected service
+	// connection variables for a task that runs against its own throwaway database.
+	unset_env?: [...string]
+	// e.g. "10m"
+	timeout?: #Duration
+	filter?:  #FileFilter
+	caches?: [...#Cache]
 }
 
 // Declarative test target selector specification
 #SelectorSpec: {
 	// Command that accepts changed files and outputs resolved test targets
-	command:   string                   // e.g. "python tools/snob.py {changed_files}" or "go list -test {changed_files}"
-	format?:   "lines" | "json" | "space" | *"lines"
-	fallback?: "all" | "none" | *"all"  // If selector fails or cannot determine
-	timeout?:  int | *10               // Max seconds to compute selection
+	command:   string
+	fallback?: #SelectorFallbackMode | *#SelectorFallback.All
+	timeout?:  int | *10
+	// "file" collapses path::Class::test targets to their file so shards run whole
+	// files in their own order (pytest-split parity); "item" keeps them as selected.
+	granularity?: #TargetGranularityMode | *#TargetGranularity.Item
+	// Drop matrix entries whose selector yields no targets
+	prefilter_matrix?: bool | *true
+	// Size shards to the selected targets
+	adaptive_shards?: bool | *true
 }
 
 // Multi-level test and blast radius scoping specification
 #ScopingRules: {
-	selector?:         #ScopingSelectorMode | #SelectorSpec | string // e.g. #ScopingSelector.PythonSnob or custom selector
-	barrels?:          [...string]          // High-fanout barrel files (e.g. ["src/types.ts"])
-	universalSymbols?: [...string]          // Symbols forcing full blast-radius execution
-	domainRoots?:      [...string]          // Domain boundary roots preventing global graph traversal
-	serviceMarkers?:   [...string]          // Regex patterns in tests requiring running microservices
-	fullRunPatterns?:  [...string]          // Global config files triggering full test execution
+	// e.g. #ScopingSelector.PythonSnob or custom selector
+	selector?: #ScopingSelectorMode | #SelectorSpec | string
+	// High-fanout barrel files (e.g. ["src/types.ts"])
+	barrels?: [...string]
+	// Symbols forcing full blast-radius execution
+	universal_symbols?: [...string]
+	// Domain boundary roots preventing global graph traversal
+	domain_roots?: [...string]
+	// Regex patterns in tests requiring running microservices
+	service_markers?: [...string]
+	// Global config files triggering full test execution
+	full_run_patterns?: [...string]
 }
-

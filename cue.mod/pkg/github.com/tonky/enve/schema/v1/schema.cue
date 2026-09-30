@@ -97,6 +97,7 @@ import (
 // `rev` overrides that revision for this package alone, for a version it cannot satisfy.
 #PackageRef: string | {
 	pname:     string
+	attr?:     string
 	version?:  #SemVer
 	rev?:      #NixpkgsRev
 	features?: _
@@ -201,6 +202,12 @@ import (
 }
 #PythonPackageFormatMode: #PythonPackageFormat.Pyproject | #PythonPackageFormat.Wheel | #PythonPackageFormat.Setuptools | *#PythonPackageFormat.Pyproject
 
+#PathMode: {
+	Prepend: "prepend"
+	Append:  "append"
+}
+#PathModeType: #PathMode.Prepend | #PathMode.Append
+
 #AppEnv: {
 	Development: "development"
 	Production:  "production"
@@ -290,7 +297,7 @@ import (
 	enabled?:   bool | *true
 }
 
-#DependencyRef: #ServiceDependency | #Service
+#DependencyRef: *#ServiceDependency | #Service
 
 #ServiceDependencyMap: [string]: #ServiceDependency | bool | {
 	service:    #Service
@@ -314,12 +321,15 @@ import (
 })
 
 #Service: {
-	name?:     string
-	enabled?:  bool | *true
-	external?: bool | *false
-	host?:     #Host | *"127.0.0.1"
-	url?:      string
-	package?:  #PackageRef
+	// Marks a service for the loader, which records the directory it was
+	// declared in as `originDir`. Hidden, so it is never exported.
+	_enveService: true
+	name?:        string
+	enabled?:     bool | *true
+	external?:    bool | *false
+	host?:        #Host | *"127.0.0.1"
+	url?:         string
+	package?:     #PackageRef
 	packages?: [...#PackageRef]
 	image?:     string
 	command?:   string
@@ -482,14 +492,14 @@ import (
 	timeout: #Duration | *defaultTimeout
 	lifecycle: {
 		init: [
-			*"mysqld --initialize-insecure --datadir=\"$DATA_DIR\"" | string,
+			*"mysqld --no-defaults --initialize-insecure --datadir=\"$DATA_DIR\"" | string,
 		]
 	}
 	// Every path under the data directory: the socket and the pid file both default
 	// into a shared location (`/tmp/mysql.sock`), which a second instance would take
 	// from the first. `--mysqlx=OFF` closes the X protocol listener, whose own
 	// default port (33060) is not the one this service was given.
-	command: string | *"mysqld --datadir=\"\(dataDir)\" --port=\(port) --socket=\"\(dataDir)/mysql.sock\" --pid-file=\"\(dataDir)/mysqld.pid\" --mysqlx=OFF --bind-address=127.0.0.1"
+	command: string | *"mysqld --no-defaults --datadir=\"\(dataDir)\" --port=\(port) --socket=\"\(dataDir)/mysql.sock\" --pid-file=\"\(dataDir)/mysqld.pid\" --mysqlx=OFF --bind-address=127.0.0.1"
 	environment: {
 		MYSQL_TCP_PORT: "\(port)"
 	}
@@ -501,6 +511,38 @@ import (
 	readinessProbe: {
 		port:    #Port | *servicePort
 		command: string | *"mysqladmin ping -h 127.0.0.1 -P \(servicePort) -u root"
+		timeout: #Duration | *defaultTimeout
+	}
+}
+
+#MariaDBService: #Service & {
+	package: #PackageRef | *"mariadb"
+
+	let defaultPort = 3306
+	let defaultDataDir = ".enve/data/mariadb"
+	let defaultTimeout = "3500ms"
+
+	port:    #Port | *defaultPort
+	dataDir: string | *defaultDataDir
+	timeout: #Duration | *defaultTimeout
+	lifecycle: {
+		init: [
+			*"mariadb-install-db --no-defaults --datadir=\"$DATA_DIR\" --auth-root-authentication-method=normal" | string,
+		]
+	}
+	command: string | *"mariadbd --no-defaults --datadir=\"\(dataDir)\" --port=\(port) --socket=\"\(dataDir)/mysql.sock\" --pid-file=\"\(dataDir)/mariadbd.pid\" --bind-address=127.0.0.1"
+	environment: {
+		MYSQL_TCP_PORT: "\(port)"
+		MARIADB_PORT:   "\(port)"
+	}
+	let servicePort = port
+	healthCheck: {
+		port:    #Port | *servicePort
+		timeout: #Duration | *"1500ms"
+	}
+	readinessProbe: {
+		port:    #Port | *servicePort
+		command: string | *"mariadb-admin ping -h 127.0.0.1 -P \(servicePort) -u root"
 		timeout: #Duration | *defaultTimeout
 	}
 }
@@ -626,7 +668,7 @@ import (
 	let servicePort = port
 	healthCheck: {
 		port:    #Port | *servicePort
-		timeout: #Duration | *"1000ms"
+		timeout: #Duration | *defaultTimeout
 	}
 	readinessProbe: {
 		port:    #Port | *servicePort
@@ -682,21 +724,21 @@ import (
 	}
 }
 
-#TansuService: #Service & {
-	package: #PackageRef | *"tansu"
+#NisshiService: #Service & {
+	package: #PackageRef | *"nisshi"
 
 	let defaultPort = 9092
-	let defaultDataDir = ".enve/data/tansu"
+	let defaultDataDir = ".enve/data/nisshi"
 	let defaultTimeout = "1500ms"
 
 	port:    #Port | *defaultPort
 	dataDir: string | *defaultDataDir
-	// On disk rather than `memory://tansu/`, which lost every topic on restart. Tansu
+	// On disk rather than `memory://nisshi/`, which lost every topic on restart. Nisshi
 	// resolves the URL's path against its working directory, so the path stays relative
 	// and the `///` is load-bearing: `sqlite://<path>` reads `<path>` as the URL's host.
-	storageEngine: string | *"sqlite:///\(dataDir)/tansu.db"
+	storageEngine: string | *"sqlite:///\(dataDir)/nisshi.db"
 	timeout:       #Duration | *defaultTimeout
-	command:       string | *"tansu --listener-url tcp://127.0.0.1:\(port) --advertised-listener-url tcp://127.0.0.1:\(port) --storage-engine \(storageEngine)"
+	command:       string | *"nisshi --listener-url tcp://127.0.0.1:\(port) --advertised-listener-url tcp://127.0.0.1:\(port) --storage-engine \(storageEngine)"
 	environment: {
 		KAFKA_PORT:    "\(port)"
 		KAFKA_BROKERS: "127.0.0.1:\(port)"
@@ -712,13 +754,15 @@ import (
 	}
 }
 
-#KafkaService: #TansuService
+#KafkaService: #NisshiService
+#TansuService: #NisshiService
 
 // A selectable configuration: the tools, services and environment variables
 // that `enve` applies. Selected with `-p/--profile`; see `profiles` in the enve file.
 #Profile: {
-	name?:  string | *""
-	build?: #BuildSpec
+	name?:     string | *""
+	pathMode?: #PathModeType
+	build?:    #BuildSpec
 	tools?: [...#PackageRef] | *[]
 	services?: [string]: #Service
 	disabledServices?: [...#Service]
@@ -733,8 +777,9 @@ import (
 }
 
 #CueOnlyDevEnvironment: {
-	name?:  string | *""
-	build?: #BuildSpec
+	name?:     string | *""
+	pathMode?: #PathModeType
+	build?:    #BuildSpec
 	tools?: [...#PackageRef] | *[]
 	services?: [string]: #Service
 	disabledServices?: [...#Service]

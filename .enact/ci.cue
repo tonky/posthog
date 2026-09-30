@@ -1,12 +1,17 @@
 package replay
 
-pipeline: {
+import "enact.dev/schema"
+
+pipeline: schema.#Pipeline & {
+	toolchain: node: package_manager: "pnpm"
 	ci: {
+		no_cache: {
+			labels: ["no-cache", "showcase"]
+			branch_prefixes: ["showcase/"]
+		}
 		concurrency: {
 			max_parallel_jobs: 16
-			max_total_shards:  32
 		}
-		strategy: "auto"
 		workers: {
 			"depot-16": {
 				available:    1

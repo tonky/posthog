@@ -1,6 +1,8 @@
 package replay
 
-pipeline: {
+import "enact.dev/schema"
+
+pipeline: schema.#Pipeline & {
 	workflows: {
 		local: {
 			layout:   "staged"

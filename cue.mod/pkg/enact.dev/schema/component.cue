@@ -1,65 +1,77 @@
 package schema
 
-// Architectural technology tag.
-#TechnologyTag: #Technology.Go | #Technology.Rust | #Technology.TypeScript | #Technology.Python | #Technology.Docker | #Technology.Infra | #Technology.Postgres | #Technology.Redis | #Technology.ClickHouse | #Technology.Kafka | string
-
 // Architectural relationship between components.
 #Relationship: {
-	target:    _ // target component or service reference (e.g. components.quill, components.infra.services.postgres, or "quill")
-	title?:    string // e.g. "Calls HTTP API", "Compiles against"
-	protocol?: #Protocol.Sql | #Protocol.Http | #Protocol.Grpc | #Protocol.Tcp | #Protocol.Kafka | #Protocol.Ipc | #Protocol.Redis | string
+	// target component or service reference (e.g. components.quill, pipeline.services.postgres, or "quill")
+	target:    _
+	// e.g. "Calls HTTP API", "Compiles against"
+	title?:    string
+	protocol?: #ProtocolMode | string
 }
+
+// A slot's command, or the whole task
+#SlotTask: string | #Task
 
 // Declarative component with LikeC4 architecture metadata & codebase boundaries.
 #Component: {
 	// Identification & LikeC4 metadata
-	name:        string
-	title:       string
+	name?:        string
+	title?:       string
 	description?: string
-	technology:  #TechnologyTag
-	tags?:       [...string]
+	tags?: [...string]
+	// `infra` components provide shared services: they start first and get the
+	// infrastructure layout in the UI.
+	technology?: string
+	// Browsers the component's tests drive; CI provisions them for its matrix entries.
+	browsers?: #Browsers
 
 	// Architectural dependencies
 	uses?: [...#Relationship]
 
 	// Codebase boundaries & change detection
-	root:                 string        // e.g. "pkg/core", "services/api"
-	watch_paths:          [...string]   // file globs triggering this component
-	depends_on:           [..._]        // component dependencies (accepting component references or string names)
-	dependsOnComponents?: [..._]        // explicit alias for compile/code dependencies
+	// e.g. "pkg/core", "services/api"
+	root?: string
+	// file globs triggering this component
+	watch_paths?: [...string]
+	// component dependencies (accepting component references or string names)
+	depends_on?: [..._]
 
-	// Strongly typed direct enve Service binding
-	service?: _
+	// The enve service this component is: its test, lint and tasks become the component's jobs.
+	service?: #ServiceSpec
 
 	// Multi-level test and blast radius scoping rules
 	scoping?: #ScopingRules
 
-	// Database schema migrations verification
-	migrations?: #MigrationSpec
+	// Declarative filesystem cone for sparse checkout
+	workspace_scope?: #WorkspaceScope
 
-	// Code generation & contract drift verification
-	codegen?:  [string]: #CodegenSpec
-	contract?: #ContractSpec
+	// Test target selection for the `test` job; another job declares its own
+	// (`jobs.<name>.target_scope`).
+	target_scope?: #TargetScope
 
-	// Static analysis & verification tasks (zero services required)
-	lint?:      _
-	fmt?:       _
-	typecheck?: _
-	audit?:     _
-	build?:     _
-
-	// Direct test specifications (single command/task or map of phases like unit/integration)
-	test?: _
+	// Slots: a one-task job named after the slot, as a command or a #Task. A job name
+	// set by a slot and by `jobs` (or the enve service) is an error.
+	lint?:         #SlotTask
+	fmt?:          #SlotTask
+	typecheck?:    #SlotTask
+	audit?:        #SlotTask
+	build?:        #SlotTask
+	pack?:         #SlotTask
+	smoke?:        #SlotTask
+	migrate?:      #SlotTask
+	schema_check?: #SlotTask
+	test?:         #SlotTask
 
 	// Runtime execution requirements
 	runner?:     #RunnerSpec
 	resources?:  #ResourceSpec
-	shards?:     int | "auto"
-	max_shards?: int
+	shards?:     #ShardingSpec
+	max_shards?: int & >0
 	worker?:     string
-	services?:  {[string]: _} | [..._]
-	secrets?:   [string]: #SecretSpec
-	caches?:    [string]: #CacheSpec
+	// Services the component's tasks need, keyed by name or listed with `name`.
+	services?: {[string]: #ServiceSpec} | [...#ServiceSpec & {name: string}]
+	caches?: [string]:  #Cache
+	tools?: [...(#Tool | string)]
 
 	// Task definitions for this component (legacy or granular jobs)
 	jobs?: [string]: #Job

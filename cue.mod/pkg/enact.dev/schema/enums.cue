@@ -24,6 +24,8 @@ package schema
 	Ipc:   "ipc"
 	Redis: "redis"
 }
+#ProtocolMode: #Protocol.Sql | #Protocol.Http | #Protocol.Grpc | #Protocol.Tcp |
+	#Protocol.Kafka | #Protocol.Ipc | #Protocol.Redis
 
 // Service transport mode
 #ServiceTransport: {
@@ -32,31 +34,27 @@ package schema
 }
 #ServiceTransportMode: #ServiceTransport.Socket | #ServiceTransport.Loopback
 
+// What a service is, as its `enact.kind` declares it
+#ServiceKind: {
+	Postgres:      "postgres"
+	Redis:         "redis"
+	ClickHouse:    "clickhouse"
+	Kafka:         "kafka"
+	Temporal:      "temporal"
+	ObjectStorage: "object_storage"
+	MySql:         "mysql"
+	Http:          "http"
+}
+#ServiceKindMode: #ServiceKind.Postgres | #ServiceKind.Redis | #ServiceKind.ClickHouse |
+	#ServiceKind.Kafka | #ServiceKind.Temporal | #ServiceKind.ObjectStorage |
+	#ServiceKind.MySql | #ServiceKind.Http
+
 // Service deployment topology / placement
 #ServicePlacement: {
 	Shared:   "shared"
 	Isolated: "isolated"
 }
 #ServicePlacementMode: #ServicePlacement.Shared | #ServicePlacement.Isolated
-
-// External runner computing tiers
-#RunnerTier: {
-	Standard:   "standard"
-	Large4Cpu:  "large-4cpu"
-	Large8Cpu:  "large-8cpu"
-	Large16Cpu: "large-16cpu"
-	Gpu:        "gpu"
-}
-#RunnerTierMode: #RunnerTier.Standard | #RunnerTier.Large4Cpu | #RunnerTier.Large8Cpu |
-	#RunnerTier.Large16Cpu | #RunnerTier.Gpu
-
-// Runner target execution environment
-#RunnerTarget: {
-	Local:        "local"
-	GithubRunner: "github-runner"
-	RemoteWorker: "remote-worker"
-}
-#RunnerTargetMode: #RunnerTarget.Local | #RunnerTarget.GithubRunner | #RunnerTarget.RemoteWorker
 
 // Runner platform architectures
 #Platform: {
@@ -67,14 +65,6 @@ package schema
 }
 #PlatformMode: #Platform.LinuxAmd64 | #Platform.LinuxArm64 | #Platform.DarwinArm64 | #Platform.DarwinAmd64
 
-// Runner allocation kinds
-#RunnerKind: {
-	Internal: "internal"
-	External: "external"
-	Auto:     "auto"
-}
-#RunnerKindMode: #RunnerKind.Internal | #RunnerKind.External | #RunnerKind.Auto
-
 // Service process restart policies
 #RestartPolicy: {
 	Always:    "always"
@@ -82,35 +72,6 @@ package schema
 	Never:     "never"
 }
 #RestartPolicyMode: #RestartPolicy.Always | #RestartPolicy.OnFailure | #RestartPolicy.Never
-
-// Database schema migration engines
-#MigrationEngine: {
-	Django:     "django"
-	ClickHouse: "clickhouse"
-	Sqlx:       "sqlx"
-	Flyway:     "flyway"
-	Alembic:    "alembic"
-	Prisma:     "prisma"
-}
-#MigrationEngineMode: #MigrationEngine.Django | #MigrationEngine.ClickHouse |
-	#MigrationEngine.Sqlx | #MigrationEngine.Flyway | #MigrationEngine.Alembic | #MigrationEngine.Prisma
-
-// GitHub Actions Problem Matcher presets
-#ProblemMatcher: {
-	Cargo:      "cargo"
-	Mypy:       "mypy"
-	Ruff:       "ruff"
-	Oxlint:     "oxlint"
-	Eslint:     "eslint"
-	Stylelint:  "stylelint"
-	Actionlint: "actionlint"
-	Shellcheck: "shellcheck"
-	Go:         "go"
-	Vitest:     "vitest"
-}
-#ProblemMatcherMode: #ProblemMatcher.Cargo | #ProblemMatcher.Mypy | #ProblemMatcher.Ruff |
-	#ProblemMatcher.Oxlint | #ProblemMatcher.Eslint | #ProblemMatcher.Stylelint |
-	#ProblemMatcher.Actionlint | #ProblemMatcher.Shellcheck | #ProblemMatcher.Go | #ProblemMatcher.Vitest
 
 // Multi-level test and blast radius scoping selectors
 #ScopingSelector: {
@@ -125,27 +86,146 @@ package schema
 	#ScopingSelector.VitestRelated | #ScopingSelector.GoDeps | #ScopingSelector.CargoMetadata |
 	#ScopingSelector.Glob
 
-// Pipeline task phase categories
-#TaskPhase: {
-	Lint:      "lint"
-	Fmt:       "fmt"
-	Typecheck: "typecheck"
-	Audit:     "audit"
-	Build:     "build"
-	Test:      "test"
-	Codegen:   "codegen"
-	Contract:  "contract"
-	Migration: "migration"
+// Workflow execution layout orchestration
+#WorkflowLayout: {
+	Staged: "staged"
+	Static: "static"
 }
-#TaskPhaseMode: #TaskPhase.Lint | #TaskPhase.Fmt | #TaskPhase.Typecheck | #TaskPhase.Audit |
-	#TaskPhase.Build | #TaskPhase.Test | #TaskPhase.Codegen | #TaskPhase.Contract | #TaskPhase.Migration
+#WorkflowLayoutMode: #WorkflowLayout.Staged | #WorkflowLayout.Static
 
-// Verification test execution categories
-#TestType: {
-	Unit:        "unit"
-	Integration: "integration"
-	E2E:         "e2e"
-	Smoke:       "smoke"
-	Benchmark:   "benchmark"
+// Sharding strategies
+#ShardingSpec: "auto" | int & >0
+
+// Workflow component scoping strategies
+#WorkflowScopeStrategy: {
+	Affected: "affected"
+	All:      "all"
 }
-#TestTypeMode: #TestType.Unit | #TestType.Integration | #TestType.E2E | #TestType.Smoke | #TestType.Benchmark
+#WorkflowScopeStrategyMode: #WorkflowScopeStrategy.Affected | #WorkflowScopeStrategy.All
+
+// Service lifecycle and provisioning policy
+#ServicePolicy: {
+	OnDemand: "on_demand"
+	Disabled: "disabled"
+}
+#ServicePolicyMode: #ServicePolicy.OnDemand | #ServicePolicy.Disabled
+
+// Concurrency grouping scope
+#ConcurrencyScope: {
+	Branch:   "branch"
+	Commit:   "commit"
+	Workflow: "workflow"
+}
+#ConcurrencyScopeMode: #ConcurrencyScope.Branch | #ConcurrencyScope.Commit | #ConcurrencyScope.Workflow
+
+// SemVer specification regex pattern
+#SemVer: =~"^v?(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?(\\+[0-9A-Za-z.-]+)?$"
+
+// Common version alias
+#VersionAlias: {
+	Latest:          "latest"
+	OldestSupported: "oldest_supported"
+	Default:         "default"
+}
+#VersionAliasMode: #VersionAlias.Latest | #VersionAlias.OldestSupported | #VersionAlias.Default
+#VersionSpec:      #SemVer | #VersionAliasMode | string
+
+// Pull request event actions
+#PullRequestAction: {
+	Opened:      "opened"
+	Synchronize: "synchronize"
+	Reopened:    "reopened"
+	Closed:      "closed"
+	Labeled:     "labeled"
+}
+#PullRequestActionMode: #PullRequestAction.Opened | #PullRequestAction.Synchronize |
+	#PullRequestAction.Reopened | #PullRequestAction.Closed | #PullRequestAction.Labeled
+#PullRequestDefaultActions: [#PullRequestAction.Opened, #PullRequestAction.Synchronize, #PullRequestAction.Reopened]
+
+// Test / Telemetry report formats
+#ReportFormat: {
+	Junit:    "junit"
+	Coverage: "coverage"
+	Sarif:    "sarif"
+}
+#ReportFormatMode: #ReportFormat.Junit | #ReportFormat.Coverage | #ReportFormat.Sarif
+
+#ReportSpec: {
+	format: #ReportFormatMode
+	path:   string
+}
+
+// Empty target/file evaluation policy for steps
+#EmptyPolicy: {
+	Skip:   "skip"
+	Pass:   "pass"
+	Fail:   "fail"
+	RunAll: "run_all"
+}
+#EmptyPolicyMode: #EmptyPolicy.Skip | #EmptyPolicy.Pass | #EmptyPolicy.Fail | #EmptyPolicy.RunAll
+
+// Cache storage hierarchy
+#CacheTier: {
+	L1Only: "l1_only"
+	L2Only: "l2_only"
+	Tiered: "tiered"
+}
+#CacheTierMode: #CacheTier.L1Only | #CacheTier.L2Only | #CacheTier.Tiered
+
+// Cache mutation mode
+#CacheMode: {
+	ReadOnly:  "read_only"
+	ReadWrite: "read_write"
+}
+#CacheModeValue: #CacheMode.ReadOnly | #CacheMode.ReadWrite
+
+// Cache backend storage
+#CacheBackend: {
+	Local: "local"
+	S3R2:  "s3-r2"
+	Gha:   "gha"
+}
+#CacheBackendMode: #CacheBackend.Local | #CacheBackend.S3R2 | #CacheBackend.Gha
+
+// Selector target granularity
+#TargetGranularity: {
+	Item: "item"
+	File: "file"
+}
+#TargetGranularityMode: #TargetGranularity.Item | #TargetGranularity.File
+
+// Selector fallback strategy
+#SelectorFallback: {
+	All:  "all"
+	None: "none"
+}
+#SelectorFallbackMode: #SelectorFallback.All | #SelectorFallback.None
+
+// Shell interpreter
+#Shell: {
+	Bash:   "bash"
+	Sh:     "sh"
+	Pwsh:   "pwsh"
+	Python: "python"
+	Node:   "node"
+}
+#ShellMode: #Shell.Bash | #Shell.Sh | #Shell.Pwsh | #Shell.Python | #Shell.Node
+
+// How a CI worker is provisioned: dedicated (standing, never reclaimed), on_demand
+// (booted per job) or spot (reclaimable after a notice window)
+#WorkerTier: {
+	Dedicated: "dedicated"
+	OnDemand:  "on_demand"
+	Spot:      "spot"
+}
+#WorkerTierMode: #WorkerTier.Dedicated | #WorkerTier.OnDemand | #WorkerTier.Spot
+
+// Hardware GPU compute tiers
+#GpuTier: {
+	None: "none"
+	T4:   "nvidia-t4"
+	A10g: "nvidia-a10g"
+	A100: "nvidia-a100"
+	H100: "nvidia-h100"
+}
+#GpuTierMode: #GpuTier.None | #GpuTier.T4 | #GpuTier.A10g | #GpuTier.A100 | #GpuTier.H100

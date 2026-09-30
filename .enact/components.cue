@@ -1,15 +1,17 @@
 package replay
 
-pipeline: {
+import "enact.dev/schema"
+
+pipeline: schema.#Pipeline & {
 	name:        "posthog-platform"
 	description: "PostHog Analytics Platform: Accelerated CI/CD Pipeline (enact + enve)"
 	env: {}
-	jobs: {}
 	workspace_scope: {
 		include: [
 			".enact",
 			"tools",
 			"showcase",
+			"patches",
 		]
 	}
 	triggers: {
@@ -31,46 +33,20 @@ pipeline: {
 			paths: [
 				"**/*",
 			]
-			tags: []
 		}
 		schedule: []
 	}
 	components: {
 		"backend": {
 			caches: {}
-			codegen: {
-				openapi: {
-					checkUncommitted: true
-					command:          "hogli build:openapi"
-					originDir:        "."
-					outputs: [
-						"frontend/src/generated/",
-					]
-					watchPaths: [
-						"posthog/api/**",
-						"products/*/backend/api/**",
-						"products/*/*.py",
-					]
-				}
-			}
-			dependsOnComponents: [
-				"product_structure",
-			]
-			depends_on:  []
 			description: "Django ASGI server, REST endpoints, ClickHouse queries, and products"
-			fmt:         "python3 showcase/scripts/static_check.py backend fmt {changed_files}"
+			fmt:          "ruff format --check {changed_files}"
 			jobs: {}
-			lint:       "python3 showcase/scripts/static_check.py backend lint {changed_files}"
-			max_shards: 8
-			migrations: {
-				checkDeletions: true
-				command:        "python3 showcase/scripts/migrations_check.py {changed_files}"
-				engine:         "django"
-				goldenDump:     "showcase/data/schema-latest.sql.gz"
-				migrationsDir:  "posthog/migrations"
-				targetDatabases: []
-			}
-			name: "backend"
+			lint:         "ruff check {changed_files}"
+			max_shards:   8
+			migrate:      "python manage.py makemigrations --check --dry-run"
+			schema_check: "./bin/hogli build:openapi && git diff --exit-code"
+			name:         "backend"
 			resources: {
 				cpus:      1.5
 				memory_mb: 1800
@@ -78,21 +54,13 @@ pipeline: {
 			root: "."
 			scoping: {
 				barrels: []
-				domainRoots: [
+				domain_roots: [
 					"posthog",
 					"ee",
 					"products",
 				]
-				fullRunPatterns: []
-				selector: {
-					command:   "enact scope -t python {changed_files}"
-					fallback:  "none"
-					format:    "lines"
-					granularity: "file"
-					originDir: "."
-					timeout:   10
-				}
-				serviceMarkers: [
+				full_run_patterns: []
+				service_markers: [
 					"django_db",
 					"BaseTest",
 					"APITestCase",
@@ -100,11 +68,25 @@ pipeline: {
 					"NonDeterministicDatabaseTestMixin",
 					"posthog.test",
 				]
-				universalSymbols: []
+				universal_symbols: []
 			}
-			secrets: {}
 			services: {}
 			shards: "auto"
+			// Python sources and syrupy snapshots map to tests; any other file of the
+			// component (a fixture, a template, SQL, configuration) runs every test.
+			target_scope: {
+				fallback: "none"
+				rules: [{
+					match: [
+						"posthog/**/*.{py,ambr}",
+						"ee/**/*.{py,ambr}",
+						"products/*/backend/**/*.{py,ambr}",
+						"products/*/*.py",
+					]
+					engine:      "python"
+					granularity: "file"
+				}]
+			}
 			tags: [
 				"backend",
 				"django",
@@ -112,39 +94,39 @@ pipeline: {
 				"products",
 			]
 			technology: "python"
-			audit:      "bash showcase/scripts/repo_invariants.sh"
-			test:       "bash showcase/scripts/run_sharded_pytest.sh {targets_file}"
+			audit:      "pytest posthog/test/repo_invariants"
+			test:       "pytest -v --tb=short --reuse-db {targets} -m 'not async_migrations'"
 			title:      "PostHog Core Django API & Analytics Backend"
-			typecheck:  "python3 showcase/scripts/backend_runtime.py exec python3 showcase/scripts/typing_check.py {changed_files}"
+			typecheck:  "mypy {changed_files}"
 			uses: [
 				{
-					protocol: "sql"
-					target:   "postgres"
+					protocol: schema.#Protocol.Sql
+					target:   pipeline.services.postgres
 					title:    "Reads & writes app metadata"
 				},
 				{
-					protocol: "redis"
-					target:   "redis"
+					protocol: schema.#Protocol.Redis
+					target:   pipeline.services.redis
 					title:    "Caches sessions & flags"
 				},
 				{
-					protocol: "kafka"
-					target:   "kafka"
+					protocol: schema.#Protocol.Kafka
+					target:   pipeline.services.kafka
 					title:    "Event streaming broker"
 				},
 				{
-					protocol: "http"
-					target:   "clickhouse"
+					protocol: schema.#Protocol.Http
+					target:   pipeline.services.clickhouse
 					title:    "Analytics DBMS"
 				},
 				{
-					protocol: "http"
-					target:   "seaweedfs"
+					protocol: schema.#Protocol.Http
+					target:   pipeline.services.seaweedfs
 					title:    "Object storage for staging & recordings"
 				},
 				{
-					protocol: "grpc"
-					target:   "temporal"
+					protocol: schema.#Protocol.Grpc
+					target:   pipeline.services.temporal
 					title:    "Workflow engine for async tasks"
 				},
 			]
@@ -156,14 +138,12 @@ pipeline: {
 			]
 		}
 		"frontend": {
-			build:  "pnpm --filter=@posthog/frontend build"
+			build: "pnpm --filter=@posthog/frontend build"
 			caches: {}
-			codegen: {}
-			dependsOnComponents: []
 			depends_on: [
 				{
-					build:       "pnpm --filter=@posthog/quill* build"
-					depends_on:  []
+					build: "pnpm --filter=@posthog/quill* build"
+					depends_on: []
 					description: "Reusable UI primitives, buttons, badges, and chart components"
 					lint:        "pnpm --filter=@posthog/quill* lint"
 					name:        "quill"
@@ -181,10 +161,10 @@ pipeline: {
 				},
 			]
 			description: "React, Vite, Kea state logics, scenes, and visual regression tests"
-			fmt:         "python3 showcase/scripts/static_check.py frontend fmt {changed_files}"
+			fmt:         "pnpm exec oxfmt --check {changed_files}"
 			jobs: {}
-			lint: "python3 showcase/scripts/static_check.py frontend lint {changed_files}"
-			name: "frontend"
+			lint:        "pnpm exec oxlint {changed_files} --quiet"
+			name:        "frontend"
 			resources: {
 				cpus:      2.0
 				memory_mb: 5120
@@ -192,27 +172,43 @@ pipeline: {
 			root: "."
 			scoping: {
 				barrels: []
-				domainRoots: [
+				domain_roots: [
 					"frontend/src",
 					"products",
 					"common",
 					"packages",
 				]
-				fullRunPatterns: []
-				selector: {
-					command:   "enact scope -t ts {changed_files}"
-					fallback:  "none"
-					format:    "lines"
-					granularity: "file"
-					originDir: "."
-					timeout:   10
-				}
-				serviceMarkers: []
-				universalSymbols: []
+				full_run_patterns: []
+				service_markers: []
+				universal_symbols: []
 			}
-			secrets: {}
 			services: {}
 			shards: 4
+			// TS/JS sources and jest snapshots map to tests. Jest's moduleNameMapper
+			// stubs styles and images, and snapshots.yml lists visual review baselines,
+			// so they reach no test; any other file of the component (JSON, YAML, a
+			// manifest) runs every test.
+			target_scope: {
+				fallback: "none"
+				rules: [
+					{
+						match: [
+							"frontend/**/*.{ts,tsx,js,jsx,mjs,cjs,mts,cts,snap}",
+							"products/*/frontend/**/*.{ts,tsx,js,jsx,mjs,cjs,mts,cts,snap}",
+						]
+						engine:      "typescript"
+						granularity: "file"
+					},
+					{
+						match: [
+							"frontend/**/*.{css,less,scss,svg,png}",
+							"products/*/frontend/**/*.{css,less,scss,svg,png}",
+							"frontend/snapshots.yml",
+						]
+						action: "ignore"
+					},
+				]
+			}
 			tags: [
 				"frontend",
 				"vite",
@@ -220,10 +216,10 @@ pipeline: {
 				"kea",
 			]
 			technology: "typescript"
-			test:       "python3 showcase/scripts/run_jest.py {targets_file}"
+			test:       "pnpm --filter=@posthog/frontend test:unit -- {targets}"
 			title:      "PostHog Frontend Web Application"
-			typecheck:  "python3 showcase/scripts/typescript_check.py {changed_files}"
-			uses:       []
+			typecheck:  "pnpm --filter=@posthog/frontend typescript:check"
+			uses: []
 			watch_paths: [
 				"frontend/**",
 				"products/*/frontend/**",
@@ -231,17 +227,14 @@ pipeline: {
 			worker: "depot-8"
 		}
 		"quill": {
-			build:  "pnpm --filter=@posthog/quill* build"
+			build: "pnpm --filter=@posthog/quill* build"
 			caches: {}
-			codegen: {}
-			dependsOnComponents: []
-			depends_on:          []
-			description:         "Reusable UI primitives, buttons, badges, and chart components"
+			depends_on: []
+			description: "Reusable UI primitives, buttons, badges, and chart components"
 			jobs: {}
 			lint: "pnpm --filter=@posthog/quill* lint"
 			name: "quill"
 			root: "packages/quill"
-			secrets: {}
 			services: {}
 			tags: [
 				"design-system",
@@ -250,7 +243,7 @@ pipeline: {
 			]
 			technology: "typescript"
 			title:      "PostHog Quill UI & Design System"
-			uses:       []
+			uses: []
 			watch_paths: [
 				"packages/quill/**",
 			]
@@ -265,7 +258,7 @@ pipeline: {
 				"tach.toml",
 				".importlinter",
 			]
-			lint: "python3 showcase/scripts/static_check.py products lint {changed_files}"
+			lint: "tach check --dependencies --interfaces"
 		}
 		"rust_services": {
 			name:       "rust_services"
@@ -275,9 +268,9 @@ pipeline: {
 			watch_paths: [
 				"rust/**",
 			]
-			fmt:  "python3 showcase/scripts/static_check.py rust fmt {changed_files}"
-			lint: "python3 showcase/scripts/static_check.py rust lint {changed_files}"
-			test: "bash showcase/scripts/run_rust_tests.sh {changed_files}"
+			fmt:  "cargo fmt --check"
+			lint: "cargo clippy --workspace --all-targets"
+			test: "cargo test --workspace"
 		}
 		"hogvm": {
 			name:       "hogvm"
@@ -307,26 +300,26 @@ pipeline: {
 			watch_paths: [
 				"nodejs/**",
 			]
-			fmt:   "python3 showcase/scripts/static_check.py nodejs fmt {changed_files}"
-			lint:  "python3 showcase/scripts/static_check.py nodejs lint {changed_files}"
+			fmt:   "pnpm exec oxfmt --check {changed_files}"
+			lint:  "pnpm exec oxlint {changed_files} --quiet"
 			build: "pnpm --filter=@posthog/nodejs build"
 			test:  "pnpm --filter=@posthog/nodejs test"
 			uses: [
 				{
-					protocol: "sql"
-					target:   "postgres"
+					protocol: schema.#Protocol.Sql
+					target:   pipeline.services.postgres
 				},
 				{
-					protocol: "redis"
-					target:   "redis"
+					protocol: schema.#Protocol.Redis
+					target:   pipeline.services.redis
 				},
 				{
-					protocol: "kafka"
-					target:   "kafka"
+					protocol: schema.#Protocol.Kafka
+					target:   pipeline.services.kafka
 				},
 				{
-					protocol: "http"
-					target:   "clickhouse"
+					protocol: schema.#Protocol.Http
+					target:   pipeline.services.clickhouse
 				},
 			]
 		}
@@ -340,20 +333,6 @@ pipeline: {
 			]
 			lint: "golangci-lint run --timeout=5m"
 			test: "go test -v ./..."
-			codegen: {
-				easyjson: {
-					checkUncommitted: true
-					command:          "go run github.com/mailru/easyjson/easyjson@v0.9.0 events/kafka.go && go run github.com/mailru/easyjson/easyjson@v0.9.0 events/filter.go"
-					originDir:        "livestream"
-					outputs: [
-						"events/*_easyjson.go",
-					]
-					watchPaths: [
-						"events/kafka.go",
-						"events/filter.go",
-					]
-				}
-			}
 		}
 		"proto": {
 			name:       "proto"
@@ -375,7 +354,7 @@ pipeline: {
 				".github/actions/**",
 				".github/actionlint.yaml",
 			]
-			lint: "python3 showcase/scripts/static_check.py workflows lint {changed_files}"
+			lint: "actionlint"
 		}
 		"mcp": {
 			name:       "mcp"
@@ -387,8 +366,8 @@ pipeline: {
 				"products/*/mcp/**",
 				"packages/llm-normalizer/**",
 			]
-			fmt:   "python3 showcase/scripts/static_check.py mcp fmt {changed_files}"
-			lint:  "python3 showcase/scripts/static_check.py mcp lint {changed_files}"
+			fmt:   "pnpm exec oxfmt --check {changed_files}"
+			lint:  "pnpm exec oxlint {changed_files} --quiet"
 			build: "pnpm --filter=@posthog/mcp build"
 			test:  "pnpm --filter=@posthog/mcp test:unit"
 		}
@@ -397,6 +376,13 @@ pipeline: {
 			title:      "PostHog Playwright End-to-End Suite"
 			technology: "typescript"
 			root:       "playwright"
+			browsers: {
+				engine: "chromium"
+				path:   "/tmp/.cache/ms-playwright"
+				env:    "PLAYWRIGHT_BROWSERS_PATH"
+				key: ["playwright/package.json", "pnpm-lock.yaml"]
+				artifact: "tools/playwright-browsers-linux-amd64.tar.zst"
+			}
 			tags: [
 				"e2e",
 				"playwright",
@@ -407,8 +393,8 @@ pipeline: {
 				"tools/playwright_spec_selection.py",
 				"tools/playwright_area_map.json",
 			]
-			test: "python3 ../showcase/scripts/run_playwright.py {changed_files}"
-			dependsOnComponents: [
+			test: "pnpm exec playwright test {targets}"
+			depends_on: [
 				"backend",
 				"frontend",
 			]

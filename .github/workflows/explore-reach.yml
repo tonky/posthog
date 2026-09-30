@@ -1,0 +1,67 @@
+name: explore-reach-map
+on:
+    workflow_dispatch:
+        inputs:
+            samples:
+                description: 'Number of stratified seccomp trace samples per component'
+                required: false
+                default: '50'
+            commit:
+                description: 'Commit updated trace-reach.bin directly to branch'
+                required: false
+                default: 'true'
+
+concurrency:
+    group: explore-reach-${{ github.ref }}
+    cancel-in-progress: true
+
+jobs:
+    explore:
+        name: Explore & Pack Binary Reach Map
+        runs-on: ubuntu-latest
+        timeout-minutes: 30
+        steps:
+            - name: Checkout Repository
+              uses: actions/checkout@v7
+              with:
+                  fetch-depth: 100
+                  token: ${{ secrets.GITHUB_TOKEN }}
+
+            - name: Restore enact CLI binary cache
+              id: enact_cli_cache
+              if: hashFiles('bin/enact') == ''
+              continue-on-error: true
+              uses: actions/cache/restore@v6
+              with:
+                  key: ${{ runner.os }}-enact-cli-${{ hashFiles('Cargo.lock', 'crates/**') }}
+                  path: ~/.cargo/bin/enact
+                  restore-keys: ${{ runner.os }}-enact-cli-
+
+            - name: Ensure enve & enact CLI on PATH
+              run: |
+                  git config --global --add safe.directory "*" 2>/dev/null || true
+                  BIN_DIR="${GITHUB_WORKSPACE:-$PWD}/bin"
+                  if [ -d "$BIN_DIR" ]; then
+                    echo "$BIN_DIR" >> "$GITHUB_PATH"
+                  fi
+                  echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+                  export PATH="$BIN_DIR:$HOME/.cargo/bin:$PATH"
+
+            - name: Run Seccomp Reach Exploration
+              env:
+                  INPUT_COMMIT: ${{ inputs.commit }}
+                  INPUT_SAMPLES: ${{ inputs.samples || 50 }}
+              run: |
+                  COMMIT_FLAG=""
+                  if [ "$INPUT_COMMIT" = "true" ]; then
+                    COMMIT_FLAG="--commit"
+                  fi
+                  bash tools/showcase/explore-reach-map.sh -n "$INPUT_SAMPLES" $COMMIT_FLAG
+
+            - name: Upload Binary Reach Map Artifact
+              if: always()
+              uses: actions/upload-artifact@v7
+              with:
+                  name: trace-reach-bin
+                  path: .enact/trace-reach.bin
+                  retention-days: 30

@@ -1,0 +1,634 @@
+name: posthog-showcase-benchmark
+on:
+    workflow_dispatch:
+        inputs:
+            pr:
+                description: 'Upstream PR number or URL (e.g. 108013 or https://github.com/PostHog/posthog/pull/108013)'
+                required: false
+            head_ref:
+                description: 'PR / Feature revision (commit SHA or branch name, e.g. f389926)'
+                required: false
+            base_ref:
+                description: 'Target base branch for diff detection (default: master)'
+                required: false
+                default: 'master'
+            upstream_repo:
+                description: 'Upstream GitHub repo (default: PostHog/posthog)'
+                required: false
+                default: 'PostHog/posthog'
+            no_cache:
+                description: 'Disable enact task cache, forcing full execution'
+                required: false
+                default: 'false'
+            all:
+                description: 'Force execution of all components regardless of git changes'
+                required: false
+                default: 'false'
+    pull_request:
+        branches:
+            - 'showcase/**'
+            - 'perf/**'
+
+permissions: read-all
+
+concurrency:
+    group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}-${{ inputs.pr || github.run_id }}
+    cancel-in-progress: true
+
+env:
+    ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: 'true'
+    COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
+    ENVE_SERVICE_GID: '1000'
+    ENVE_SERVICE_UID: '1000'
+    FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+    GOCACHE: /tmp/go-build
+    GOPATH: /tmp/go
+    UV_CACHE_DIR: /tmp/.cache/uv
+    XDG_CACHE_HOME: /tmp/.cache
+
+jobs:
+    detect:
+        name: Prepare & Detect Affected Components
+        runs-on: ubuntu-latest
+        timeout-minutes: 10
+        outputs:
+            matrix: ${{ steps.diff.outputs.matrix }}
+            base_sha: ${{ steps.prep.outputs.base_sha }}
+            head_sha: ${{ steps.prep.outputs.head_sha }}
+            pr_title: ${{ steps.prep.outputs.pr_title }}
+            pr_url: ${{ steps.prep.outputs.pr_url }}
+            has_upstream_baseline: ${{ steps.prep.outputs.has_upstream_baseline }}
+            upstream_cpu_minutes: ${{ steps.prep.outputs.upstream_cpu_minutes }}
+            upstream_wall_minutes: ${{ steps.prep.outputs.upstream_wall_minutes }}
+        steps:
+            - name: Checkout Repository (sparse)
+              uses: actions/checkout@v7
+              with:
+                  fetch-depth: '100'
+                  fetch-tags: 'false'
+                  filter: blob:none
+                  lfs: 'false'
+                  show-progress: 'false'
+                  sparse-checkout: |-
+                      .enact
+                      cue.mod
+                      .github
+                      bin
+                      tools
+                      showcase
+                      helpers
+                      patches
+                      enve.cue
+                      enve.lock
+                  sparse-checkout-cone-mode: 'true'
+                  submodules: 'false'
+
+            - name: Restore enact CLI binary cache
+              id: enact_cli_cache
+              if: hashFiles('bin/enact') == ''
+              continue-on-error: true
+              uses: actions/cache/restore@v6
+              with:
+                  key: ${{ runner.os }}-enact-cli-${{ hashFiles('Cargo.lock', 'crates/**') }}
+                  path: ~/.cargo/bin/enact
+                  restore-keys: ${{ runner.os }}-enact-cli-
+
+            - name: Ensure enve & enact CLI on PATH
+              run: |
+                  git config --global --add safe.directory "*" 2>/dev/null || true
+                  mkdir -p "$HOME/.cargo/bin" "$HOME/.local/share/enve/store"
+                  if command -v sudo >/dev/null 2>&1; then
+                    sudo mkdir -p -m 0755 /nix 2>/dev/null || true
+                    sudo chown -R $(id -u):$(id -g) /nix 2>/dev/null || true
+                  fi
+                  if [ -d "/nix" ]; then
+                    if [ -d "/nix/store" ] && [ ! -L "/nix/store" ]; then
+                      cp -rn /nix/store/* "$HOME/.local/share/enve/store/" 2>/dev/null || true
+                      rm -rf /nix/store 2>/dev/null || true
+                    fi
+                    ln -sfn "$HOME/.local/share/enve/store" /nix/store 2>/dev/null || true
+                  fi
+                  BIN_DIR="${GITHUB_WORKSPACE:-$PWD}/bin"
+                  if [ -d "$BIN_DIR" ]; then
+                    for b in enact enve; do
+                      if [ -f "$BIN_DIR/$b" ]; then
+                        cp -f "$BIN_DIR/$b" "$HOME/.cargo/bin/" 2>/dev/null || true
+                        chmod +x "$HOME/.cargo/bin/$b" "$BIN_DIR/$b" 2>/dev/null || true
+                      fi
+                    done
+                    echo "$BIN_DIR" >> "$GITHUB_PATH"
+                  fi
+                  echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+                  export PATH="$BIN_DIR:$HOME/.cargo/bin:$PATH"
+
+            - name: Prepare Showcase Environment & Scrape Upstream CI
+              id: prep
+              env:
+                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+                  INPUT_PR: ${{ inputs.pr }}
+                  INPUT_HEAD: ${{ inputs.head_ref || github.event.pull_request.head.sha }}
+                  INPUT_BASE: ${{ inputs.base_ref || github.event.pull_request.base.ref || 'master' }}
+                  INPUT_REPO: ${{ inputs.upstream_repo || 'PostHog/posthog' }}
+              run: |
+                  python3 tools/showcase/prepare-showcase-env.py \
+                    --pr "$INPUT_PR" \
+                    --head "$INPUT_HEAD" \
+                    --base "$INPUT_BASE" \
+                    --repo "$INPUT_REPO" \
+                    --workspace "${GITHUB_WORKSPACE:-$PWD}"
+
+            - name: Compute Affected Component Matrix via Enact Reachability
+              id: diff
+              env:
+                  INPUT_ALL: ${{ inputs.all }}
+                  INPUT_NO_CACHE: ${{ inputs.no_cache }}
+                  BASE_SHA: ${{ steps.prep.outputs.base_sha }}
+              run: |
+                  UPDATED_ARG=""
+                  if [ "$INPUT_ALL" = "true" ]; then
+                    UPDATED_ARG="--all"
+                  fi
+                  NO_CACHE_ARG=""
+                  if [ "$INPUT_NO_CACHE" = "true" ]; then
+                    NO_CACHE_ARG="--no-cache"
+                  fi
+                  BASE_ARG=""
+                  if [ -n "$BASE_SHA" ]; then
+                    BASE_ARG="--base $BASE_SHA"
+                  fi
+                  FILES_ARG=""
+                  if [ -f ".enact/changed-files.txt" ] && [ -s ".enact/changed-files.txt" ]; then
+                    FILES_CSV=$(paste -sd, .enact/changed-files.txt)
+                    if [ -n "$FILES_CSV" ]; then
+                      FILES_ARG="--files $FILES_CSV"
+                    fi
+                  fi
+                  MATRIX=$(enact affected --pipeline .enact --workflow ci $BASE_ARG $FILES_ARG $UPDATED_ARG $NO_CACHE_ARG --format json)
+                  echo "$MATRIX"
+                  echo "matrix=$MATRIX" >> "$GITHUB_OUTPUT"
+
+            - name: Upload Showcase Baseline Artifact
+              uses: actions/upload-artifact@v7
+              with:
+                  name: showcase-baseline
+                  path: |-
+                      .enact/upstream-baseline.json
+                      .enact/changed-files.txt
+                      .enact/trace-reach.bin
+                  retention-days: 1
+
+    static-proof:
+        name: 'Stage: Differential Reachability Proof'
+        needs: [detect]
+        runs-on: ubuntu-latest
+        timeout-minutes: 5
+        steps:
+            - name: Checkout Repository (sparse)
+              uses: actions/checkout@v7
+              with:
+                  fetch-depth: '1'
+                  fetch-tags: 'false'
+                  filter: blob:none
+                  lfs: 'false'
+                  show-progress: 'false'
+                  sparse-checkout: |-
+                      .enact
+                      bin
+                      tools
+                  sparse-checkout-cone-mode: 'false'
+                  submodules: 'false'
+
+            - name: Download Showcase Baseline Artifact
+              uses: actions/download-artifact@v8
+              with:
+                  name: showcase-baseline
+                  path: .enact/
+
+            - name: Restore enact CLI binary cache
+              id: enact_cli_cache
+              if: hashFiles('bin/enact') == ''
+              continue-on-error: true
+              uses: actions/cache/restore@v6
+              with:
+                  key: ${{ runner.os }}-enact-cli-${{ hashFiles('Cargo.lock', 'crates/**') }}
+                  path: ~/.cargo/bin/enact
+                  restore-keys: ${{ runner.os }}-enact-cli-
+
+            - name: Run Independent Static Proof vs Seccomp Reach Map
+              run: |
+                  mkdir -p bin
+                  if [ -f "$HOME/.cargo/bin/enact" ]; then
+                    cp "$HOME/.cargo/bin/enact" bin/enact
+                  fi
+                  chmod +x bin/enact
+
+                  FILES_ARG=""
+                  if [ -s ".enact/changed-files.txt" ]; then
+                    FILES_ARG=$(tr '\n' ',' < .enact/changed-files.txt | sed 's/,$//')
+                  fi
+
+                  echo "::group::Executing Differential Reachability Proof"
+                  bin/enact trace verify \
+                    --reach-file .enact/trace-reach.bin \
+                    --summary-file "$GITHUB_STEP_SUMMARY" \
+                    $FILES_ARG
+                  echo "::endgroup::"
+
+    preflight:
+        name: 'Stage: Preflight'
+        needs: detect
+        runs-on: ubuntu-latest
+        timeout-minutes: 15
+        steps:
+            - name: Checkout Repository (sparse)
+              uses: actions/checkout@v7
+              with:
+                  fetch-depth: '1'
+                  fetch-tags: 'false'
+                  filter: blob:none
+                  lfs: 'false'
+                  show-progress: 'false'
+                  sparse-checkout: |-
+                      .enact
+                      cue.mod
+                      .github
+                      bin
+                      tools
+                      showcase
+                      patches
+                      .
+                      playwright
+                      common/hogvm
+                      livestream
+                      services/mcp
+                      nodejs
+                      proto
+                      packages/quill
+                      tools/hogli-commands
+                  sparse-checkout-cone-mode: 'true'
+                  submodules: 'false'
+
+            - name: Restore enact CLI binary cache
+              id: enact_cli_cache
+              if: hashFiles('bin/enact') == ''
+              continue-on-error: true
+              uses: actions/cache/restore@v6
+              with:
+                  key: ${{ runner.os }}-enact-cli-${{ hashFiles('Cargo.lock', 'crates/**') }}
+                  path: ~/.cargo/bin/enact
+                  restore-keys: ${{ runner.os }}-enact-cli-
+
+            - name: Ensure enve & enact CLI on PATH
+              run: |
+                  git config --global --add safe.directory "*" 2>/dev/null || true
+                  mkdir -p "$HOME/.cargo/bin" "$HOME/.local/share/enve/store"
+                  if command -v sudo >/dev/null 2>&1; then
+                    sudo mkdir -p -m 0755 /nix 2>/dev/null || true
+                    sudo chown -R $(id -u):$(id -g) /nix 2>/dev/null || true
+                  fi
+                  if [ -d "/nix" ]; then
+                    if [ -d "/nix/store" ] && [ ! -L "/nix/store" ]; then
+                      cp -rn /nix/store/* "$HOME/.local/share/enve/store/" 2>/dev/null || true
+                      rm -rf /nix/store 2>/dev/null || true
+                    fi
+                    ln -sfn "$HOME/.local/share/enve/store" /nix/store 2>/dev/null || true
+                  fi
+                  BIN_DIR="${GITHUB_WORKSPACE:-$PWD}/bin"
+                  if [ -d "$BIN_DIR" ]; then
+                    for b in enact enve; do
+                      if [ -f "$BIN_DIR/$b" ]; then
+                        cp -f "$BIN_DIR/$b" "$HOME/.cargo/bin/" 2>/dev/null || true
+                        chmod +x "$HOME/.cargo/bin/$b" "$BIN_DIR/$b" 2>/dev/null || true
+                      fi
+                    done
+                    echo "$BIN_DIR" >> "$GITHUB_PATH"
+                  fi
+                  echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+                  export PATH="$BIN_DIR:$HOME/.cargo/bin:$PATH"
+
+            - name: Restore Nix Store (L1 GHA Cache)
+              id: nix_l1_cache
+              continue-on-error: true
+              uses: actions/cache/restore@v6
+              with:
+                  key: ${{ runner.os }}-nix-store-${{ hashFiles('**/enve.lock') }}
+                  path: |-
+                      /nix/store
+                      ~/.local/share/enve/store
+                  restore-keys: |
+                      ${{ runner.os }}-nix-store-
+
+            - name: Pull Dependencies via enve
+              env:
+                  AWS_ACCESS_KEY_ID: ${{ secrets.ENACT_R2_ACCESS_KEY_ID || env.ENACT_R2_ACCESS_KEY_ID }}
+                  AWS_REGION: auto
+                  AWS_SECRET_ACCESS_KEY: ${{ secrets.ENACT_R2_SECRET_ACCESS_KEY || env.ENACT_R2_SECRET_ACCESS_KEY }}
+                  ENACT_R2_BUCKET: ${{ secrets.ENACT_R2_BUCKET || env.ENACT_R2_BUCKET }}
+                  ENVE_CACHE_CONCURRENCY: '16'
+                  NIX_CACHE_HIT: ${{ steps.nix_l1_cache.outputs.cache-hit }}
+              run: |-
+                  if [ -d "/nix" ]; then
+                    if [ -d "/nix/store" ] && [ ! -L "/nix/store" ]; then
+                      cp -rn /nix/store/* "$HOME/.local/share/enve/store/" 2>/dev/null || true
+                      rm -rf /nix/store 2>/dev/null || true
+                    fi
+                    ln -sfn "$HOME/.local/share/enve/store" /nix/store 2>/dev/null || true
+                  fi
+                  if [ -f "enve.lock" ]; then
+                    if [ "$NIX_CACHE_HIT" != "true" ] && [ -n "$ENACT_R2_BUCKET" ]; then
+                      enve cache pull enve.lock --cache "$ENACT_R2_BUCKET" --insecure -j 16
+                    fi
+                    enve run $([ -f enve.lock ] && echo --locked) -- true
+                  fi
+
+            - name: Restore Node dependency cache
+              id: node_l1_cache
+              continue-on-error: true
+              uses: actions/cache/restore@v6
+              with:
+                  key: ${{ runner.os }}-node-stage-preflight-${{ hashFiles('package.json', 'pnpm-lock.yaml') }}
+                  path: |-
+                      ~/.local/share/pnpm/store
+                      ~/.cache/pnpm
+                      node_modules/.cache
+                  restore-keys: ${{ runner.os }}-node-stage-preflight-
+
+            - name: Install Project Dependencies
+              run: |-
+                  RUN_PREFIX=""
+                  if command -v enve >/dev/null 2>&1 && [ -f "enve.lock" ]; then
+                    RUN_PREFIX="enve run --locked -- "
+                  fi
+                  echo "📦 Installing project dependencies..."
+                  PNPM_FLAGS="--config.audit=false --config.minimum-release-age=0 --config.package-import-method=hardlink"
+                  $RUN_PREFIX pnpm config set fetch-retries 2 2>/dev/null || true
+                  $RUN_PREFIX pnpm config set fetch-retry-maxtimeout 10000 2>/dev/null || true
+                  $RUN_PREFIX pnpm config set network-concurrency 16 2>/dev/null || true
+                  $RUN_PREFIX pnpm install $FILTER_ARGS --frozen-lockfile --offline $PNPM_FLAGS 2>/dev/null || $RUN_PREFIX pnpm install $FILTER_ARGS --frozen-lockfile --prefer-offline $PNPM_FLAGS 2>/dev/null || $RUN_PREFIX pnpm install $FILTER_ARGS --no-frozen-lockfile --prefer-offline $PNPM_FLAGS
+                  git checkout -- pnpm-lock.yaml 2>/dev/null || true
+              env:
+                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+            - name: Execute Stage [Preflight]
+              env:
+                  AWS_ACCESS_KEY_ID: ${{ secrets.ENACT_R2_ACCESS_KEY_ID || env.ENACT_R2_ACCESS_KEY_ID }}
+                  AWS_REGION: auto
+                  AWS_SECRET_ACCESS_KEY: ${{ secrets.ENACT_R2_SECRET_ACCESS_KEY || env.ENACT_R2_SECRET_ACCESS_KEY }}
+                  ENACT_R2_BUCKET: ${{ secrets.ENACT_R2_BUCKET || env.ENACT_R2_BUCKET }}
+                  BASE_SHA: ${{ needs.detect.outputs.base_sha }}
+              run: |-
+                  BASE_ARG=""
+                  if [ -n "$BASE_SHA" ]; then
+                    BASE_ARG="--base $BASE_SHA"
+                  fi
+                  enact run --pipeline .enact $BASE_ARG preflight
+
+            - name: Upload Telemetry for [preflight]
+              if: always()
+              continue-on-error: true
+              uses: actions/upload-artifact@v7
+              with:
+                  if-no-files-found: ignore
+                  name: telemetry-stage-preflight
+                  path: |-
+                      .enact/telemetry.json
+                      .enact/summary.html
+                  retention-days: 1
+
+    test:
+        name: Run Tests (${{ matrix.component }})
+        needs:
+            - detect
+            - preflight
+        if: ${{ needs.detect.outputs.matrix != '{"include":[]}' && needs.detect.outputs.matrix != '[]' && needs.detect.outputs.matrix != '' }}
+        strategy:
+            fail-fast: false
+            max-parallel: 16
+            matrix: ${{ fromJson(needs.detect.outputs.matrix) }}
+        runs-on: ${{ matrix.runs_on }}
+        timeout-minutes: 15
+        steps:
+            - name: Checkout Repository (sparse)
+              if: ${{ matrix.sparse_checkout != '' }}
+              uses: actions/checkout@v7
+              with:
+                  fetch-depth: '1'
+                  fetch-tags: 'false'
+                  filter: blob:none
+                  lfs: 'false'
+                  show-progress: 'false'
+                  sparse-checkout: ${{ matrix.sparse_checkout }}
+                  sparse-checkout-cone-mode: 'true'
+                  submodules: 'false'
+
+            - name: Checkout Repository (full)
+              if: ${{ matrix.sparse_checkout == '' }}
+              uses: actions/checkout@v7
+              with:
+                  fetch-depth: '1'
+                  fetch-tags: 'false'
+                  filter: blob:none
+                  lfs: 'false'
+                  show-progress: 'false'
+                  submodules: 'false'
+
+            - name: Restore enact CLI binary cache
+              id: enact_cli_cache
+              if: hashFiles('bin/enact') == ''
+              continue-on-error: true
+              uses: actions/cache/restore@v6
+              with:
+                  key: ${{ runner.os }}-enact-cli-${{ hashFiles('Cargo.lock', 'crates/**') }}
+                  path: ~/.cargo/bin/enact
+                  restore-keys: ${{ runner.os }}-enact-cli-
+
+            - name: Ensure enve & enact CLI on PATH
+              run: |
+                  git config --global --add safe.directory "*" 2>/dev/null || true
+                  mkdir -p "$HOME/.cargo/bin" "$HOME/.local/share/enve/store"
+                  if command -v sudo >/dev/null 2>&1; then
+                    sudo mkdir -p -m 0755 /nix 2>/dev/null || true
+                    sudo chown -R $(id -u):$(id -g) /nix 2>/dev/null || true
+                  fi
+                  if [ -d "/nix" ]; then
+                    if [ -d "/nix/store" ] && [ ! -L "/nix/store" ]; then
+                      cp -rn /nix/store/* "$HOME/.local/share/enve/store/" 2>/dev/null || true
+                      rm -rf /nix/store 2>/dev/null || true
+                    fi
+                    ln -sfn "$HOME/.local/share/enve/store" /nix/store 2>/dev/null || true
+                  fi
+                  BIN_DIR="${GITHUB_WORKSPACE:-$PWD}/bin"
+                  if [ -d "$BIN_DIR" ]; then
+                    for b in enact enve; do
+                      if [ -f "$BIN_DIR/$b" ]; then
+                        cp -f "$BIN_DIR/$b" "$HOME/.cargo/bin/" 2>/dev/null || true
+                        chmod +x "$HOME/.cargo/bin/$b" "$BIN_DIR/$b" 2>/dev/null || true
+                      fi
+                    done
+                    echo "$BIN_DIR" >> "$GITHUB_PATH"
+                  fi
+                  echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+                  export PATH="$BIN_DIR:$HOME/.cargo/bin:$PATH"
+
+            - name: Restore Nix Store (L1 GHA Cache)
+              id: nix_l1_cache
+              continue-on-error: true
+              uses: actions/cache/restore@v6
+              with:
+                  key: ${{ runner.os }}-nix-store-${{ hashFiles('**/enve.lock') }}
+                  path: |-
+                      /nix/store
+                      ~/.local/share/enve/store
+                  restore-keys: |
+                      ${{ runner.os }}-nix-store-
+
+            - name: Pull Dependencies via enve
+              env:
+                  AWS_ACCESS_KEY_ID: ${{ secrets.ENACT_R2_ACCESS_KEY_ID || env.ENACT_R2_ACCESS_KEY_ID }}
+                  AWS_REGION: auto
+                  AWS_SECRET_ACCESS_KEY: ${{ secrets.ENACT_R2_SECRET_ACCESS_KEY || env.ENACT_R2_SECRET_ACCESS_KEY }}
+                  ENACT_COMPONENT_DIR: ${{ matrix.component_dir }}
+                  ENACT_R2_BUCKET: ${{ secrets.ENACT_R2_BUCKET || env.ENACT_R2_BUCKET }}
+                  ENVE_CACHE_CONCURRENCY: '16'
+                  NIX_CACHE_HIT: ${{ steps.nix_l1_cache.outputs.cache-hit }}
+              run: |-
+                  if [ -d "/nix" ]; then
+                    if [ -d "/nix/store" ] && [ ! -L "/nix/store" ]; then
+                      cp -rn /nix/store/* "$HOME/.local/share/enve/store/" 2>/dev/null || true
+                      rm -rf /nix/store 2>/dev/null || true
+                    fi
+                    ln -sfn "$HOME/.local/share/enve/store" /nix/store 2>/dev/null || true
+                  fi
+                  if [ -f "enve.lock" ]; then
+                    if [ "$NIX_CACHE_HIT" != "true" ] && [ -n "$ENACT_R2_BUCKET" ]; then
+                      enve cache pull enve.lock --cache "$ENACT_R2_BUCKET" --insecure -j 16
+                    fi
+                    enve run $([ -f enve.lock ] && echo --locked) -- true
+                  fi
+                  if [ -n "$ENACT_COMPONENT_DIR" ] && [ "$ENACT_COMPONENT_DIR" != "." ] && [ -f "$ENACT_COMPONENT_DIR/enve.lock" ]; then
+                    if [ "$NIX_CACHE_HIT" != "true" ] && [ -n "$ENACT_R2_BUCKET" ]; then
+                      enve cache pull "$ENACT_COMPONENT_DIR/enve.lock" --cache "$ENACT_R2_BUCKET" --insecure -j 16
+                    fi
+                    (cd "$ENACT_COMPONENT_DIR" && enve run $([ -f enve.lock ] && echo --locked) -- true)
+                  fi
+
+            - name: Install Project Dependencies
+              env:
+                  ENACT_MATRIX_FILTER_ARGS: ${{ matrix.filter_args }}
+                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              run: |-
+                  RUN_PREFIX=""
+                  if command -v enve >/dev/null 2>&1 && [ -f "enve.lock" ]; then
+                    RUN_PREFIX="enve run --locked -- "
+                  fi
+                  FILTER_ARGS="${ENACT_MATRIX_FILTER_ARGS:-}"
+                  echo "📦 Installing project dependencies..."
+                  PNPM_FLAGS="--config.audit=false --config.minimum-release-age=0 --config.package-import-method=hardlink"
+                  $RUN_PREFIX pnpm config set fetch-retries 2 2>/dev/null || true
+                  $RUN_PREFIX pnpm config set fetch-retry-maxtimeout 10000 2>/dev/null || true
+                  $RUN_PREFIX pnpm config set network-concurrency 16 2>/dev/null || true
+                  $RUN_PREFIX pnpm install $FILTER_ARGS --frozen-lockfile --offline $PNPM_FLAGS 2>/dev/null || $RUN_PREFIX pnpm install $FILTER_ARGS --frozen-lockfile --prefer-offline $PNPM_FLAGS 2>/dev/null || $RUN_PREFIX pnpm install $FILTER_ARGS --no-frozen-lockfile --prefer-offline $PNPM_FLAGS
+                  git checkout -- pnpm-lock.yaml 2>/dev/null || true
+
+            - name: Execute Component Task
+              env:
+                  CI_COMPONENT: ${{ matrix.component }}
+                  ENACT_MATRIX_COMMAND: ${{ matrix.command }}
+                  ENACT_MAX_PARALLEL: ${{ matrix.max_parallel }}
+                  ENACT_RUNNER_TIER: ${{ matrix.runner_tier }}
+                  ENACT_TOPOLOGY: ${{ matrix.topology }}
+              run: eval "$ENACT_MATRIX_COMMAND"
+
+            - name: Upload Telemetry for [${{ matrix.component }}]
+              if: always()
+              continue-on-error: true
+              uses: actions/upload-artifact@v7
+              with:
+                  if-no-files-found: ignore
+                  name: telemetry-comp-${{ matrix.component }}
+                  path: |-
+                      .enact/telemetry.json
+                      .enact/summary.html
+                  retention-days: 1
+
+    benchmark:
+        name: Showcase Benchmark & Summary
+        needs:
+            - detect
+            - preflight
+            - test
+        if: always()
+        runs-on: ubuntu-latest
+        timeout-minutes: 5
+        steps:
+            - name: Checkout Repository (sparse)
+              uses: actions/checkout@v7
+              with:
+                  fetch-depth: '1'
+                  fetch-tags: 'false'
+                  filter: blob:none
+                  lfs: 'false'
+                  show-progress: 'false'
+                  sparse-checkout: |-
+                      .enact
+                      cue.mod
+                      .github
+                      bin
+                      tools
+                  sparse-checkout-cone-mode: 'true'
+                  submodules: 'false'
+
+            - name: Restore enact CLI binary cache
+              id: enact_cli_cache
+              if: hashFiles('bin/enact') == ''
+              continue-on-error: true
+              uses: actions/cache/restore@v6
+              with:
+                  key: ${{ runner.os }}-enact-cli-${{ hashFiles('Cargo.lock', 'crates/**') }}
+                  path: ~/.cargo/bin/enact
+                  restore-keys: ${{ runner.os }}-enact-cli-
+
+            - name: Ensure enve & enact CLI on PATH
+              run: |
+                  BIN_DIR="${GITHUB_WORKSPACE:-$PWD}/bin"
+                  if [ -d "$BIN_DIR" ]; then
+                    echo "$BIN_DIR" >> "$GITHUB_PATH"
+                  fi
+                  echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+                  export PATH="$BIN_DIR:$HOME/.cargo/bin:$PATH"
+
+            - name: Download Baseline Data
+              continue-on-error: true
+              uses: actions/download-artifact@v8
+              with:
+                  name: showcase-baseline
+                  path: .enact
+
+            - name: Download All Component Telemetry
+              continue-on-error: true
+              uses: actions/download-artifact@v8
+              with:
+                  path: .enact/telemetry
+                  pattern: telemetry-*
+
+            - name: Generate Consolidated Telemetry Summary
+              continue-on-error: true
+              run: |
+                  if command -v enact >/dev/null 2>&1; then
+                    enact report --dir .enact/telemetry || true
+                  fi
+
+            - name: Generate Head-to-Head Benchmark Report
+              run: |
+                  python3 tools/showcase/report-showcase-benchmark.py \
+                    --workspace "${GITHUB_WORKSPACE:-$PWD}"
+
+            - name: Upload Master Workflow Dashboard
+              if: always()
+              continue-on-error: true
+              uses: actions/upload-artifact@v7
+              with:
+                  if-no-files-found: ignore
+                  name: enact-workflow-summary
+                  path: .enact/summary.html
+                  retention-days: 7
