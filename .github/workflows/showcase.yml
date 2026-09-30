@@ -99,7 +99,7 @@ jobs:
                   mkdir -p "$HOME/.cargo/bin" "$HOME/.local/share/enve/store"
                   if command -v sudo >/dev/null 2>&1; then
                     sudo mkdir -p -m 0755 /nix 2>/dev/null || true
-                    sudo chown -R $(id -u):$(id -g) /nix 2>/dev/null || true
+                    sudo chown -R "$(id -u):$(id -g)" /nix 2>/dev/null || true
                   fi
                   if [ -d "/nix" ]; then
                     if [ -d "/nix/store" ] && [ ! -L "/nix/store" ]; then
@@ -144,6 +144,7 @@ jobs:
                   INPUT_NO_CACHE: ${{ inputs.no_cache }}
                   BASE_SHA: ${{ steps.prep.outputs.base_sha }}
               run: |
+                  # shellcheck disable=SC2086
                   UPDATED_ARG=""
                   if [ "$INPUT_ALL" = "true" ]; then
                     UPDATED_ARG="--all"
@@ -163,6 +164,7 @@ jobs:
                       FILES_ARG="--files $FILES_CSV"
                     fi
                   fi
+                  # shellcheck disable=SC2086
                   MATRIX=$(enact affected --pipeline .enact --workflow ci $BASE_ARG $FILES_ARG $UPDATED_ARG $NO_CACHE_ARG --format json)
                   echo "$MATRIX"
                   echo "matrix=$MATRIX" >> "$GITHUB_OUTPUT"
@@ -216,6 +218,7 @@ jobs:
 
             - name: Run Independent Static Proof vs Seccomp Reach Map
               run: |
+                  # shellcheck disable=SC2086
                   mkdir -p bin
                   if [ -f "$HOME/.cargo/bin/enact" ]; then
                     cp "$HOME/.cargo/bin/enact" bin/enact
@@ -228,6 +231,7 @@ jobs:
                   fi
 
                   echo "::group::Executing Differential Reachability Proof"
+                  # shellcheck disable=SC2086
                   bin/enact trace verify \
                     --reach-file .enact/trace-reach.bin \
                     --summary-file "$GITHUB_STEP_SUMMARY" \
@@ -290,7 +294,7 @@ jobs:
                   mkdir -p "$HOME/.cargo/bin" "$HOME/.local/share/enve/store"
                   if command -v sudo >/dev/null 2>&1; then
                     sudo mkdir -p -m 0755 /nix 2>/dev/null || true
-                    sudo chown -R $(id -u):$(id -g) /nix 2>/dev/null || true
+                    sudo chown -R "$(id -u):$(id -g)" /nix 2>/dev/null || true
                   fi
                   if [ -d "/nix" ]; then
                     if [ -d "/nix/store" ] && [ ! -L "/nix/store" ]; then
@@ -333,6 +337,7 @@ jobs:
                   ENVE_CACHE_CONCURRENCY: '16'
                   NIX_CACHE_HIT: ${{ steps.nix_l1_cache.outputs.cache-hit }}
               run: |-
+                  # shellcheck disable=SC2046
                   if [ -d "/nix" ]; then
                     if [ -d "/nix/store" ] && [ ! -L "/nix/store" ]; then
                       cp -rn /nix/store/* "$HOME/.local/share/enve/store/" 2>/dev/null || true
@@ -344,6 +349,7 @@ jobs:
                     if [ "$NIX_CACHE_HIT" != "true" ] && [ -n "$ENACT_R2_BUCKET" ]; then
                       enve cache pull enve.lock --cache "$ENACT_R2_BUCKET" --insecure -j 16
                     fi
+                    # shellcheck disable=SC2046
                     enve run $([ -f enve.lock ] && echo --locked) -- true
                   fi
 
@@ -370,6 +376,7 @@ jobs:
                   $RUN_PREFIX pnpm config set fetch-retries 2 2>/dev/null || true
                   $RUN_PREFIX pnpm config set fetch-retry-maxtimeout 10000 2>/dev/null || true
                   $RUN_PREFIX pnpm config set network-concurrency 16 2>/dev/null || true
+                  # shellcheck disable=SC2086
                   $RUN_PREFIX pnpm install $FILTER_ARGS --frozen-lockfile --offline $PNPM_FLAGS 2>/dev/null || $RUN_PREFIX pnpm install $FILTER_ARGS --frozen-lockfile --prefer-offline $PNPM_FLAGS 2>/dev/null || $RUN_PREFIX pnpm install $FILTER_ARGS --no-frozen-lockfile --prefer-offline $PNPM_FLAGS
                   git checkout -- pnpm-lock.yaml 2>/dev/null || true
               env:
@@ -394,6 +401,7 @@ jobs:
                   if [ -z "$FILES_ARG" ] && [ -n "$BASE_SHA" ]; then
                     BASE_ARG="--base $BASE_SHA"
                   fi
+                  # shellcheck disable=SC2086
                   enact run --pipeline .enact $FILES_ARG $BASE_ARG preflight
 
             - name: Upload Telemetry for [preflight]
@@ -461,7 +469,7 @@ jobs:
                   mkdir -p "$HOME/.cargo/bin" "$HOME/.local/share/enve/store"
                   if command -v sudo >/dev/null 2>&1; then
                     sudo mkdir -p -m 0755 /nix 2>/dev/null || true
-                    sudo chown -R $(id -u):$(id -g) /nix 2>/dev/null || true
+                    sudo chown -R "$(id -u):$(id -g)" /nix 2>/dev/null || true
                   fi
                   if [ -d "/nix" ]; then
                     if [ -d "/nix/store" ] && [ ! -L "/nix/store" ]; then
@@ -505,6 +513,7 @@ jobs:
                   ENVE_CACHE_CONCURRENCY: '16'
                   NIX_CACHE_HIT: ${{ steps.nix_l1_cache.outputs.cache-hit }}
               run: |-
+                  # shellcheck disable=SC2046
                   if [ -d "/nix" ]; then
                     if [ -d "/nix/store" ] && [ ! -L "/nix/store" ]; then
                       cp -rn /nix/store/* "$HOME/.local/share/enve/store/" 2>/dev/null || true
@@ -516,12 +525,14 @@ jobs:
                     if [ "$NIX_CACHE_HIT" != "true" ] && [ -n "$ENACT_R2_BUCKET" ]; then
                       enve cache pull enve.lock --cache "$ENACT_R2_BUCKET" --insecure -j 16
                     fi
+                    # shellcheck disable=SC2046
                     enve run $([ -f enve.lock ] && echo --locked) -- true
                   fi
                   if [ -n "$ENACT_COMPONENT_DIR" ] && [ "$ENACT_COMPONENT_DIR" != "." ] && [ -f "$ENACT_COMPONENT_DIR/enve.lock" ]; then
                     if [ "$NIX_CACHE_HIT" != "true" ] && [ -n "$ENACT_R2_BUCKET" ]; then
                       enve cache pull "$ENACT_COMPONENT_DIR/enve.lock" --cache "$ENACT_R2_BUCKET" --insecure -j 16
                     fi
+                    # shellcheck disable=SC2046
                     (cd "$ENACT_COMPONENT_DIR" && enve run $([ -f enve.lock ] && echo --locked) -- true)
                   fi
 
@@ -540,6 +551,7 @@ jobs:
                   $RUN_PREFIX pnpm config set fetch-retries 2 2>/dev/null || true
                   $RUN_PREFIX pnpm config set fetch-retry-maxtimeout 10000 2>/dev/null || true
                   $RUN_PREFIX pnpm config set network-concurrency 16 2>/dev/null || true
+                  # shellcheck disable=SC2086
                   $RUN_PREFIX pnpm install $FILTER_ARGS --frozen-lockfile --offline $PNPM_FLAGS 2>/dev/null || $RUN_PREFIX pnpm install $FILTER_ARGS --frozen-lockfile --prefer-offline $PNPM_FLAGS 2>/dev/null || $RUN_PREFIX pnpm install $FILTER_ARGS --no-frozen-lockfile --prefer-offline $PNPM_FLAGS
                   git checkout -- pnpm-lock.yaml 2>/dev/null || true
 
