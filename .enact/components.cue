@@ -201,6 +201,9 @@ pipeline: schema.#Pipeline & {
 			workspace_scope: {
 				include: [
 					"frontend",
+					"products",
+					"packages",
+					"common",
 					"docs/onboarding",
 				]
 			}
@@ -252,7 +255,6 @@ pipeline: schema.#Pipeline & {
 			technology: "typescript"
 			test:       "pnpm --filter=@posthog/frontend exec jest --forceExit {targets}"
 			title:      "PostHog Frontend Web Application"
-			typecheck:  "python3 showcase/scripts/typescript_check.py {changed_files}"
 			uses: []
 			watch_paths: [
 				"frontend/**",
@@ -398,6 +400,13 @@ pipeline: schema.#Pipeline & {
 			title:      "PostHog MCP AI Server & Toolchain"
 			technology: "typescript"
 			root:       "services/mcp"
+			workspace_scope: {
+				include: [
+					"services/mcp",
+					"products/posthog_ai",
+					"products/ai_observability",
+				]
+			}
 			watch_paths: [
 				"services/mcp/**",
 				"products/*/mcp/**",

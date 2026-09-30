@@ -588,11 +588,9 @@ jobs:
                   $RUN_PREFIX pnpm install $FILTER_ARGS --frozen-lockfile --offline $PNPM_FLAGS 2>/dev/null || $RUN_PREFIX pnpm install $FILTER_ARGS --frozen-lockfile --prefer-offline $PNPM_FLAGS 2>/dev/null || $RUN_PREFIX pnpm install $FILTER_ARGS --no-frozen-lockfile --prefer-offline $PNPM_FLAGS
                   git checkout -- pnpm-lock.yaml 2>/dev/null || true
                   if [ -f "pyproject.toml" ] && [[ "$CI_COMPONENT" == *"backend"* || "$CI_TASK_ID" == *"backend"* ]]; then
-                    if [ ! -d ".venv" ] || [ ! -f ".venv/pyvenv.cfg" ]; then
-                      echo "🐍 Provisioning Python virtual environment via uv..."
-                      $RUN_PREFIX uv sync --frozen --compile-bytecode 2>/dev/null || $RUN_PREFIX uv sync --compile-bytecode 2>/dev/null || true
-                      python3 showcase/scripts/backend_runtime.py record 2>/dev/null || true
-                    fi
+                    echo "🐍 Syncing Python virtual environment via uv..."
+                    $RUN_PREFIX uv sync --frozen --compile-bytecode 2>&1 || $RUN_PREFIX uv sync --compile-bytecode 2>&1 || true
+                    python3 showcase/scripts/backend_runtime.py record 2>&1 || true
                   fi
 
             - name: Execute Component Task
