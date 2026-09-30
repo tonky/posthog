@@ -50,9 +50,19 @@ pipeline: schema.#Pipeline & {
 		"backend": {
 			caches: {}
 			description: "Django ASGI server, REST endpoints, ClickHouse queries, and products"
-			fmt:          "uvx ruff format --check {changed_files}"
+			fmt: {
+				command: "uvx ruff format --check {changed_files}"
+				filter: {
+					include: ["*.py", "**/*.py"]
+				}
+			}
 			jobs: {}
-			lint:         "uvx ruff check {changed_files}"
+			lint: {
+				command: "uvx ruff check {changed_files}"
+				filter: {
+					include: ["*.py", "**/*.py"]
+				}
+			}
 			max_shards:   8
 			migrate:      "python manage.py makemigrations --check --dry-run"
 			schema_check: "./bin/hogli build:openapi && git diff --exit-code"
@@ -62,6 +72,13 @@ pipeline: schema.#Pipeline & {
 				memory_mb: 1800
 			}
 			root: "."
+			workspace_scope: {
+				include: [
+					"posthog",
+					"ee",
+					"products",
+				]
+			}
 			scoping: {
 				barrels: []
 				domain_roots: [
@@ -107,7 +124,12 @@ pipeline: schema.#Pipeline & {
 			audit:      "pytest posthog/test/repo_invariants"
 			test:       "pytest -v --tb=short --reuse-db {targets} -m 'not async_migrations'"
 			title:      "PostHog Core Django API & Analytics Backend"
-			typecheck:  "mypy {changed_files}"
+			typecheck: {
+				command: "mypy {changed_files}"
+				filter: {
+					include: ["*.py", "**/*.py"]
+				}
+			}
 			uses: [
 				{
 					protocol: schema.#Protocol.Sql
@@ -145,6 +167,9 @@ pipeline: schema.#Pipeline & {
 				"ee/**",
 				"products/*/backend/**",
 				"products/*/*.py",
+				"pyproject.toml",
+				"uv.lock",
+				"requirements.txt",
 			]
 		}
 		"frontend": {
@@ -239,6 +264,9 @@ pipeline: schema.#Pipeline & {
 			watch_paths: [
 				"frontend/**",
 				"products/*/frontend/**",
+				"tsconfig.json",
+				"package.json",
+				"pnpm-lock.yaml",
 			]
 			worker: "standard"
 		}

@@ -219,7 +219,15 @@ jobs:
                       showcase
                       patches
                       .
+                      posthog
+                      ee
+                      products
                       playwright
+                      frontend
+                      docs/onboarding
+                      frontend/src
+                      common
+                      packages
                       common/hogvm
                       livestream
                       services/mcp

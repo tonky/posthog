@@ -290,6 +290,20 @@ def main():
                 run_cmd(f"git checkout {head_sha} -- {quoted}", cwd=repo_dir, check=False)
         print("   ✓ PR code changes projected successfully.")
 
+        # Package changed files so subsequent workflow stages (preflight, test) can restore them
+        try:
+            existing_pr_files = [f for f in pr_files_to_checkout if (repo_dir / f).exists()]
+            if existing_pr_files:
+                archive_path = enact_dir / "showcase-changes.tar.gz"
+                file_list_path = enact_dir / "pr-files-list.tmp"
+                with open(file_list_path, "w") as fl:
+                    fl.write("\n".join(existing_pr_files) + "\n")
+                run_cmd(f"tar -czf {archive_path} -T {file_list_path}", cwd=repo_dir)
+                file_list_path.unlink(missing_ok=True)
+                print(f"   📦 Packaged {len(existing_pr_files)} PR files into {archive_path}")
+        except Exception as e:
+            print(f"⚠️ Warning: Could not package PR files: {e}")
+
     # 6. Set GitHub Actions outputs
     set_gha_output("base_sha", base_sha)
     set_gha_output("head_sha", head_sha)

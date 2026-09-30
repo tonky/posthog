@@ -172,6 +172,7 @@ jobs:
                       .enact/upstream-baseline.json
                       .enact/changed-files.txt
                       .enact/trace-reach.bin
+                      .enact/showcase-changes.tar.gz
                   retention-days: 1
 
     static-proof:
@@ -256,6 +257,13 @@ jobs:
                       showcase
                       patches
                       .
+                      posthog
+                      ee
+                      products
+                      frontend
+                      frontend/src
+                      common
+                      packages
                       playwright
                       common/hogvm
                       livestream
@@ -272,6 +280,13 @@ jobs:
               with:
                   name: showcase-baseline
                   path: .enact/
+
+            - name: Restore PR Changes
+              run: |
+                  if [ -f ".enact/showcase-changes.tar.gz" ]; then
+                    tar -xzf .enact/showcase-changes.tar.gz
+                    echo "✓ Restored PR changes onto workspace"
+                  fi
 
             - name: Restore enact CLI binary cache
               id: enact_cli_cache
@@ -442,6 +457,19 @@ jobs:
                   lfs: 'false'
                   show-progress: 'false'
                   submodules: 'false'
+
+            - name: Download Showcase Baseline Artifact
+              uses: actions/download-artifact@v8
+              with:
+                  name: showcase-baseline
+                  path: .enact/
+
+            - name: Restore PR Changes
+              run: |
+                  if [ -f ".enact/showcase-changes.tar.gz" ]; then
+                    tar -xzf .enact/showcase-changes.tar.gz
+                    echo "✓ Restored PR changes onto workspace"
+                  fi
 
             - name: Restore enact CLI binary cache
               id: enact_cli_cache
