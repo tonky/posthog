@@ -1306,3 +1306,7 @@ environment:
         bin_script: rasterize-recording-file
         description: 'Render a recording JSONL file to video with the rasterizer'
         hidden: true
+    sqlx:
+        bin_script: sqlx
+        description: 'TODO: add description for sqlx'
+        hidden: true

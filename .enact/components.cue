@@ -20,7 +20,10 @@ pipeline: schema.#Pipeline & {
 		ignore: [
 			".agents/**",
 			".github/ISSUE_TEMPLATE/**",
-			"docs/**",
+			"docs/internal/**",
+			"docs/plans/**",
+			"docs/published/**",
+			"docs/superpowers/**",
 		]
 	}
 	triggers: {
@@ -90,6 +93,9 @@ pipeline: schema.#Pipeline & {
 					"cli",
 					"playwright",
 					".agents",
+					"packages/agent",
+					"frontend/src/lib/agentScopes.generated.ts",
+					"frontend/src/lib/components/AgentObjectTags/objectKinds.generated.ts",
 				]
 			}
 			scoping: {
@@ -223,6 +229,7 @@ pipeline: schema.#Pipeline & {
 					"common",
 					"docs/onboarding",
 					".github/scripts",
+					"playwright",
 				]
 			}
 			scoping: {
@@ -361,6 +368,7 @@ pipeline: schema.#Pipeline & {
 			}
 			watch_paths: [
 				"tools/hogli-commands/**",
+				"hogli.yaml",
 			]
 			test: "uv run --no-sync pytest hogli_commands/tests/test_product_lint_cli.py hogli_commands/tests/test_ast_helpers.py"
 		}
