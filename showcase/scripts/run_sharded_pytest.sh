@@ -68,42 +68,13 @@ if [ "$SERVICES_ACTIVE" = "1" ]; then
     done
 fi
 
-# Enact already assigns targets to each shard; do not split them again in pytest.
 if [ "$TOTAL" -gt 1 ]; then
     WORKER_ID="shard${SHARD}"
-    POSTHOG_DB="test_posthog_${WORKER_ID}"
-    PERSONS_DB="${POSTHOG_DB}_persons"
-    DAGSTER_DB="test_dagster_${WORKER_ID}"
-    CH_DB="posthog_test_${WORKER_ID}"
 
     if [ "$SERVICES_ACTIVE" = "1" ]; then
-        # 1. Clone test_posthog if needed
-        if ! psql -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname = '$POSTHOG_DB'" | rg -q 1; then
-            psql -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" -d postgres -c "CREATE DATABASE $POSTHOG_DB TEMPLATE test_posthog;" >/dev/null 2>&1 || true
-        fi
-
-        # 2. Clone test_posthog_persons if needed
-        if ! psql -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname = '$PERSONS_DB'" | rg -q 1; then
-            psql -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" -d postgres -c "CREATE DATABASE $PERSONS_DB TEMPLATE test_posthog_persons;" >/dev/null 2>&1 || true
-        fi
-
-        # 3. Fresh isolated test_dagster per shard with zero sequence drift
-        if ! psql -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname = '$DAGSTER_DB'" | rg -q 1; then
-            psql -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" -d postgres -c "CREATE DATABASE $DAGSTER_DB;" >/dev/null 2>&1 || true
-        fi
-        psql -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" -d "$DAGSTER_DB" -c "TRUNCATE runs, run_tags, event_logs, daemon_heartbeats, snapshots, backfill_tags, bulk_actions, job_ticks, jobs RESTART IDENTITY CASCADE;" >/dev/null 2>&1 || true
-
-        # 4. ClickHouse isolated database
-        clickhouse-client -q "CREATE DATABASE IF NOT EXISTS $CH_DB;" >/dev/null 2>&1 || true
-
-        # Export isolation variables
-        # TOX_PARALLEL_ENV ensures pytest-django scopes the database name to test_posthog_shard${SHARD}
-        export TOX_PARALLEL_ENV="${WORKER_ID}"
-        export PYTEST_XDIST_WORKER="${WORKER_ID}"
-        export DAGSTER_TEST_POSTGRES_URL="postgresql://${PG_USER}:${PG_USER}@${PG_HOST}:${PG_PORT}/${DAGSTER_DB}"
-        export PERSONS_DB_WRITER_URL="postgres://${PG_USER}:${PG_USER}@${PG_HOST}:${PG_PORT}/${PERSONS_DB}"
-        export PERSONS_DATABASE_URL="postgres://${PG_USER}:${PG_USER}@${PG_HOST}:${PG_PORT}/${PERSONS_DB}"
-        export CLICKHOUSE_DATABASE="${CH_DB}"
+        # shellcheck source=test_databases.sh
+        source "$(dirname "${BASH_SOURCE[0]}")/test_databases.sh"
+        prepare_worker_databases "$WORKER_ID"
     fi
 
     # Memory & Python Runtime Optimizations
@@ -153,8 +124,11 @@ if [ "$TOTAL" -gt 1 ]; then
     code=$?
     exit "$code"
 else
+    WORKER_ID="shard${SHARD:-1}"
     if [ "$SERVICES_ACTIVE" = "1" ]; then
-        export DAGSTER_TEST_POSTGRES_URL="postgresql://${PG_USER}:${PG_USER}@${PG_HOST}:${PG_PORT}/test_dagster"
+        # shellcheck source=test_databases.sh
+        source "$(dirname "${BASH_SOURCE[0]}")/test_databases.sh"
+        prepare_worker_databases "$WORKER_ID"
     fi
     export PYTHONNODEBUGRANGES="${PYTHONNODEBUGRANGES:-1}"
     export PYTHONDONTWRITEBYTECODE="${PYTHONDONTWRITEBYTECODE:-1}"

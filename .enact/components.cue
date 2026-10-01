@@ -69,8 +69,8 @@ pipeline: schema.#Pipeline & {
 			migrate:      "python3 showcase/scripts/migrations_check.py {changed_files}"
 			name:         "backend"
 			resources: {
-				cpus:      1.5
-				memory_mb: 1800
+				cpus:      2.1
+				memory_mb: 2400
 			}
 			root: "."
 			workspace_scope: {
@@ -117,7 +117,7 @@ pipeline: schema.#Pipeline & {
 				universal_symbols: []
 			}
 			services: {}
-			shards: "auto"
+			shards: 4
 			// Python sources and syrupy snapshots map to tests; any other file of the
 			// component (a fixture, a template, SQL, configuration) runs every test.
 			target_scope: {
@@ -380,6 +380,8 @@ pipeline: schema.#Pipeline & {
 					".depot",
 					".semgrep",
 					".postgres-backups",
+					"frontend/package.json",
+					"services/mcp/tsconfig.json",
 				]
 			}
 			watch_paths: [
