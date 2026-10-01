@@ -49,7 +49,20 @@ restore_from_snapshots() {
             echo "✓ Restored test database templates in <3s from snapshot" >&2
             return 0
         fi
-        echo "⚠️ Snapshot restore incomplete; falling back to bootstrap" >&2
+        echo "⚠️ Snapshot restore incomplete; trying backup" >&2
+    fi
+    if [ -f ".postgres-backups/schema-latest.sql.gz" ]; then
+        echo "⚡ Restoring test database templates from .postgres-backups/schema-latest.sql.gz (<3s)" >&2
+        database_exists "$TEMPLATE_DB" || pg -d postgres -c "CREATE DATABASE $TEMPLATE_DB;" >/dev/null
+        database_exists "$TEMPLATE_PERSONS_DB" || pg -d postgres -c "CREATE DATABASE $TEMPLATE_PERSONS_DB;" >/dev/null
+        gunzip -c .postgres-backups/schema-latest.sql.gz | pg -d "$TEMPLATE_DB" 2>/dev/null || true
+        gunzip -c .postgres-backups/schema-latest.sql.gz | pg -d "$TEMPLATE_PERSONS_DB" 2>/dev/null || true
+        if template_ready; then
+            echo "✓ Restored test database templates in <3s from schema-latest.sql.gz" >&2
+            dump_snapshots
+            return 0
+        fi
+        echo "⚠️ schema-latest.sql.gz restore incomplete; falling back to bootstrap" >&2
     fi
     return 1
 }

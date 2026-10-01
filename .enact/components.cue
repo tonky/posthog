@@ -96,6 +96,7 @@ pipeline: schema.#Pipeline & {
 					"packages/agent",
 					"frontend/src/lib/agentScopes.generated.ts",
 					"frontend/src/lib/components/AgentObjectTags/objectKinds.generated.ts",
+					".postgres-backups",
 				]
 			}
 			scoping: {
