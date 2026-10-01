@@ -258,27 +258,15 @@ jobs:
         runs-on: ubuntu-latest
         timeout-minutes: 15
         steps:
-            - name: Checkout Repository (sparse)
+            - name: Checkout Repository
               uses: actions/checkout@v7
               with:
                   fetch-depth: '1'
                   fetch-tags: 'false'
                   lfs: 'false'
                   show-progress: 'false'
-                  sparse-checkout: |-
-                      .enact
-                      cue.mod
-                      .github
-                      bin
-                      tools
-                      showcase
-                      patches
-                      frontend
-                      common
-                      packages
-                      products
-                  sparse-checkout-cone-mode: 'true'
                   submodules: 'false'
+                  persist-credentials: 'false'
 
             - name: Download Showcase Baseline Artifact
               uses: actions/download-artifact@v8
@@ -336,7 +324,7 @@ jobs:
               continue-on-error: true
               uses: actions/cache/restore@v6
               with:
-                  key: ${{ runner.os }}-nix-store-${{ hashFiles('**/enve.lock') }}
+                  key: ${{ runner.os }}-nix-store-${{ needs.detect.outputs.enve_lock_hash }}
                   path: |-
                       /nix/store
                       ~/.local/share/enve/store
@@ -426,6 +414,16 @@ jobs:
                       ~/.cache/pnpm
                       node_modules/.cache
 
+            - name: Save Nix store cache
+              if: always() && steps.nix_l1_cache.outputs.cache-hit != 'true'
+              continue-on-error: true
+              uses: actions/cache/save@v6
+              with:
+                  key: ${{ runner.os }}-nix-store-${{ needs.detect.outputs.enve_lock_hash }}
+                  path: |-
+                      /nix/store
+                      ~/.local/share/enve/store
+
             - name: Upload Telemetry for [preflight]
               if: always()
               continue-on-error: true
@@ -451,21 +449,7 @@ jobs:
         runs-on: ${{ matrix.runs_on }}
         timeout-minutes: 25
         steps:
-            - name: Checkout Repository (sparse)
-              if: ${{ matrix.sparse_checkout != '' }}
-              uses: actions/checkout@v7
-              with:
-                  fetch-depth: '1'
-                  fetch-tags: 'false'
-                  lfs: 'false'
-                  show-progress: 'false'
-                  sparse-checkout: ${{ matrix.sparse_checkout }}
-                  sparse-checkout-cone-mode: 'true'
-                  submodules: 'false'
-                  persist-credentials: 'false'
-
-            - name: Checkout Repository (full)
-              if: ${{ matrix.sparse_checkout == '' }}
+            - name: Checkout Repository
               uses: actions/checkout@v7
               with:
                   fetch-depth: '1'
@@ -580,13 +564,6 @@ jobs:
                   NIX_CACHE_HIT: ${{ steps.nix_l1_cache.outputs.cache-hit }}
               run: |-
                   # shellcheck disable=SC2046
-                  if [ -d "/nix" ]; then
-                    if [ -d "/nix/store" ] && [ ! -L "/nix/store" ]; then
-                      cp -rn /nix/store/* "$HOME/.local/share/enve/store/" 2>/dev/null || true
-                      rm -rf /nix/store 2>/dev/null || true
-                    fi
-                    ln -sfn "$HOME/.local/share/enve/store" /nix/store 2>/dev/null || true
-                  fi
                   PULL_PIDS=()
                   if [ -f "enve.lock" ]; then
                     if [ "$NIX_CACHE_HIT" != "true" ] && [ -n "$ENACT_R2_BUCKET" ]; then
