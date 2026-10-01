@@ -110,7 +110,7 @@ jobs:
                   fi
                   BIN_DIR="${GITHUB_WORKSPACE:-$PWD}/bin"
                   if [ -d "$BIN_DIR" ]; then
-                    for b in enact enve; do
+                    for b in enact enve sqlx; do
                       if [ -f "$BIN_DIR/$b" ]; then
                         cp -f "$BIN_DIR/$b" "$HOME/.cargo/bin/" 2>/dev/null || true
                         chmod +x "$HOME/.cargo/bin/$b" "$BIN_DIR/$b" 2>/dev/null || true
@@ -315,7 +315,7 @@ jobs:
                   fi
                   BIN_DIR="${GITHUB_WORKSPACE:-$PWD}/bin"
                   if [ -d "$BIN_DIR" ]; then
-                    for b in enact enve; do
+                    for b in enact enve sqlx; do
                       if [ -f "$BIN_DIR/$b" ]; then
                         cp -f "$BIN_DIR/$b" "$HOME/.cargo/bin/" 2>/dev/null || true
                         chmod +x "$HOME/.cargo/bin/$b" "$BIN_DIR/$b" 2>/dev/null || true
@@ -512,7 +512,7 @@ jobs:
                   fi
                   BIN_DIR="${GITHUB_WORKSPACE:-$PWD}/bin"
                   if [ -d "$BIN_DIR" ]; then
-                    for b in enact enve; do
+                    for b in enact enve sqlx; do
                       if [ -f "$BIN_DIR/$b" ]; then
                         cp -f "$BIN_DIR/$b" "$HOME/.cargo/bin/" 2>/dev/null || true
                         chmod +x "$HOME/.cargo/bin/$b" "$BIN_DIR/$b" 2>/dev/null || true

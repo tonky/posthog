@@ -19,13 +19,8 @@ pipeline: schema.#Pipeline & {
 		]
 		ignore: [
 			".agents/**",
-			".github/workflows/**",
 			".github/ISSUE_TEMPLATE/**",
-			"docs/internal/**",
-			"docs/plans/**",
-			"docs/published/**",
-			"docs/superpowers/**",
-			"*.md",
+			"docs/**",
 		]
 	}
 	triggers: {
@@ -81,6 +76,20 @@ pipeline: schema.#Pipeline & {
 					"ee",
 					"products",
 					"common",
+					"livestream",
+					".semgrep",
+					"docker",
+					"services",
+					"rust",
+					".github",
+					".depot",
+					"AGENTS.md",
+					"frontend/src/taxonomy/core-filter-definitions-by-group.json",
+					".stamphog",
+					"scripts",
+					"cli",
+					"playwright",
+					".agents",
 				]
 			}
 			scoping: {
