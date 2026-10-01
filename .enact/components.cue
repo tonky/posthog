@@ -14,6 +14,8 @@ pipeline: schema.#Pipeline & {
 			"showcase",
 			"patches",
 			".github/scripts",
+			"packages/owners-yaml",
+			"packages/personhog-proto",
 		]
 		ignore: [
 			".agents/**",
