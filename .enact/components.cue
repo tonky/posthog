@@ -313,6 +313,18 @@ pipeline: schema.#Pipeline & {
 				"packages/quill/**",
 			]
 		}
+		"agent": {
+			build: "pnpm --dir packages/agent run build"
+			description: "PostHog agent runtime and the packages it bundles"
+			name:  "agent"
+			root:  "packages/agent"
+			technology: "typescript"
+			title: "PostHog Agent Runtime & SDKs"
+			watch_paths: [
+				"packages/agent/**",
+			]
+			test: "pnpm --dir packages/agent test"
+		}
 		"product_structure": {
 			name:       "product_structure"
 			title:      "Product structure and isolation"
