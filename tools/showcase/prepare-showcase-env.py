@@ -15,6 +15,7 @@ import os
 import json
 import argparse
 import subprocess
+import tempfile
 from datetime import datetime
 from pathlib import Path
 
@@ -293,16 +294,49 @@ def main():
                 )
                 if res.returncode == 0:
                     dest.parent.mkdir(parents=True, exist_ok=True)
-                    with open(dest, "wb") as out_f:
-                        subprocess.run(
-                            ["git", "show", f"{head_sha}:{f}"],
-                            stdout=out_f,
-                            cwd=repo_dir,
-                            check=True,
+                    # Attempt 3-way merge if file exists locally and in base commit
+                    merged = False
+                    if dest.exists() and base_sha:
+                        has_base = (
+                            subprocess.run(
+                                f"git cat-file -e {base_sha}:'{f}'",
+                                shell=True,
+                                cwd=repo_dir,
+                                stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL,
+                            ).returncode
+                            == 0
                         )
+                        if has_base:
+                            with tempfile.NamedTemporaryFile() as f_base, tempfile.NamedTemporaryFile() as f_other:
+                                subprocess.run(
+                                    ["git", "show", f"{base_sha}:{f}"], stdout=f_base, cwd=repo_dir, check=True
+                                )
+                                subprocess.run(
+                                    ["git", "show", f"{head_sha}:{f}"], stdout=f_other, cwd=repo_dir, check=True
+                                )
+                                f_base.flush()
+                                f_other.flush()
+                                merge_res = subprocess.run(
+                                    ["git", "merge-file", "-p", str(dest), f_base.name, f_other.name],
+                                    cwd=repo_dir,
+                                    capture_output=True,
+                                )
+                                if merge_res.returncode == 0:
+                                    with open(dest, "wb") as out_f:
+                                        out_f.write(merge_res.stdout)
+                                    merged = True
+                    if not merged:
+                        with open(dest, "wb") as out_f:
+                            subprocess.run(
+                                ["git", "show", f"{head_sha}:{f}"],
+                                stdout=out_f,
+                                cwd=repo_dir,
+                                check=True,
+                            )
                 else:
                     dest.unlink(missing_ok=True)
-        print("   ✓ PR code changes projected successfully.")
+        print("   ✓ PR code changes projected successfully (with 3-way merge).")
 
         # Package changed files so subsequent workflow stages (preflight, test) can restore them
         try:

@@ -410,6 +410,17 @@ jobs:
                   # shellcheck disable=SC2086
                   enact run --pipeline .enact $FILES_ARG preflight
 
+            - name: Save Node dependency cache
+              if: always() && steps.node_l1_cache.outputs.cache-hit != 'true'
+              continue-on-error: true
+              uses: actions/cache/save@v6
+              with:
+                  key: ${{ runner.os }}-node-stage-preflight-${{ hashFiles('package.json', 'pnpm-lock.yaml') }}
+                  path: |-
+                      ~/.local/share/pnpm/store
+                      ~/.cache/pnpm
+                      node_modules/.cache
+
             - name: Upload Telemetry for [preflight]
               if: always()
               continue-on-error: true
@@ -530,7 +541,7 @@ jobs:
               continue-on-error: true
               uses: actions/cache/restore@v6
               with:
-                  key: ${{ runner.os }}-python-${{ hashFiles('**/uv.lock', '**/pyproject.toml', '**/requirements.txt', '**/poetry.lock') }}
+                  key: ${{ runner.os }}-python-${{ hashFiles('**/enve.lock', '**/uv.lock', '**/pyproject.toml', '**/requirements.txt', '**/poetry.lock') }}
                   path: |-
                       /tmp/.cache/uv
                       ~/.cache/pip
@@ -608,7 +619,7 @@ jobs:
                   if [ -f "pyproject.toml" ] && [[ "$CI_COMPONENT" == *"backend"* || "$CI_TASK_ID" == *"backend"* ]]; then
                     echo "🐍 Syncing Python virtual environment via uv..."
                     PY_BIN="$($RUN_PREFIX which python3 2>/dev/null || which python3)"
-                    $RUN_PREFIX env -u LD_LIBRARY_PATH UV_PYTHON_DOWNLOADS=automatic uv sync --python "$PY_BIN" --frozen --compile-bytecode --no-install-package pytest-split 2>&1 || $RUN_PREFIX env -u LD_LIBRARY_PATH UV_PYTHON_DOWNLOADS=automatic uv sync --python "$PY_BIN" --compile-bytecode --no-install-package pytest-split 2>&1 || true
+                    $RUN_PREFIX env -u LD_LIBRARY_PATH UV_PYTHON_DOWNLOADS=automatic uv sync --python "$PY_BIN" --frozen --no-install-package pytest-split 2>&1 || $RUN_PREFIX env -u LD_LIBRARY_PATH UV_PYTHON_DOWNLOADS=automatic uv sync --python "$PY_BIN" --no-install-package pytest-split 2>&1 || true
                     $RUN_PREFIX env -u LD_LIBRARY_PATH uv pip install pytest-split 2>&1 || true
                     python3 showcase/scripts/backend_runtime.py record 2>&1 || true
                   fi
@@ -638,7 +649,7 @@ jobs:
               continue-on-error: true
               uses: actions/cache/save@v6
               with:
-                  key: ${{ runner.os }}-python-${{ hashFiles('**/uv.lock', '**/pyproject.toml', '**/requirements.txt', '**/poetry.lock') }}
+                  key: ${{ runner.os }}-python-${{ hashFiles('**/enve.lock', '**/uv.lock', '**/pyproject.toml', '**/requirements.txt', '**/poetry.lock') }}
                   path: |-
                       /tmp/.cache/uv
                       ~/.cache/pip

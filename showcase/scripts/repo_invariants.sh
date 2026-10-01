@@ -19,5 +19,5 @@ if [ -n "${PGPORT:-}" ] && pg_isready -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -q;
     prepare_worker_databases "audit9"
     reuse=(--reuse-db)
 fi
-exec python3 showcase/scripts/backend_runtime.py exec uv run --no-sync python -m pytest \
+exec env -u E2E_TESTING python3 showcase/scripts/backend_runtime.py exec uv run --no-sync python -m pytest \
     -p no:cacheprovider -o pythonhashseed=0 "${reuse[@]}" "${junit[@]}" posthog/test/repo_invariants
