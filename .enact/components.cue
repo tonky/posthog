@@ -14,7 +14,6 @@ pipeline: schema.#Pipeline & {
 			"showcase",
 			"patches",
 			".github/scripts",
-			"enve*",
 		]
 		ignore: [
 			".agents/**",
@@ -167,7 +166,8 @@ pipeline: schema.#Pipeline & {
 				"pyproject.toml",
 				"uv.lock",
 				"requirements.txt",
-				"enve*",
+				"enve.cue",
+				"enve.lock",
 				"bin/**",
 			]
 		}
