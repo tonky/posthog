@@ -166,7 +166,7 @@ pipeline: schema.#Pipeline & {
 			]
 		}
 		"frontend": {
-			build: "pnpm --filter=@posthog/frontend build"
+			build: "pnpm --filter=@posthog/frontend... build"
 			caches: {}
 			depends_on: [
 				{
@@ -253,7 +253,7 @@ pipeline: schema.#Pipeline & {
 				"kea",
 			]
 			technology: "typescript"
-			test:       "pnpm --filter=@posthog/frontend exec jest --forceExit {targets}"
+			test:       "pnpm --filter=@posthog/frontend exec jest --forceExit --passWithNoTests {targets}"
 			title:      "PostHog Frontend Web Application"
 			uses: []
 			watch_paths: [
@@ -403,8 +403,9 @@ pipeline: schema.#Pipeline & {
 			workspace_scope: {
 				include: [
 					"services/mcp",
-					"products/posthog_ai",
-					"products/ai_observability",
+					"packages/quill",
+					"packages/llm-normalizer",
+					"products",
 				]
 			}
 			watch_paths: [
@@ -414,7 +415,7 @@ pipeline: schema.#Pipeline & {
 			]
 			fmt:   "pnpm exec oxfmt --check --no-error-on-unmatched-pattern {relative_changed_files}"
 			lint:  "pnpm exec oxlint --no-error-on-unmatched-pattern {relative_changed_files} --quiet"
-			build: "pnpm --filter=@posthog/mcp build"
+			build: "pnpm --filter=@posthog/mcp... build"
 			test:  "pnpm --filter=@posthog/mcp test --run"
 		}
 		"e2e": {

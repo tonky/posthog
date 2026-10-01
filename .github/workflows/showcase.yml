@@ -377,6 +377,7 @@ jobs:
 
             - name: Install Project Dependencies
               run: |-
+                  git config --unset-all http.https://github.com/.extraheader 2>/dev/null || true
                   RUN_PREFIX=""
                   if command -v enve >/dev/null 2>&1 && [ -f "enve.lock" ]; then
                     RUN_PREFIX="enve run --locked -- "
@@ -446,6 +447,7 @@ jobs:
                   sparse-checkout: ${{ matrix.sparse_checkout }}
                   sparse-checkout-cone-mode: 'true'
                   submodules: 'false'
+                  persist-credentials: 'false'
 
             - name: Checkout Repository (full)
               if: ${{ matrix.sparse_checkout == '' }}
@@ -457,6 +459,7 @@ jobs:
                   lfs: 'false'
                   show-progress: 'false'
                   submodules: 'false'
+                  persist-credentials: 'false'
 
             - name: Download Showcase Baseline Artifact
               uses: actions/download-artifact@v8
@@ -574,6 +577,7 @@ jobs:
                   ENACT_MATRIX_FILTER_ARGS: ${{ matrix.filter_args }}
                   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
               run: |-
+                  git config --unset-all http.https://github.com/.extraheader 2>/dev/null || true
                   RUN_PREFIX=""
                   if command -v enve >/dev/null 2>&1 && [ -f "enve.lock" ]; then
                     RUN_PREFIX="enve run --locked -- "
