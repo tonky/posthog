@@ -57,16 +57,32 @@ restore_from_snapshots() {
         database_exists "$TEMPLATE_PERSONS_DB" || pg -d postgres -c "CREATE DATABASE $TEMPLATE_PERSONS_DB;" >/dev/null
         local psql_restore="psql -h $PGHOST -p $PGPORT -U $PGUSER -q"
         gunzip -c .postgres-backups/schema-latest.sql.gz | $psql_restore -d "$TEMPLATE_DB" 2>/dev/null || true
-        
-        # Apply persons migrations to TEMPLATE_PERSONS_DB using sqlx
-        local sqlx_bin="sqlx"
-        [ -x "bin/sqlx" ] && sqlx_bin="bin/sqlx"
-        if command -v "$sqlx_bin" >/dev/null 2>&1; then
-            DATABASE_URL="postgres://${PGUSER}:${PGPASSWORD:-posthog}@${PGHOST}:${PGPORT}/${TEMPLATE_PERSONS_DB}" \
-                "$sqlx_bin" migrate run --source rust/persons_migrations >/dev/null 2>&1 || true
-        elif [ -f "posthog/management/commands/apply_persons_migrations.py" ]; then
-            PERSONS_DB_WRITER_URL="postgres://${PGUSER}:${PGPASSWORD:-posthog}@${PGHOST}:${PGPORT}/${TEMPLATE_PERSONS_DB}" \
-                python3 showcase/scripts/backend_runtime.py exec uv run --no-sync python manage.py apply_persons_migrations >/dev/null 2>&1 || true
+        gunzip -c .postgres-backups/schema-latest.sql.gz | $psql_restore -d "$TEMPLATE_PERSONS_DB" 2>/dev/null || true
+
+        # Ensure _sqlx_migrations tracking table exists and marks rust/persons_migrations as applied
+        # so subsequent sqlx migrate run in conftest is an instant (<0.01s) no-op without collisions.
+        pg -d "$TEMPLATE_PERSONS_DB" -c "
+            CREATE TABLE IF NOT EXISTS _sqlx_migrations (
+                version BIGINT PRIMARY KEY,
+                description TEXT NOT NULL,
+                installed_on TIMESTAMPTZ NOT NULL DEFAULT now(),
+                success BOOLEAN NOT NULL,
+                checksum BYTEA NOT NULL,
+                execution_time BIGINT NOT NULL
+            );
+        " >/dev/null 2>&1 || true
+        if [ -d "rust/persons_migrations" ]; then
+            for f in rust/persons_migrations/*.sql; do
+                [ -f "$f" ] || continue
+                fname=$(basename "$f")
+                version=$(echo "$fname" | cut -d'_' -f1)
+                desc=$(echo "$fname" | cut -d'_' -f2- | sed 's/\.sql$//' | tr '_' ' ')
+                pg -d "$TEMPLATE_PERSONS_DB" -c "
+                    INSERT INTO _sqlx_migrations (version, description, success, checksum, execution_time)
+                    VALUES ($version, '$desc', true, E'\\\\x00', 1)
+                    ON CONFLICT (version) DO NOTHING;
+                " >/dev/null 2>&1 || true
+            done
         fi
         if template_ready; then
             echo "✓ Restored test database templates in <3s from schema-latest.sql.gz" >&2

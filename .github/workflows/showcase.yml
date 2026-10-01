@@ -529,12 +529,15 @@ jobs:
                     continue-on-error: true
                     uses: actions/cache/restore@v6
                     with:
-                        key: ${{ runner.os }}-python-${{ hashFiles('**/enve.lock', '**/uv.lock', '**/pyproject.toml', '**/requirements.txt', '**/poetry.lock') }}
+                        key: ${{ runner.os }}-python-${{ hashFiles('enve.lock', 'uv.lock', 'pyproject.toml') }}
                         path: |-
+                            ~/.cache/uv
                             /tmp/.cache/uv
                             ~/.cache/pip
                             .venv
-                        restore-keys: ${{ runner.os }}-python-
+                        restore-keys: |
+                            ${{ runner.os }}-python-${{ hashFiles('enve.lock') }}-
+                            ${{ runner.os }}-python-
 
                   - name: Restore Node dependency cache
                     id: node_l1_cache
@@ -569,18 +572,26 @@ jobs:
                     fi
                     ln -sfn "$HOME/.local/share/enve/store" /nix/store 2>/dev/null || true
                   fi
+                  PULL_PIDS=()
                   if [ -f "enve.lock" ]; then
                     if [ "$NIX_CACHE_HIT" != "true" ] && [ -n "$ENACT_R2_BUCKET" ]; then
-                      enve cache pull enve.lock --cache "$ENACT_R2_BUCKET" --insecure -j 16
+                      enve cache pull enve.lock --cache "$ENACT_R2_BUCKET" --insecure -j 16 &
+                      PULL_PIDS+=($!)
                     fi
-                    # shellcheck disable=SC2046
-                    enve run $([ -f enve.lock ] && echo --locked) -- true
                   fi
                   if [ -n "$ENACT_COMPONENT_DIR" ] && [ "$ENACT_COMPONENT_DIR" != "." ] && [ -f "$ENACT_COMPONENT_DIR/enve.lock" ]; then
                     if [ "$NIX_CACHE_HIT" != "true" ] && [ -n "$ENACT_R2_BUCKET" ]; then
-                      enve cache pull "$ENACT_COMPONENT_DIR/enve.lock" --cache "$ENACT_R2_BUCKET" --insecure -j 16
+                      enve cache pull "$ENACT_COMPONENT_DIR/enve.lock" --cache "$ENACT_R2_BUCKET" --insecure -j 16 &
+                      PULL_PIDS+=($!)
                     fi
-                    # shellcheck disable=SC2046
+                  fi
+                  for pid in "${PULL_PIDS[@]}"; do
+                    wait "$pid"
+                  done
+                  if [ -f "enve.lock" ]; then
+                    enve run $([ -f enve.lock ] && echo --locked) -- true
+                  fi
+                  if [ -n "$ENACT_COMPONENT_DIR" ] && [ "$ENACT_COMPONENT_DIR" != "." ] && [ -f "$ENACT_COMPONENT_DIR/enve.lock" ]; then
                     (cd "$ENACT_COMPONENT_DIR" && enve run $([ -f enve.lock ] && echo --locked) -- true)
                   fi
 
@@ -597,7 +608,8 @@ jobs:
                     RUN_PREFIX="enve run --locked -- "
                   fi
                   FILTER_ARGS="${ENACT_MATRIX_FILTER_ARGS:-}"
-                  if [[ "$CI_COMPONENT" != *"backend"* ]]; then
+
+                  install_node() {
                     echo "📦 Installing Node project dependencies..."
                     PNPM_FLAGS="--config.audit=false --config.minimum-release-age=0 --config.package-import-method=hardlink"
                     $RUN_PREFIX pnpm config set fetch-retries 2 2>/dev/null || true
@@ -606,14 +618,36 @@ jobs:
                     # shellcheck disable=SC2086
                     $RUN_PREFIX pnpm install $FILTER_ARGS --frozen-lockfile --offline $PNPM_FLAGS 2>/dev/null || $RUN_PREFIX pnpm install $FILTER_ARGS --frozen-lockfile --prefer-offline $PNPM_FLAGS 2>/dev/null || $RUN_PREFIX pnpm install $FILTER_ARGS --no-frozen-lockfile --prefer-offline $PNPM_FLAGS
                     git checkout -- pnpm-lock.yaml 2>/dev/null || true
-                  fi
-                  if [ -f "pyproject.toml" ] && [[ "$CI_COMPONENT" == *"backend"* || "$CI_TASK_ID" == *"backend"* || "$CI_COMPONENT" == *"mcp"* ]]; then
+                  }
+
+                  install_python() {
                     echo "🐍 Syncing Python virtual environment via uv..."
                     PY_BIN="$($RUN_PREFIX which python3 2>/dev/null || which python3)"
+                    if [ -d ".venv" ]; then
+                      ln -sfn "$PY_BIN" .venv/bin/python 2>/dev/null || true
+                      ln -sfn "$PY_BIN" .venv/bin/python3 2>/dev/null || true
+                      if [ -f ".venv/pyvenv.cfg" ]; then
+                        PY_HOME="$(dirname "$PY_BIN")"
+                        sed -i "s|^home = .*|home = $PY_HOME|" .venv/pyvenv.cfg 2>/dev/null || true
+                      fi
+                    fi
                     $RUN_PREFIX env -u LD_LIBRARY_PATH UV_PYTHON_DOWNLOADS=automatic uv sync --python "$PY_BIN" --frozen --no-install-package pytest-split 2>&1 || $RUN_PREFIX env -u LD_LIBRARY_PATH UV_PYTHON_DOWNLOADS=automatic uv sync --python "$PY_BIN" --no-install-package pytest-split 2>&1 || true
                     $RUN_PREFIX env -u LD_LIBRARY_PATH uv pip install pytest-split 2>&1 || true
                     python3 showcase/scripts/backend_runtime.py record 2>&1 || true
+                  }
+
+                  PID_NODE=""
+                  PID_PY=""
+                  if [[ "$CI_COMPONENT" != *"backend"* ]]; then
+                    install_node &
+                    PID_NODE=$!
                   fi
+                  if [ -f "pyproject.toml" ] && [[ "$CI_COMPONENT" == *"backend"* || "$CI_TASK_ID" == *"backend"* || "$CI_COMPONENT" == *"mcp"* ]]; then
+                    install_python &
+                    PID_PY=$!
+                  fi
+                  [ -n "$PID_NODE" ] && wait "$PID_NODE"
+                  [ -n "$PID_PY" ] && wait "$PID_PY"
 
             - name: Execute Component Task
               env:
@@ -640,8 +674,9 @@ jobs:
               continue-on-error: true
               uses: actions/cache/save@v6
               with:
-                  key: ${{ runner.os }}-python-${{ hashFiles('**/enve.lock', '**/uv.lock', '**/pyproject.toml', '**/requirements.txt', '**/poetry.lock') }}
+                  key: ${{ runner.os }}-python-${{ hashFiles('enve.lock', 'uv.lock', 'pyproject.toml') }}
                   path: |-
+                      ~/.cache/uv
                       /tmp/.cache/uv
                       ~/.cache/pip
                       .venv

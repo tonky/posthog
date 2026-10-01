@@ -69,7 +69,7 @@ pipeline: schema.#Pipeline & {
 			migrate:      "python3 showcase/scripts/migrations_check.py {changed_files}"
 			name:         "backend"
 			resources: {
-				cpus:      2.1
+				cpus:      1.0
 				memory_mb: 2400
 			}
 			root: "."
