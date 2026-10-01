@@ -459,6 +459,13 @@ jobs:
                   submodules: 'false'
                   persist-credentials: 'false'
 
+            - name: Prepare /nix directory permissions
+              run: |
+                  if command -v sudo >/dev/null 2>&1; then
+                    sudo mkdir -p -m 0755 /nix 2>/dev/null || true
+                    sudo chown -R "$(id -u):$(id -g)" /nix 2>/dev/null || true
+                  fi
+
             - parallel:
                   - name: Download Showcase Baseline Artifact
                     uses: actions/download-artifact@v8
