@@ -9,6 +9,7 @@
 # ==============================================================================
 set -euo pipefail
 unset LD_PRELOAD
+unset LD_LIBRARY_PATH
 
 SHARD="${ENACT_SHARD_INDEX:-${SHARD:-1}}"
 TOTAL="${ENACT_SHARD_TOTAL:-${TOTAL_SHARDS:-1}}"

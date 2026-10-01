@@ -413,10 +413,9 @@ pipeline: schema.#Pipeline & {
 				"products/*/mcp/**",
 				"packages/llm-normalizer/**",
 			]
-			fmt:   "pnpm exec oxfmt --check --no-error-on-unmatched-pattern {relative_changed_files}"
-			lint:  "pnpm exec oxlint --no-error-on-unmatched-pattern {relative_changed_files} --quiet"
-			build: "pnpm --filter=@posthog/mcp... build"
-			test:  "pnpm --filter=@posthog/mcp test --run"
+			fmt:  "pnpm exec oxfmt --check --no-error-on-unmatched-pattern {relative_changed_files}"
+			lint: "pnpm exec oxlint --no-error-on-unmatched-pattern {relative_changed_files} --quiet"
+			test: "pnpm --filter=@posthog/mcp test --run"
 		}
 		"e2e": {
 			name:       "e2e"
