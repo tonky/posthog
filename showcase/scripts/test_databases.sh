@@ -55,8 +55,9 @@ restore_from_snapshots() {
         echo "⚡ Restoring test database templates from .postgres-backups/schema-latest.sql.gz (<3s)" >&2
         database_exists "$TEMPLATE_DB" || pg -d postgres -c "CREATE DATABASE $TEMPLATE_DB;" >/dev/null
         database_exists "$TEMPLATE_PERSONS_DB" || pg -d postgres -c "CREATE DATABASE $TEMPLATE_PERSONS_DB;" >/dev/null
-        gunzip -c .postgres-backups/schema-latest.sql.gz | pg -d "$TEMPLATE_DB" 2>/dev/null || true
-        gunzip -c .postgres-backups/schema-latest.sql.gz | pg -d "$TEMPLATE_PERSONS_DB" 2>/dev/null || true
+        local psql_restore="psql -h $PGHOST -p $PGPORT -U $PGUSER -q"
+        gunzip -c .postgres-backups/schema-latest.sql.gz | $psql_restore -d "$TEMPLATE_DB" 2>/dev/null || true
+        gunzip -c .postgres-backups/schema-latest.sql.gz | $psql_restore -d "$TEMPLATE_PERSONS_DB" 2>/dev/null || true
         if template_ready; then
             echo "✓ Restored test database templates in <3s from schema-latest.sql.gz" >&2
             dump_snapshots
