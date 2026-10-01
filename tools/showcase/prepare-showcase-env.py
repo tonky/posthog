@@ -282,12 +282,26 @@ def main():
         protected_prefixes = (".enact", "enve.cue", "enve.lock", "showcase", "helpers", ".github/workflows")
         pr_files_to_checkout = [f for f in changed_files if not any(f.startswith(p) for p in protected_prefixes)]
         if pr_files_to_checkout:
-            # Batch checkout changed files
-            chunk_size = 50
-            for i in range(0, len(pr_files_to_checkout), chunk_size):
-                chunk = pr_files_to_checkout[i : i + chunk_size]
-                quoted = " ".join(f"'{f}'" for f in chunk)
-                run_cmd(f"git checkout {head_sha} -- {quoted}", cwd=repo_dir, check=False)
+            for f in pr_files_to_checkout:
+                dest = repo_dir / f
+                res = subprocess.run(
+                    f"git cat-file -e {head_sha}:'{f}'",
+                    shell=True,
+                    cwd=repo_dir,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                if res.returncode == 0:
+                    dest.parent.mkdir(parents=True, exist_ok=True)
+                    with open(dest, "wb") as out_f:
+                        subprocess.run(
+                            ["git", "show", f"{head_sha}:{f}"],
+                            stdout=out_f,
+                            cwd=repo_dir,
+                            check=True,
+                        )
+                else:
+                    dest.unlink(missing_ok=True)
         print("   ✓ PR code changes projected successfully.")
 
         # Package changed files so subsequent workflow stages (preflight, test) can restore them

@@ -537,6 +537,20 @@ jobs:
                       .venv
                   restore-keys: ${{ runner.os }}-python-
 
+            - name: Restore Node dependency cache
+              id: node_l1_cache
+              continue-on-error: true
+              uses: actions/cache/restore@v6
+              with:
+                  key: ${{ runner.os }}-node-${{ matrix.task_id }}-${{ hashFiles('package.json', 'pnpm-lock.yaml') }}
+                  path: |-
+                      ~/.local/share/pnpm/store
+                      ~/.cache/pnpm
+                      node_modules/.cache
+                  restore-keys: |
+                      ${{ runner.os }}-node-${{ matrix.task_id }}-
+                      ${{ runner.os }}-node-
+
             - name: Pull Dependencies via enve
               env:
                   AWS_ACCESS_KEY_ID: ${{ secrets.ENACT_R2_ACCESS_KEY_ID || env.ENACT_R2_ACCESS_KEY_ID }}
@@ -607,8 +621,19 @@ jobs:
                   ENACT_TOPOLOGY: ${{ matrix.topology }}
               run: eval "$ENACT_MATRIX_COMMAND"
 
+            - name: Save Node dependency cache
+              if: always() && steps.node_l1_cache.outputs.cache-hit != 'true'
+              continue-on-error: true
+              uses: actions/cache/save@v6
+              with:
+                  key: ${{ runner.os }}-node-${{ matrix.task_id }}-${{ hashFiles('package.json', 'pnpm-lock.yaml') }}
+                  path: |-
+                      ~/.local/share/pnpm/store
+                      ~/.cache/pnpm
+                      node_modules/.cache
+
             - name: Save Python build & venv cache
-              if: (github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch') && hashFiles('pyproject.toml', 'requirements.txt') != '' && steps.python_l1_cache.outputs.cache-hit != 'true'
+              if: always() && hashFiles('pyproject.toml', 'requirements.txt') != '' && steps.python_l1_cache.outputs.cache-hit != 'true'
               continue-on-error: true
               uses: actions/cache/save@v6
               with:

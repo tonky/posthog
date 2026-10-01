@@ -116,6 +116,10 @@ def main():
         except Exception:
             pass
 
+    execution_records = enact_data.get("execution_records", []) or enact_data.get("jobs", [])
+    failed_jobs = [j for j in execution_records if str(j.get("status", "")).lower() == "failed"]
+    status_str = f"🔴 **Failed** ({len(failed_jobs)} task(s) failed)" if failed_jobs else "🟢 **Passed** (100% green)"
+
     # Build Markdown Report
     lines = [
         f"# ⚡ Head-to-Head Showcase: Upstream CI vs. Enact Accelerated CI",
@@ -128,6 +132,7 @@ def main():
         "",
         "| Performance Metric | Upstream CI Baseline | Enact Modernized Run | Improvement Factor |",
         "| :--- | :--- | :--- | :--- |",
+        f"| **Pipeline Status** | Scraped from GitHub API | {status_str} | {'⚠️ Verification Failure' if failed_jobs else '✨ 100% Sound'} |",
         f"| **Wall Duration (End-to-End)** | **{format_duration(upstream_wall_s)}** | **{format_duration(enact_wall_s)}** | 🚀 **{speedup}x faster** |",
         f"| **Total CPU Consumption** | **{upstream_cpu_s / 60.0:.1f} CPU min** | **{enact_cpu_s / 60.0:.1f} CPU min** | 📉 **{cpu_reduction}% less compute** |",
         f"| **Estimated Runner Cost** | **${upstream_cost:.2f}** | **${enact_cost:.2f}** | 💰 **{cost_savings}% cheaper** |",
@@ -136,13 +141,39 @@ def main():
         "",
         "---",
         "",
-        "### 🔍 Architectural Highlights",
-        "",
-        "- **Instant Dynamic Reachability**: Targets were dynamically resolved via `.enact/trace-reach.bin` in **<2ms**, avoiding unnecessary test execution.",
-        "- **Zero-Docker Isolation**: All services (PostgreSQL, Redis, ClickHouse, etc.) executed daemonless in unprivileged user space on ephemeral RAM disks (`/dev/shm`).",
-        "- **Fail-Fast Preflight Quality Gate**: Linting, formatting, migration checks, and schema validation completed in under 10 seconds before tests started.",
-        "",
     ]
+
+    if failed_jobs:
+        lines.extend(
+            [
+                "### ❌ Failed Tasks in Run",
+                "",
+                "| Component | Task / Job | Status | Duration | Peak RAM |",
+                "| :--- | :--- | :--- | :--- | :--- |",
+            ]
+        )
+        for fj in failed_jobs:
+            comp = fj.get("component", "unknown")
+            j_name = fj.get("job", "unknown")
+            shard = fj.get("shard_index")
+            shard_label = f"{j_name} [shard {shard}]" if shard is not None else j_name
+            dur_ms = fj.get("duration_ms", 0)
+            ram = fj.get("metrics", {}).get("peak_ram_bytes", 0) / (1024 * 1024)
+            lines.append(
+                f"| `{comp}` | `{shard_label}` | ❌ Failed | {format_duration(dur_ms / 1000.0)} | {ram:.1f} MB |"
+            )
+        lines.extend(["", "---", ""])
+
+    lines.extend(
+        [
+            "### 🔍 Architectural Highlights",
+            "",
+            "- **Instant Dynamic Reachability**: Targets were dynamically resolved via `.enact/trace-reach.bin` in **<2ms**, avoiding unnecessary test execution.",
+            "- **Zero-Docker Isolation**: All services (PostgreSQL, Redis, ClickHouse, etc.) executed daemonless in unprivileged user space on ephemeral RAM disks (`/dev/shm`).",
+            "- **Fail-Fast Preflight Quality Gate**: Linting, formatting, migration checks, and schema validation completed in under 10 seconds before tests started.",
+            "",
+        ]
+    )
 
     if changed_files:
         lines.extend(

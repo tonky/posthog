@@ -76,6 +76,7 @@ pipeline: schema.#Pipeline & {
 					"posthog",
 					"ee",
 					"products",
+					"common",
 				]
 			}
 			scoping: {
@@ -407,6 +408,7 @@ pipeline: schema.#Pipeline & {
 					"packages/llm-normalizer",
 					"products",
 					"frontend/src/mocks",
+					"frontend/bin",
 				]
 			}
 			watch_paths: [
