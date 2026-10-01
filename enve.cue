@@ -550,7 +550,7 @@ profiles: {
         "watchexec",
         {
             "pname": "python3",
-            "version": "3.13.13"
+            "version": "3.14.7"
         },
         {
             "pname": "uv",

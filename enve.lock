@@ -2848,8 +2848,8 @@
         },
         "python3": {
           "bin": "bin/python3",
-          "closure": "60m4rxhg2fldqaak400c0lry96ijrzqn-python3-3.13.13",
-          "version": "3.13.13"
+          "closure": "d64q19q1xjdwfhqx6czvrjgrhq0n3lcc-python3-3.14.7",
+          "version": "3.14.7"
         },
         "redis": {
           "bin": "bin",

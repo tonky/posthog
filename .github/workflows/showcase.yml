@@ -607,7 +607,8 @@ jobs:
                   git checkout -- pnpm-lock.yaml 2>/dev/null || true
                   if [ -f "pyproject.toml" ] && [[ "$CI_COMPONENT" == *"backend"* || "$CI_TASK_ID" == *"backend"* ]]; then
                     echo "🐍 Syncing Python virtual environment via uv..."
-                    $RUN_PREFIX env -u LD_LIBRARY_PATH uv sync --frozen --compile-bytecode --no-install-package pytest-split 2>&1 || $RUN_PREFIX env -u LD_LIBRARY_PATH uv sync --compile-bytecode --no-install-package pytest-split 2>&1 || true
+                    PY_BIN="$($RUN_PREFIX which python3 2>/dev/null || which python3)"
+                    $RUN_PREFIX env -u LD_LIBRARY_PATH UV_PYTHON_DOWNLOADS=automatic uv sync --python "$PY_BIN" --frozen --compile-bytecode --no-install-package pytest-split 2>&1 || $RUN_PREFIX env -u LD_LIBRARY_PATH UV_PYTHON_DOWNLOADS=automatic uv sync --python "$PY_BIN" --compile-bytecode --no-install-package pytest-split 2>&1 || true
                     $RUN_PREFIX env -u LD_LIBRARY_PATH uv pip install pytest-split 2>&1 || true
                     python3 showcase/scripts/backend_runtime.py record 2>&1 || true
                   fi

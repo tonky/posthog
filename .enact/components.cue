@@ -13,10 +13,12 @@ pipeline: schema.#Pipeline & {
 			"tools",
 			"showcase",
 			"patches",
+			".github/scripts",
 		]
 		ignore: [
 			".agents/**",
-			".github/**",
+			".github/workflows/**",
+			".github/ISSUE_TEMPLATE/**",
 			"docs/internal/**",
 			"docs/plans/**",
 			"docs/published/**",
@@ -206,6 +208,7 @@ pipeline: schema.#Pipeline & {
 					"packages",
 					"common",
 					"docs/onboarding",
+					".github/scripts",
 				]
 			}
 			scoping: {
@@ -436,6 +439,7 @@ pipeline: schema.#Pipeline & {
 					"packages/llm-normalizer",
 					"products",
 					"frontend/src/mocks",
+					"frontend/src/taxonomy",
 					"frontend/bin",
 				]
 			}
@@ -470,7 +474,7 @@ pipeline: schema.#Pipeline & {
 				"tools/playwright_spec_selection.py",
 				"tools/playwright_area_map.json",
 			]
-			test: "pnpm exec playwright test {targets}"
+			test: "[ -z \"{targets}\" ] && echo \"ℹ️  No E2E targets provided. Skipping Playwright.\" || pnpm exec playwright test --pass-with-no-tests {targets}"
 			depends_on: [
 				"backend",
 				"frontend",

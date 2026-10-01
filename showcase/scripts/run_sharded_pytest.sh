@@ -10,10 +10,8 @@
 set -euo pipefail
 unset LD_PRELOAD
 
-# Ensure libstdc++.so.6 is discoverable for C-extensions (grpc, etc.)
+# Ensure libstdc++.so.6 is discoverable for C-extensions (grpc, etc.) without shadowing glibc
 for candidate in \
-    /usr/lib/x86_64-linux-gnu \
-    /lib/x86_64-linux-gnu \
     /nix/store/*-gcc-*-lib/lib \
     "$HOME/.local/share/enve/store"/*-gcc-*-lib/lib; do
     if [ -d "$candidate" ] && [ -f "$candidate/libstdc++.so.6" ]; then
@@ -21,6 +19,17 @@ for candidate in \
         break
     fi
 done
+
+if [[ "${LD_LIBRARY_PATH:-}" != *"gcc"* ]]; then
+    mkdir -p /tmp/enve-extra-libs
+    for host_lib in /usr/lib/x86_64-linux-gnu/libstdc++.so.6 /lib/x86_64-linux-gnu/libstdc++.so.6; do
+        if [ -f "$host_lib" ]; then
+            ln -sf "$host_lib" /tmp/enve-extra-libs/libstdc++.so.6 2>/dev/null || true
+            export LD_LIBRARY_PATH="/tmp/enve-extra-libs${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+            break
+        fi
+    done
+fi
 
 SHARD="${ENACT_SHARD_INDEX:-${SHARD:-1}}"
 TOTAL="${ENACT_SHARD_TOTAL:-${TOTAL_SHARDS:-1}}"
