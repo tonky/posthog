@@ -91,6 +91,9 @@ pipeline: schema.#Pipeline & {
 					"docker",
 					"livestream",
 					".depot",
+					"AGENTS.md",
+					".semgrep",
+					"packages/agent",
 				]
 			}
 			scoping: {
