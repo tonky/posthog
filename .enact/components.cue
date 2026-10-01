@@ -14,6 +14,7 @@ pipeline: schema.#Pipeline & {
 			"showcase",
 			"patches",
 			".github/scripts",
+			"enve*",
 		]
 		ignore: [
 			".agents/**",
@@ -166,6 +167,8 @@ pipeline: schema.#Pipeline & {
 				"pyproject.toml",
 				"uv.lock",
 				"requirements.txt",
+				"enve*",
+				"bin/**",
 			]
 		}
 		"frontend": {
@@ -324,6 +327,7 @@ pipeline: schema.#Pipeline & {
 				include: [
 					"common/hogvm",
 					"posthog/hogql",
+					"posthog/models",
 				]
 			}
 			watch_paths: [
