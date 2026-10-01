@@ -1,11 +1,13 @@
 import { BindLogic, useActions, useValues } from 'kea'
 import { router } from 'kea-router'
+import posthog from 'posthog-js'
 import { useState } from 'react'
 
 import { IconDocument, IconGear, IconHeadset } from '@posthog/icons'
 import { LemonBadge, LemonButton, Link } from '@posthog/lemon-ui'
 import { PostHogCaptureOnViewed } from '@posthog/react'
 
+import { isAccessDeniedError, shouldReportApiFailure } from 'lib/api-error'
 import { AccessControlAction } from 'lib/components/AccessControlAction'
 import { LiveRecordingsCount } from 'lib/components/LiveUserCount'
 import { Shortcut } from 'lib/components/Shortcuts/Shortcut'
@@ -14,6 +16,7 @@ import { useFeatureFlag } from 'lib/hooks/useFeatureFlag'
 import { LemonBanner } from 'lib/lemon-ui/LemonBanner'
 import { lemonBannerLogic } from 'lib/lemon-ui/LemonBanner/lemonBannerLogic'
 import { LemonTab, LemonTabs } from 'lib/lemon-ui/LemonTabs'
+import { lemonToast } from 'lib/lemon-ui/LemonToast/LemonToast'
 import { Spinner } from 'lib/lemon-ui/Spinner/Spinner'
 import { useAttachedLogic } from 'lib/logic/scenes/useAttachedLogic'
 import { cn } from 'lib/utils/css-classes'
@@ -28,10 +31,12 @@ import { ScenePanel, ScenePanelActionsSection } from '~/layout/scenes/SceneLayou
 import { ProductKey } from '~/queries/schema/schema-general'
 import { AccessControlLevel, AccessControlResourceType, ReplayTab, ReplayTabs } from '~/types'
 
+import { ReplayComments } from 'products/replay/frontend/comments/ReplayComments'
 import { sessionReplayEmptyState } from 'products/replay/frontend/emptyState/sessionReplayEmptyState'
 
 import { SessionRecordingCollections } from './collections/SessionRecordingCollections'
 import { SessionRecordingsPlaylistRedesign } from './playlist-redesign/SessionRecordingsPlaylistRedesign'
+import { playlistFiltersLogic } from './playlist/playlistFiltersLogic'
 import { createPlaylist } from './playlist/playlistUtils'
 import { SessionRecordingsPlaylist } from './playlist/SessionRecordingsPlaylist'
 import {
@@ -53,6 +58,16 @@ function Header(): JSX.Element {
         try {
             await createPlaylist({ _create_in_folder: 'Unfiled/Replay playlists', type: 'collection' }, true)
             reportRecordingPlaylistCreated('new')
+        } catch (error: any) {
+            if (isAccessDeniedError(error)) {
+                lemonToast.error('You do not have access to create collections.')
+            } else {
+                lemonToast.error('Could not create the collection. Please try again.')
+            }
+            // Not a kea loader, so initKea's report gate does not run. Apply the same gate here.
+            if (shouldReportApiFailure(error)) {
+                posthog.captureException(error)
+            }
         } finally {
             setLoading(false)
         }
@@ -191,6 +206,8 @@ function MainPanel(): JSX.Element {
                 </div>
             ) : tab === ReplayTabs.Playlists ? (
                 <SessionRecordingCollections />
+            ) : tab === ReplayTabs.Comments ? (
+                <ReplayComments />
             ) : tab === ReplayTabs.Templates ? (
                 <SessionRecordingTemplates />
             ) : null}
@@ -213,6 +230,12 @@ const ReplayPageTabs: ReplayTab[] = [
         'data-attr': 'session-recordings-collections-tab',
     },
     {
+        label: 'Comments',
+        key: ReplayTabs.Comments,
+        tooltip: 'Comments you added to recordings',
+        'data-attr': 'session-recordings-comments-tab',
+    },
+    {
         label: 'Filter templates',
         key: ReplayTabs.Templates,
         'data-attr': 'session-recordings-templates-tab',
@@ -221,13 +244,17 @@ const ReplayPageTabs: ReplayTab[] = [
 
 export function SessionRecordingsPageTabs(): JSX.Element {
     const { tab, shouldShowNewBadge } = useValues(sessionReplaySceneLogic)
+    const { templatesInFiltersPanel } = useValues(playlistFiltersLogic)
+    const visibleTabs = templatesInFiltersPanel
+        ? ReplayPageTabs.filter((replayTab) => replayTab.key !== ReplayTabs.Templates)
+        : ReplayPageTabs
     return (
         <LemonTabs
             activeKey={tab}
             onChange={(t) => router.actions.push(urls.replay(t as ReplayTabs))}
             sceneInset
             className="-mt-4"
-            tabs={ReplayPageTabs.map((replayTab): LemonTab<string> => {
+            tabs={visibleTabs.map((replayTab): LemonTab<string> => {
                 return {
                     label: (
                         <>

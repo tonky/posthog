@@ -29,6 +29,9 @@ class ScannerScoutCreateSerializer(SignalScoutCreateSerializer):
         # Bundling files with a prompt is the generic endpoint's affordance; this one creates a scout
         # from a template in the Vision UI.
         fields.pop("files", None)
+        # Scout suggestions are a Signals surface; a scanner scout never comes from one, so the
+        # field would only be accepted here to be ignored.
+        fields.pop("suggestion_id", None)
         return fields
 
 
@@ -99,7 +102,8 @@ class ScannerScoutViewSet(TeamAndOrgViewSetMixin, viewsets.ViewSet):
         result = signals_facade.create_scout_for_source(
             team=canonical_team,
             user=request.user,
-            name=validated["name"],
+            name=validated.get("name"),
+            display_name=validated.get("display_name", ""),
             description=validated["description"],
             body=validated["body"],
             files=[],
