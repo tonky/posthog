@@ -57,7 +57,17 @@ restore_from_snapshots() {
         database_exists "$TEMPLATE_PERSONS_DB" || pg -d postgres -c "CREATE DATABASE $TEMPLATE_PERSONS_DB;" >/dev/null
         local psql_restore="psql -h $PGHOST -p $PGPORT -U $PGUSER -q"
         gunzip -c .postgres-backups/schema-latest.sql.gz | $psql_restore -d "$TEMPLATE_DB" 2>/dev/null || true
-        gunzip -c .postgres-backups/schema-latest.sql.gz | $psql_restore -d "$TEMPLATE_PERSONS_DB" 2>/dev/null || true
+        
+        # Apply persons migrations to TEMPLATE_PERSONS_DB using sqlx
+        local sqlx_bin="sqlx"
+        [ -x "bin/sqlx" ] && sqlx_bin="bin/sqlx"
+        if command -v "$sqlx_bin" >/dev/null 2>&1; then
+            DATABASE_URL="postgres://${PGUSER}:${PGPASSWORD:-posthog}@${PGHOST}:${PGPORT}/${TEMPLATE_PERSONS_DB}" \
+                "$sqlx_bin" migrate run --source rust/persons_migrations >/dev/null 2>&1 || true
+        elif [ -f "posthog/management/commands/apply_persons_migrations.py" ]; then
+            PERSONS_DB_WRITER_URL="postgres://${PGUSER}:${PGPASSWORD:-posthog}@${PGHOST}:${PGPORT}/${TEMPLATE_PERSONS_DB}" \
+                python3 showcase/scripts/backend_runtime.py exec uv run --no-sync python manage.py apply_persons_migrations >/dev/null 2>&1 || true
+        fi
         if template_ready; then
             echo "✓ Restored test database templates in <3s from schema-latest.sql.gz" >&2
             dump_snapshots
