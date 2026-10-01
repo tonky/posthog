@@ -65,8 +65,19 @@ pipeline: schema.#Pipeline & {
 					include: ["*.py", "**/*.py"]
 				}
 			}
+			migrate: {
+				command: "python3 showcase/scripts/migrations_check.py {changed_files}"
+				filter: {
+					include: [
+						"**/models/**",
+						"**/migrations/**",
+						"**/models.py",
+						"**/model_*.py",
+						"**/*_model.py",
+					]
+				}
+			}
 			max_shards:   8
-			migrate:      "python3 showcase/scripts/migrations_check.py {changed_files}"
 			name:         "backend"
 			resources: {
 				cpus:      1.0
@@ -513,7 +524,7 @@ pipeline: schema.#Pipeline & {
 				"tools/playwright_spec_selection.py",
 				"tools/playwright_area_map.json",
 			]
-			test: "[ -z \"{targets}\" ] && echo \"ℹ️  No E2E targets provided. Skipping Playwright.\" || pnpm exec playwright test --pass-with-no-tests {targets}"
+			test: "pnpm exec playwright test --pass-with-no-tests {targets}"
 			depends_on: [
 				"backend",
 				"frontend",
