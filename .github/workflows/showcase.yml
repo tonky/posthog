@@ -38,6 +38,7 @@ concurrency:
 env:
     ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: 'true'
     COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
+    ENACT_STEP_TIMEOUT_SECS: '1500'
     ENVE_SERVICE_GID: '1000'
     ENVE_SERVICE_UID: '1000'
     FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
@@ -444,7 +445,7 @@ jobs:
             max-parallel: 16
             matrix: ${{ fromJson(needs.detect.outputs.matrix) }}
         runs-on: ${{ matrix.runs_on }}
-        timeout-minutes: 15
+        timeout-minutes: 25
         steps:
             - name: Checkout Repository (sparse)
               if: ${{ matrix.sparse_checkout != '' }}

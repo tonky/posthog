@@ -230,6 +230,7 @@ pipeline: schema.#Pipeline & {
 					"docs/onboarding",
 					".github/scripts",
 					"playwright",
+					"services/mcp",
 				]
 			}
 			scoping: {
@@ -364,6 +365,9 @@ pipeline: schema.#Pipeline & {
 					"posthog",
 					"products",
 					"common",
+					".depot",
+					".semgrep",
+					".postgres-backups",
 				]
 			}
 			watch_paths: [
