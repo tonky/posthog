@@ -62,13 +62,15 @@ jobs:
             has_upstream_baseline: ${{ steps.prep.outputs.has_upstream_baseline }}
             upstream_cpu_minutes: ${{ steps.prep.outputs.upstream_cpu_minutes }}
             upstream_wall_minutes: ${{ steps.prep.outputs.upstream_wall_minutes }}
+            enve_lock_hash: ${{ steps.hashes.outputs.enve_lock_hash }}
+            python_hash: ${{ steps.hashes.outputs.python_hash }}
+            node_hash: ${{ steps.hashes.outputs.node_hash }}
         steps:
             - name: Checkout Repository (sparse)
               uses: actions/checkout@v7
               with:
                   fetch-depth: '100'
                   fetch-tags: 'false'
-                  filter: blob:none
                   lfs: 'false'
                   show-progress: 'false'
                   sparse-checkout: |-
@@ -82,6 +84,10 @@ jobs:
                       patches
                       enve.cue
                       enve.lock
+                      package.json
+                      pnpm-lock.yaml
+                      pyproject.toml
+                      uv.lock
                   sparse-checkout-cone-mode: 'true'
                   submodules: 'false'
 
@@ -165,6 +171,16 @@ jobs:
                   MATRIX=$(enact affected --pipeline .enact --workflow ci $FILES_ARG $UPDATED_ARG $NO_CACHE_ARG --format json)
                   echo "$MATRIX"
                   echo "matrix=$MATRIX" >> "$GITHUB_OUTPUT"
+
+            - name: Compute Dependency Hashes
+              id: hashes
+              run: |
+                  ENVE_HASH=$(sha256sum enve.lock 2>/dev/null | cut -d' ' -f1 || echo "none")
+                  PY_HASH=$(sha256sum enve.lock uv.lock pyproject.toml 2>/dev/null | sha256sum | cut -d' ' -f1 || echo "none")
+                  NODE_HASH=$(sha256sum package.json pnpm-lock.yaml 2>/dev/null | sha256sum | cut -d' ' -f1 || echo "none")
+                  echo "enve_lock_hash=$ENVE_HASH" >> "$GITHUB_OUTPUT"
+                  echo "python_hash=$PY_HASH" >> "$GITHUB_OUTPUT"
+                  echo "node_hash=$NODE_HASH" >> "$GITHUB_OUTPUT"
 
             - name: Upload Showcase Baseline Artifact
               uses: actions/upload-artifact@v7
@@ -435,38 +451,81 @@ jobs:
         runs-on: ${{ matrix.runs_on }}
         timeout-minutes: 25
         steps:
-            - name: Checkout Repository (sparse)
-              if: ${{ matrix.sparse_checkout != '' }}
-              uses: actions/checkout@v7
-              with:
-                  fetch-depth: '1'
-                  fetch-tags: 'false'
-                  lfs: 'false'
-                  show-progress: 'false'
-                  sparse-checkout: ${{ matrix.sparse_checkout }}
-                  sparse-checkout-cone-mode: 'true'
-                  submodules: 'false'
-                  persist-credentials: 'false'
+            - parallel:
+                  - name: Checkout Repository (sparse)
+                    if: ${{ matrix.sparse_checkout != '' }}
+                    uses: actions/checkout@v7
+                    with:
+                        fetch-depth: '1'
+                        fetch-tags: 'false'
+                        lfs: 'false'
+                        show-progress: 'false'
+                        sparse-checkout: ${{ matrix.sparse_checkout }}
+                        sparse-checkout-cone-mode: 'true'
+                        submodules: 'false'
+                        persist-credentials: 'false'
 
-            - name: Checkout Repository (full)
-              if: ${{ matrix.sparse_checkout == '' }}
-              uses: actions/checkout@v7
-              with:
-                  fetch-depth: '1'
-                  fetch-tags: 'false'
-                  lfs: 'false'
-                  show-progress: 'false'
-                  submodules: 'false'
-                  persist-credentials: 'false'
+                  - name: Checkout Repository (full)
+                    if: ${{ matrix.sparse_checkout == '' }}
+                    uses: actions/checkout@v7
+                    with:
+                        fetch-depth: '1'
+                        fetch-tags: 'false'
+                        lfs: 'false'
+                        show-progress: 'false'
+                        submodules: 'false'
+                        persist-credentials: 'false'
 
-            - name: Download Showcase Baseline Artifact
-              uses: actions/download-artifact@v8
-              with:
-                  name: showcase-baseline
-                  path: .enact/
+                  - name: Download Showcase Baseline Artifact
+                    uses: actions/download-artifact@v8
+                    with:
+                        name: showcase-baseline
+                        path: /tmp/showcase-baseline/
 
-            - name: Restore PR Changes
+                  - name: Restore Nix Store (L1 GHA Cache)
+                    id: nix_l1_cache
+                    continue-on-error: true
+                    uses: actions/cache/restore@v6
+                    with:
+                        key: ${{ runner.os }}-nix-store-${{ needs.detect.outputs.enve_lock_hash }}
+                        path: |-
+                            /nix/store
+                            ~/.local/share/enve/store
+                        restore-keys: |
+                            ${{ runner.os }}-nix-store-
+
+                  - name: Restore Python build & venv cache
+                    id: python_l1_cache
+                    if: contains(matrix.component, 'backend') || matrix.component == 'mcp'
+                    continue-on-error: true
+                    uses: actions/cache/restore@v6
+                    with:
+                        key: ${{ runner.os }}-python-${{ needs.detect.outputs.python_hash }}
+                        path: |-
+                            ~/.cache/uv
+                            /tmp/.cache/uv
+                            ~/.cache/pip
+                        restore-keys: |
+                            ${{ runner.os }}-python-
+
+                  - name: Restore Node dependency cache
+                    id: node_l1_cache
+                    if: "!contains(matrix.component, 'backend')"
+                    continue-on-error: true
+                    uses: actions/cache/restore@v6
+                    with:
+                        key: ${{ runner.os }}-node-${{ matrix.task_id }}-${{ needs.detect.outputs.node_hash }}
+                        path: |-
+                            ~/.local/share/pnpm/store
+                            ~/.cache/pnpm
+                        restore-keys: |
+                            ${{ runner.os }}-node-${{ matrix.task_id }}-
+                            ${{ runner.os }}-node-
+
+            - name: Restore PR Changes & Baseline
               run: |
+                  mkdir -p .enact
+                  cp -rf /tmp/showcase-baseline/* .enact/ 2>/dev/null || true
                   if [ -f ".enact/showcase-changes.tar.gz" ]; then
                     tar -xzf .enact/showcase-changes.tar.gz
                     echo "✓ Restored PR changes onto workspace"
@@ -509,50 +568,6 @@ jobs:
                   fi
                   echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
                   export PATH="$BIN_DIR:$HOME/.cargo/bin:$PATH"
-
-            - parallel:
-                  - name: Restore Nix Store (L1 GHA Cache)
-                    id: nix_l1_cache
-                    continue-on-error: true
-                    uses: actions/cache/restore@v6
-                    with:
-                        key: ${{ runner.os }}-nix-store-${{ hashFiles('**/enve.lock') }}
-                        path: |-
-                            /nix/store
-                            ~/.local/share/enve/store
-                        restore-keys: |
-                            ${{ runner.os }}-nix-store-
-
-                  - name: Restore Python build & venv cache
-                    id: python_l1_cache
-                    if: contains(matrix.component, 'backend') || matrix.component == 'mcp'
-                    continue-on-error: true
-                    uses: actions/cache/restore@v6
-                    with:
-                        key: ${{ runner.os }}-python-${{ hashFiles('enve.lock', 'uv.lock', 'pyproject.toml') }}
-                        path: |-
-                            ~/.cache/uv
-                            /tmp/.cache/uv
-                            ~/.cache/pip
-                            .venv
-                        restore-keys: |
-                            ${{ runner.os }}-python-${{ hashFiles('enve.lock') }}-
-                            ${{ runner.os }}-python-
-
-                  - name: Restore Node dependency cache
-                    id: node_l1_cache
-                    if: "!contains(matrix.component, 'backend')"
-                    continue-on-error: true
-                    uses: actions/cache/restore@v6
-                    with:
-                        key: ${{ runner.os }}-node-${{ matrix.task_id }}-${{ hashFiles('package.json', 'pnpm-lock.yaml') }}
-                        path: |-
-                            ~/.local/share/pnpm/store
-                            ~/.cache/pnpm
-                            node_modules/.cache
-                        restore-keys: |
-                            ${{ runner.os }}-node-${{ matrix.task_id }}-
-                            ${{ runner.os }}-node-
 
             - name: Pull Dependencies via enve
               env:
@@ -646,8 +661,12 @@ jobs:
                     install_python &
                     PID_PY=$!
                   fi
-                  [ -n "$PID_NODE" ] && wait "$PID_NODE"
-                  [ -n "$PID_PY" ] && wait "$PID_PY"
+                  if [ -n "$PID_NODE" ]; then
+                    wait "$PID_NODE" || true
+                  fi
+                  if [ -n "$PID_PY" ]; then
+                    wait "$PID_PY" || true
+                  fi
 
             - name: Execute Component Task
               env:
