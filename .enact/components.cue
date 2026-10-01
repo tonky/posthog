@@ -406,6 +406,7 @@ pipeline: schema.#Pipeline & {
 					"packages/quill",
 					"packages/llm-normalizer",
 					"products",
+					"frontend/src/mocks",
 				]
 			}
 			watch_paths: [
