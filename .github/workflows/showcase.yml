@@ -247,7 +247,6 @@ jobs:
               with:
                   fetch-depth: '1'
                   fetch-tags: 'false'
-                  filter: blob:none
                   lfs: 'false'
                   show-progress: 'false'
                   sparse-checkout: |-
@@ -258,22 +257,12 @@ jobs:
                       tools
                       showcase
                       patches
-                      .
                       posthog
                       ee
                       products
                       frontend
-                      frontend/src
                       common
                       packages
-                      playwright
-                      common/hogvm
-                      livestream
-                      services/mcp
-                      nodejs
-                      proto
-                      packages/quill
-                      tools/hogli-commands
                   sparse-checkout-cone-mode: 'true'
                   submodules: 'false'
 
@@ -468,7 +457,6 @@ jobs:
               with:
                   fetch-depth: '1'
                   fetch-tags: 'false'
-                  filter: blob:none
                   lfs: 'false'
                   show-progress: 'false'
                   submodules: 'false'
