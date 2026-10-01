@@ -318,6 +318,24 @@ def main():
         except Exception as e:
             print(f"⚠️ Warning: Could not package PR files: {e}")
 
+    # 5b. Augment reach map with static AST analysis for changed files
+    if changed_files:
+        print("🔮 Augmenting reach map with static AST analysis for changed files...")
+        try:
+            changed_txt = enact_dir / "changed-files.txt"
+            res = subprocess.run(
+                ["enact", "trace", "augment", "--files", f"@{changed_txt}"],
+                cwd=repo_dir,
+                capture_output=True,
+                text=True,
+            )
+            if res.stdout:
+                print(res.stdout.strip())
+            if res.returncode != 0 and res.stderr:
+                print(f"⚠️ enact trace augment warning: {res.stderr.strip()}")
+        except Exception as e:
+            print(f"⚠️ Warning: Could not augment reach map: {e}")
+
     # 6. Set GitHub Actions outputs
     set_gha_output("base_sha", base_sha)
     set_gha_output("head_sha", head_sha)

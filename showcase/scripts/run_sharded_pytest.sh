@@ -10,6 +10,18 @@
 set -euo pipefail
 unset LD_PRELOAD
 
+# Ensure libstdc++.so.6 is discoverable for C-extensions (grpc, etc.)
+for candidate in \
+    /usr/lib/x86_64-linux-gnu \
+    /lib/x86_64-linux-gnu \
+    /nix/store/*-gcc-*-lib/lib \
+    "$HOME/.local/share/enve/store"/*-gcc-*-lib/lib; do
+    if [ -d "$candidate" ] && [ -f "$candidate/libstdc++.so.6" ]; then
+        export LD_LIBRARY_PATH="${candidate}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+        break
+    fi
+done
+
 SHARD="${ENACT_SHARD_INDEX:-${SHARD:-1}}"
 TOTAL="${ENACT_SHARD_TOTAL:-${TOTAL_SHARDS:-1}}"
 

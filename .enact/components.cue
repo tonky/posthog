@@ -254,7 +254,7 @@ pipeline: schema.#Pipeline & {
 				"kea",
 			]
 			technology: "typescript"
-			test:       "pnpm --filter=@posthog/frontend exec jest --forceExit --passWithNoTests {targets}"
+			test:       "pnpm build:products && pnpm --filter=@posthog/frontend exec jest --maxWorkers=2 --forceExit --passWithNoTests {targets}"
 			title:      "PostHog Frontend Web Application"
 			uses: []
 			watch_paths: [
@@ -317,6 +317,12 @@ pipeline: schema.#Pipeline & {
 			title:      "PostHog Hog VM & Bytecode Compiler"
 			technology: "typescript"
 			root:       "common/hogvm"
+			workspace_scope: {
+				include: [
+					"common/hogvm",
+					"posthog/hogql",
+				]
+			}
 			watch_paths: [
 				"common/hogvm/**",
 			]
@@ -327,6 +333,14 @@ pipeline: schema.#Pipeline & {
 			title:      "PostHog Developer Tooling & Hogli Framework"
 			technology: "python"
 			root:       "tools/hogli-commands"
+			workspace_scope: {
+				include: [
+					"tools/hogli-commands",
+					"posthog",
+					"products",
+					"common",
+				]
+			}
 			watch_paths: [
 				"tools/hogli-commands/**",
 			]
@@ -337,6 +351,14 @@ pipeline: schema.#Pipeline & {
 			title:      "PostHog Node.js Ingestion & Plugin Server"
 			technology: "typescript"
 			root:       "nodejs"
+			workspace_scope: {
+				include: [
+					"nodejs",
+					"frontend/src/types.ts",
+					"common",
+					"rust",
+				]
+			}
 			watch_paths: [
 				"nodejs/**",
 			]
@@ -368,6 +390,12 @@ pipeline: schema.#Pipeline & {
 			title:      "PostHog Livestream & Realtime Event Gateway"
 			technology: "go"
 			root:       "livestream"
+			workspace_scope: {
+				include: [
+					"livestream",
+					"products/web_analytics",
+				]
+			}
 			watch_paths: [
 				"livestream/**",
 			]

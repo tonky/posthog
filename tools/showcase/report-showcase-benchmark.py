@@ -40,6 +40,8 @@ def main():
     parser.add_argument("--workspace", default=".", help="Target repository directory (default: .)")
     parser.add_argument("--wall-time", type=float, help="Explicit Enact wall duration in seconds")
     parser.add_argument("--cpu-time", type=float, help="Explicit Enact total CPU duration in seconds")
+    parser.add_argument("--preflight-result", default=os.environ.get("NEEDS_PREFLIGHT_RESULT", ""), help="Preflight job result")
+    parser.add_argument("--test-result", default=os.environ.get("NEEDS_TEST_RESULT", ""), help="Test matrix job result")
     parser.add_argument("--output", help="Path to write report markdown (defaults to GITHUB_STEP_SUMMARY if set)")
     args = parser.parse_args()
 
@@ -117,8 +119,42 @@ def main():
             pass
 
     execution_records = enact_data.get("execution_records", []) or enact_data.get("jobs", [])
+
+    # Also scan any component telemetry files downloaded into .enact/telemetry
+    comp_telemetry_dir = enact_dir / "telemetry"
+    if comp_telemetry_dir.exists():
+        for t_file in comp_telemetry_dir.rglob("*.json"):
+            try:
+                with open(t_file) as f:
+                    t_data = json.load(f)
+                    records = t_data.get("execution_records", []) or t_data.get("jobs", [])
+                    for rec in records:
+                        if rec not in execution_records:
+                            execution_records.append(rec)
+            except Exception:
+                pass
+
     failed_jobs = [j for j in execution_records if str(j.get("status", "")).lower() == "failed"]
-    status_str = f"🔴 **Failed** ({len(failed_jobs)} task(s) failed)" if failed_jobs else "🟢 **Passed** (100% green)"
+    has_runner_failure = (
+        args.test_result.lower() == "failure"
+        or args.preflight_result.lower() == "failure"
+    )
+
+    if failed_jobs:
+        status_str = f"🔴 **Failed** ({len(failed_jobs)} task(s) failed)"
+        improvement_status = "⚠️ Verification Failure"
+    elif has_runner_failure:
+        failed_stage = []
+        if args.preflight_result.lower() == "failure":
+            failed_stage.append("preflight")
+        if args.test_result.lower() == "failure":
+            failed_stage.append("test runner")
+        stage_str = " & ".join(failed_stage) or "matrix runner"
+        status_str = f"🔴 **Failed** ({stage_str} failed)"
+        improvement_status = "⚠️ Verification Failure"
+    else:
+        status_str = "🟢 **Passed** (100% green)"
+        improvement_status = "✨ 100% Sound"
 
     # Build Markdown Report
     lines = [
@@ -132,7 +168,7 @@ def main():
         "",
         "| Performance Metric | Upstream CI Baseline | Enact Modernized Run | Improvement Factor |",
         "| :--- | :--- | :--- | :--- |",
-        f"| **Pipeline Status** | Scraped from GitHub API | {status_str} | {'⚠️ Verification Failure' if failed_jobs else '✨ 100% Sound'} |",
+        f"| **Pipeline Status** | Scraped from GitHub API | {status_str} | {improvement_status} |",
         f"| **Wall Duration (End-to-End)** | **{format_duration(upstream_wall_s)}** | **{format_duration(enact_wall_s)}** | 🚀 **{speedup}x faster** |",
         f"| **Total CPU Consumption** | **{upstream_cpu_s / 60.0:.1f} CPU min** | **{enact_cpu_s / 60.0:.1f} CPU min** | 📉 **{cpu_reduction}% less compute** |",
         f"| **Estimated Runner Cost** | **${upstream_cost:.2f}** | **${enact_cost:.2f}** | 💰 **{cost_savings}% cheaper** |",
@@ -198,6 +234,10 @@ def main():
         print(f"📄 Report written to {dest}")
 
     print("\n" + report_content)
+
+    if failed_jobs or has_runner_failure:
+        print("❌ Showcase run contained failed tasks or failed test runners.")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
