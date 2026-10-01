@@ -451,36 +451,36 @@ jobs:
         runs-on: ${{ matrix.runs_on }}
         timeout-minutes: 25
         steps:
+            - name: Checkout Repository (sparse)
+              if: ${{ matrix.sparse_checkout != '' }}
+              uses: actions/checkout@v7
+              with:
+                  fetch-depth: '1'
+                  fetch-tags: 'false'
+                  lfs: 'false'
+                  show-progress: 'false'
+                  sparse-checkout: ${{ matrix.sparse_checkout }}
+                  sparse-checkout-cone-mode: 'true'
+                  submodules: 'false'
+                  persist-credentials: 'false'
+
+            - name: Checkout Repository (full)
+              if: ${{ matrix.sparse_checkout == '' }}
+              uses: actions/checkout@v7
+              with:
+                  fetch-depth: '1'
+                  fetch-tags: 'false'
+                  lfs: 'false'
+                  show-progress: 'false'
+                  submodules: 'false'
+                  persist-credentials: 'false'
+
             - parallel:
-                  - name: Checkout Repository (sparse)
-                    if: ${{ matrix.sparse_checkout != '' }}
-                    uses: actions/checkout@v7
-                    with:
-                        fetch-depth: '1'
-                        fetch-tags: 'false'
-                        lfs: 'false'
-                        show-progress: 'false'
-                        sparse-checkout: ${{ matrix.sparse_checkout }}
-                        sparse-checkout-cone-mode: 'true'
-                        submodules: 'false'
-                        persist-credentials: 'false'
-
-                  - name: Checkout Repository (full)
-                    if: ${{ matrix.sparse_checkout == '' }}
-                    uses: actions/checkout@v7
-                    with:
-                        fetch-depth: '1'
-                        fetch-tags: 'false'
-                        lfs: 'false'
-                        show-progress: 'false'
-                        submodules: 'false'
-                        persist-credentials: 'false'
-
                   - name: Download Showcase Baseline Artifact
                     uses: actions/download-artifact@v8
                     with:
                         name: showcase-baseline
-                        path: /tmp/showcase-baseline/
+                        path: .enact/
 
                   - name: Restore Nix Store (L1 GHA Cache)
                     id: nix_l1_cache
@@ -505,6 +505,7 @@ jobs:
                             ~/.cache/uv
                             /tmp/.cache/uv
                             ~/.cache/pip
+                            .venv
                         restore-keys: |
                             ${{ runner.os }}-python-
 
@@ -518,14 +519,13 @@ jobs:
                         path: |-
                             ~/.local/share/pnpm/store
                             ~/.cache/pnpm
+                            node_modules/.cache
                         restore-keys: |
                             ${{ runner.os }}-node-${{ matrix.task_id }}-
                             ${{ runner.os }}-node-
 
-            - name: Restore PR Changes & Baseline
+            - name: Restore PR Changes
               run: |
-                  mkdir -p .enact
-                  cp -rf /tmp/showcase-baseline/* .enact/ 2>/dev/null || true
                   if [ -f ".enact/showcase-changes.tar.gz" ]; then
                     tar -xzf .enact/showcase-changes.tar.gz
                     echo "✓ Restored PR changes onto workspace"
@@ -682,7 +682,7 @@ jobs:
               continue-on-error: true
               uses: actions/cache/save@v6
               with:
-                  key: ${{ runner.os }}-node-${{ matrix.task_id }}-${{ hashFiles('package.json', 'pnpm-lock.yaml') }}
+                  key: ${{ runner.os }}-node-${{ matrix.task_id }}-${{ needs.detect.outputs.node_hash }}
                   path: |-
                       ~/.local/share/pnpm/store
                       ~/.cache/pnpm
@@ -693,7 +693,7 @@ jobs:
               continue-on-error: true
               uses: actions/cache/save@v6
               with:
-                  key: ${{ runner.os }}-python-${{ hashFiles('enve.lock', 'uv.lock', 'pyproject.toml') }}
+                  key: ${{ runner.os }}-python-${{ needs.detect.outputs.python_hash }}
                   path: |-
                       ~/.cache/uv
                       /tmp/.cache/uv
