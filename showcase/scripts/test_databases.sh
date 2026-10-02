@@ -59,31 +59,7 @@ restore_from_snapshots() {
         gunzip -c .postgres-backups/schema-latest.sql.gz | $psql_restore -d "$TEMPLATE_DB" 2>/dev/null || true
         gunzip -c .postgres-backups/schema-latest.sql.gz | $psql_restore -d "$TEMPLATE_PERSONS_DB" 2>/dev/null || true
 
-        # Ensure _sqlx_migrations tracking table exists and marks rust/persons_migrations as applied
-        # so subsequent sqlx migrate run in conftest is an instant (<0.01s) no-op without collisions.
-        pg -d "$TEMPLATE_PERSONS_DB" -c "
-            CREATE TABLE IF NOT EXISTS _sqlx_migrations (
-                version BIGINT PRIMARY KEY,
-                description TEXT NOT NULL,
-                installed_on TIMESTAMPTZ NOT NULL DEFAULT now(),
-                success BOOLEAN NOT NULL,
-                checksum BYTEA NOT NULL,
-                execution_time BIGINT NOT NULL
-            );
-        " >/dev/null 2>&1 || true
-        if [ -d "rust/persons_migrations" ]; then
-            for f in rust/persons_migrations/*.sql; do
-                [ -f "$f" ] || continue
-                fname=$(basename "$f")
-                version=$(echo "$fname" | cut -d'_' -f1)
-                desc=$(echo "$fname" | cut -d'_' -f2- | sed 's/\.sql$//' | tr '_' ' ')
-                pg -d "$TEMPLATE_PERSONS_DB" -c "
-                    INSERT INTO _sqlx_migrations (version, description, success, checksum, execution_time)
-                    VALUES ($version, '$desc', true, E'\\\\x00', 1)
-                    ON CONFLICT (version) DO NOTHING;
-                " >/dev/null 2>&1 || true
-            done
-        fi
+        sync_sqlx_migrations "$TEMPLATE_PERSONS_DB"
         if template_ready; then
             echo "✓ Restored test database templates in <3s from schema-latest.sql.gz" >&2
             dump_snapshots
@@ -94,8 +70,40 @@ restore_from_snapshots() {
     return 1
 }
 
+# Sync real SHA-384 checksums for all sqlx migrations so conftest sqlx migrate run
+# is an instant (<0.01s) no-op without VersionMismatch or checksum errors.
+sync_sqlx_migrations() {
+    local target_db="${1:-$TEMPLATE_PERSONS_DB}"
+    if [ -d "rust/persons_migrations" ]; then
+        pg -d "$target_db" -c "
+            CREATE TABLE IF NOT EXISTS _sqlx_migrations (
+                version BIGINT PRIMARY KEY,
+                description TEXT NOT NULL,
+                installed_on TIMESTAMPTZ NOT NULL DEFAULT now(),
+                success BOOLEAN NOT NULL,
+                checksum BYTEA NOT NULL,
+                execution_time BIGINT NOT NULL
+            );
+        " >/dev/null 2>&1 || true
+        for f in rust/persons_migrations/*.sql; do
+            [ -f "$f" ] || continue
+            fname=$(basename "$f")
+            version=$(echo "$fname" | cut -d'_' -f1)
+            desc=$(echo "$fname" | cut -d'_' -f2- | sed 's/\.sql$//' | tr '_' ' ')
+            csum=$(sha384sum "$f" 2>/dev/null | cut -d' ' -f1 || openssl dgst -sha384 "$f" 2>/dev/null | awk '{print $NF}')
+            [ -n "$csum" ] || continue
+            pg -d "$target_db" -c "
+                INSERT INTO _sqlx_migrations (version, description, success, checksum, execution_time)
+                VALUES ($version, '$desc', true, decode('$csum', 'hex'), 1)
+                ON CONFLICT (version) DO UPDATE SET checksum = decode('$csum', 'hex'), success = true;
+            " >/dev/null 2>&1 || true
+        done
+    fi
+}
+
 dump_snapshots() {
     if template_ready; then
+        sync_sqlx_migrations "$TEMPLATE_PERSONS_DB"
         mkdir -p "$SNAPSHOT_DIR"
         echo "💾 Caching test database templates to snapshot: $SNAPSHOT_DIR" >&2
         if pg_dump -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -Fc -d "$TEMPLATE_DB" -f "${POSTGRES_SNAPSHOT}.tmp" 2>/dev/null && [ -s "${POSTGRES_SNAPSHOT}.tmp" ]; then
@@ -157,6 +165,7 @@ prepare_worker_databases() { # <worker>
     (
         flock 9
         template_ready || bootstrap_templates
+        sync_sqlx_migrations "$TEMPLATE_PERSONS_DB"
     ) 9>"$TEST_DB_LOCK"
     wait_templates_free
     # Every run starts from fresh clones and an empty ClickHouse database,

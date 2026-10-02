@@ -64,6 +64,9 @@ jobs:
                       tools
                       showcase
                       patches
+                      .github/scripts
+                      packages/owners-yaml
+                      packages/personhog-proto
                   sparse-checkout-cone-mode: 'true'
                   submodules: 'false'
             - name: Restore enact CLI binary cache
@@ -207,6 +210,7 @@ jobs:
               with:
                   fetch-depth: '1'
                   fetch-tags: 'false'
+                  filter: blob:none
                   lfs: 'false'
                   show-progress: 'false'
                   sparse-checkout: |-
@@ -217,12 +221,9 @@ jobs:
                       tools
                       showcase
                       patches
-                      posthog
-                      ee
-                      products
-                      frontend
-                      common
-                      packages
+                      .github/scripts
+                      packages/owners-yaml
+                      packages/personhog-proto
                   sparse-checkout-cone-mode: 'true'
                   submodules: 'false'
             - name: Restore enact CLI binary cache
@@ -620,19 +621,20 @@ jobs:
                   restore-keys: ${{ runner.os }}-enact-tasks-
             - name: Restore Python build & venv cache
               id: python_l1_cache
-              if: hashFiles('pyproject.toml', 'requirements.txt') != ''
+              if: hashFiles('pyproject.toml', 'requirements.txt') != '' && (matrix.technology == '' || matrix.technology == 'python')
               continue-on-error: true
               uses: actions/cache/restore@v6
               with:
                   key: ${{ runner.os }}-python-${{ hashFiles('**/uv.lock', '**/pyproject.toml', '**/requirements.txt', '**/poetry.lock') }}
                   path: |-
                       /tmp/.cache/uv
+                      ~/.cache/uv
                       ~/.cache/pip
                       .venv
                   restore-keys: ${{ runner.os }}-python-
             - name: Restore Go build cache
               id: go_l1_cache
-              if: hashFiles('go.mod', 'go.sum') != ''
+              if: hashFiles('go.mod', 'go.sum') != '' && (matrix.technology == '' || matrix.technology == 'go')
               continue-on-error: true
               uses: actions/cache/restore@v6
               with:
@@ -643,7 +645,7 @@ jobs:
                   restore-keys: ${{ runner.os }}-go-
             - name: Restore Rust target & cargo cache
               id: rust_l1_cache
-              if: hashFiles('Cargo.toml', 'Cargo.lock') != ''
+              if: hashFiles('Cargo.toml', 'Cargo.lock') != '' && (matrix.technology == '' || matrix.technology == 'rust')
               continue-on-error: true
               uses: actions/cache/restore@v6
               with:
@@ -656,6 +658,7 @@ jobs:
                   restore-keys: ${{ runner.os }}-rust-
             - name: Restore Node dependency cache
               id: node_l1_cache
+              if: matrix.technology == '' || matrix.technology == 'typescript' || matrix.technology == 'javascript' || matrix.technology == 'node'
               continue-on-error: true
               uses: actions/cache/restore@v6
               with:
@@ -677,16 +680,13 @@ jobs:
               if: matrix.browsers
               continue-on-error: true
               run: |
+                  set -o pipefail
                   BROWSERS_PATH="${ENACT_BROWSERS_PATH/#\~/$HOME}"
                   mkdir -p "$BROWSERS_PATH"
                   if [ "$ENACT_BROWSERS_CACHE_HIT" != "true" ] && [ -n "${ENACT_BROWSERS_ARTIFACT:-}" ]; then
                     echo "🌐 Hydrating browsers from the remote cache..."
                     if command -v enact >/dev/null 2>&1; then
-                      TMP_TAR="$(mktemp --suffix=.tar.zst)"
-                      if enact cache download "$ENACT_BROWSERS_ARTIFACT" "$TMP_TAR" 2>/dev/null; then
-                        tar -x --zstd -C "$BROWSERS_PATH" -f "$TMP_TAR" 2>/dev/null || true
-                      fi
-                      rm -f "$TMP_TAR" 2>/dev/null || true
+                      enact cache restore --remote-path "$ENACT_BROWSERS_ARTIFACT" --dest "$BROWSERS_PATH" 2>/dev/null || true
                     elif [ -n "$ENACT_R2_BUCKET" ]; then
                       curl -fsSL --connect-timeout 5 --max-time 60 --user "${AWS_ACCESS_KEY_ID}:${AWS_SECRET_ACCESS_KEY}" --aws-sigv4 "aws:amz:auto:s3" "${ENACT_R2_BUCKET%/}/$ENACT_BROWSERS_ARTIFACT" 2>/dev/null | tar -x --zstd -C "$BROWSERS_PATH" 2>/dev/null || true
                     fi
@@ -743,6 +743,7 @@ jobs:
                   ENACT_R2_BUCKET: ${{ secrets.ENACT_R2_BUCKET || env.ENACT_R2_BUCKET }}
                   ENVE_CACHE_CONCURRENCY: '16'
             - name: Install Project Dependencies
+              if: matrix.technology == '' || matrix.technology == 'typescript' || matrix.technology == 'javascript' || matrix.technology == 'node'
               run: |-
                   RUN_PREFIX=""
                   if command -v enve >/dev/null 2>&1 && [ -f "enve.lock" ]; then
@@ -806,17 +807,18 @@ jobs:
                       .enact/summary.html
                   retention-days: '1'
             - name: Save Python build & venv cache
-              if: (github.event_name == 'push' || github.event_name == 'pull_request') && hashFiles('pyproject.toml', 'requirements.txt') != '' && steps.python_l1_cache.outputs.cache-hit != 'true'
+              if: (github.event_name == 'push' || github.event_name == 'pull_request') && hashFiles('pyproject.toml', 'requirements.txt') != '' && (matrix.technology == '' || matrix.technology == 'python') && steps.python_l1_cache.outputs.cache-hit != 'true'
               continue-on-error: true
               uses: actions/cache/save@v6
               with:
                   key: ${{ runner.os }}-python-${{ hashFiles('**/uv.lock', '**/pyproject.toml', '**/requirements.txt', '**/poetry.lock') }}
                   path: |-
                       /tmp/.cache/uv
+                      ~/.cache/uv
                       ~/.cache/pip
                       .venv
             - name: Save Go build cache
-              if: (github.event_name == 'push' || github.event_name == 'pull_request') && hashFiles('go.mod', 'go.sum') != '' && steps.go_l1_cache.outputs.cache-hit != 'true'
+              if: (github.event_name == 'push' || github.event_name == 'pull_request') && hashFiles('go.mod', 'go.sum') != '' && (matrix.technology == '' || matrix.technology == 'go') && steps.go_l1_cache.outputs.cache-hit != 'true'
               continue-on-error: true
               uses: actions/cache/save@v6
               with:
@@ -825,7 +827,7 @@ jobs:
                       /tmp/go-build
                       /tmp/go/pkg/mod
             - name: Save Rust target & cargo cache
-              if: (github.event_name == 'push' || github.event_name == 'pull_request') && hashFiles('Cargo.toml', 'Cargo.lock') != '' && steps.rust_l1_cache.outputs.cache-hit != 'true'
+              if: (github.event_name == 'push' || github.event_name == 'pull_request') && hashFiles('Cargo.toml', 'Cargo.lock') != '' && (matrix.technology == '' || matrix.technology == 'rust') && steps.rust_l1_cache.outputs.cache-hit != 'true'
               continue-on-error: true
               uses: actions/cache/save@v6
               with:
