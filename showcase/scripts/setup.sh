@@ -8,7 +8,7 @@ case "${1:-frontend}" in
         pnpm --filter=@posthog/frontend exec jest --version
         ;;
     backend)
-        uv sync --frozen --compile-bytecode
+        uv sync --frozen
         uv run --no-sync python -c 'import grpc; from grpc._cython import cygrpc'
         python3 showcase/scripts/backend_runtime.py record
         ;;
