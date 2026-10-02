@@ -3,7 +3,13 @@ package replay
 import "enact.dev/schema"
 
 pipeline: schema.#Pipeline & {
-	toolchain: node: package_manager: "pnpm"
+	toolchain: {
+		node: package_manager: "pnpm"
+		python: {
+			package_manager: "uv"
+			install:         "bash showcase/scripts/setup.sh backend"
+		}
+	}
 	ci: {
 		no_cache: {
 			labels: ["no-cache", "showcase"]

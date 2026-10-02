@@ -474,7 +474,10 @@ pipeline: schema.#Pipeline & {
 				".github/workflows/**",
 				".github/actions/**",
 				".github/actionlint.yaml",
+				".enact/**",
+				"cue.mod/**",
 			]
+
 			lint: "actionlint"
 		}
 		"mcp": {

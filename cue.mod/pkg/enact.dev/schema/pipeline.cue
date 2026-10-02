@@ -104,7 +104,13 @@ package schema
 		install?:        string
 		env?: [string]: string
 	}
+	python?: {
+		package_manager?: "uv" | "poetry" | "pip"
+		install?:         string
+		env?: [string]: string
+	}
 }
+
 
 // Declarative filesystem scope specification (sparse checkout cone & audit filtering).
 #WorkspaceScope: {
