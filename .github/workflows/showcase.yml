@@ -356,7 +356,7 @@ jobs:
                   fi
                   if [ -n "$ENACT_BIN" ]; then
                     echo "🔬 Running enact ci-verify..."
-                    $ENACT_BIN ci-verify --pipeline .enact
+                    $ENACT_BIN ci-verify --pipeline .enact --workflow showcase
                   fi
             - name: Execute Stage [Preflight]
               run: |-
