@@ -176,13 +176,13 @@
             "configured_ram_mb": 512,
             "configured_cpus": 1.0,
             "adjusted_ram_mb": 512,
-            "adjusted_cpus": 5.5,
-            "sample_count": 3,
+            "adjusted_cpus": 6.5,
+            "sample_count": 4,
             "peak_ram_mb": 223,
-            "avg_ram_mb": 74,
-            "peak_cpus": 5.564516129032258,
+            "avg_ram_mb": 78,
+            "peak_cpus": 8.84393063583815,
             "violations_count": 0,
-            "last_updated_rfc3339": "2026-09-30T19:37:14.910636847+00:00"
+            "last_updated_rfc3339": "2026-10-02T08:51:27.632746840+00:00"
         }
     }
 }
