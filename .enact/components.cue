@@ -793,13 +793,14 @@ pipeline: schema.#Pipeline & {
 			// services/stripe-mock/tests/conftest.py (top-level "conftest"); without it among
 			// the sources mypy follows the import to the root conftest.py, which pyproject
 			// excludes and which fails its checks (10 errors). Python CI gives mypy 2 workers
-			// on a 16 GB runner; core's and the products' runs peaked at 5.8 and 10.3 GB.
+			// on a 16 GB runner; this one run peaks at 9.4 GB cold (usecases/posthog/IMPROVEMENTS.md),
+			// asked with a sixth more, inside a tonky-ci slot's 11 GB usable.
 			// A static check: no services.
 			jobs: typecheck: {
 				direct:   true
 				services: false
 				worker:   "standard"
-				resources: {cpus: 2.0, memory_mb: 12288}
+				resources: {cpus: 2.0, memory_mb: 11264}
 				tasks: [{
 					command: "uv run --no-sync ty check posthog ee common products && uv run --no-sync mypy --cache-fine-grained posthog ee common products services/stripe-mock/tests/conftest.py"
 					env: MYPY_NUM_WORKERS: "2"
@@ -1003,10 +1004,11 @@ pipeline: schema.#Pipeline & {
 				// esbuild's Go service holds every bundle (the app, the exporter, the workers,
 				// the toolbar) at once, ~7 GB live; under Go's default GC it grows past 10 GB.
 				// GOMEMLIMIT=6GiB holds it near its live set at no wall cost (14.0 GB peak
-				// before, usecases/posthog/IMPROVEMENTS.md).
+				// before, usecases/posthog/IMPROVEMENTS.md): 9.0 GB on the Mac, 8.3 GB on a tonky-ci
+				// x86_64 slot; asked with a tenth more.
 				// esbuild and sass keep 4 cores busy.
 				worker:    "standard"
-				resources: {cpus: 4.0, memory_mb: 12288}
+				resources: {cpus: 4.0, memory_mb: 10240}
 				outputs: {
 					paths: ["frontend/dist"]
 					key: list.Concat([[
