@@ -2,8 +2,8 @@
   "platforms": {
     "aarch64-darwin": {
       "binding": {
-        "environment_sha256": "3b5c94a042c4f03d4637d16ae87adb3dcdd3d02e2126888f92dd7afc7aff9dec",
-        "inventory_sha256": "7cb70dbd4e40eec849eae96bffe6120345bd5babaf3d5510abd74ec4962d1029",
+        "environment_sha256": "8959e484a6f047232d18991bbeffdbb119be1c8474b6b5915f8f2ccdfceebb5d",
+        "inventory_sha256": "cd7525beda32253e8b59bce6cb286d94503e1498241fc057ff3a43be9fb54db6",
         "profile": null,
         "version": 2
       },
@@ -708,9 +708,6 @@
           ]
         },
         {
-          "hash_name": "ava3hb4jzr2s0yc9yx84vfwfva2jq3kv-rust-1.91.1"
-        },
-        {
           "hash_name": "bg5jzffngczf8r5m9xl8snpny7w36n70-oniguruma-6.9.10-lib",
           "nar_hash": "sha256:0vsaqqm9d69svwlcfl5ax6d1ffiy07xw2gp1kgh097v743i5jcj4",
           "nar_size": 639080,
@@ -790,6 +787,9 @@
           "references": [
             "chqs6xblyhfzkghnf20ay6vygrls2kgg-perl5.42.3-LWP-MediaTypes-6.04"
           ]
+        },
+        {
+          "hash_name": "cry61fcy2f3474yd713v5fjdl1zfkicz-rust-1.91.1"
         },
         {
           "hash_name": "cs6639hb4vvnmc829afcpcprpq7smlvg-util-linux-2.42.3-bin",
@@ -3508,7 +3508,7 @@
           }
         },
         "lockSourcePath": "enve.lock",
-        "projectSha256": "debc04bf50f96bdc6d65264cdae9893979b3e1451e47ffd41532615ac6414e2f"
+        "projectSha256": "feb5d11cc45715f6464be103d8867e812d99982f99d6c6a64df181fdc89d9068"
       },
       "environment": {
         "AWS_ENDPOINT_URL": "http://127.0.0.1:${ENVE_SERVICE_SEAWEEDFS_PORT}",
@@ -4358,7 +4358,7 @@
             "s5mhqidsrm8aw2982k3mv82ajanirjm8-gnused-4.10",
             "sjzhqc66j881n9lyg3m15aqiykad4h5k-bash-interactive-5.3p15-dev"
           ],
-          "closure": "ava3hb4jzr2s0yc9yx84vfwfva2jq3kv-rust-1.91.1",
+          "closure": "cry61fcy2f3474yd713v5fjdl1zfkicz-rust-1.91.1",
           "version": "1.91.1"
         },
         "seaweedfs": {
@@ -4462,8 +4462,8 @@
     },
     "aarch64-linux": {
       "binding": {
-        "environment_sha256": "3b5c94a042c4f03d4637d16ae87adb3dcdd3d02e2126888f92dd7afc7aff9dec",
-        "inventory_sha256": "93405057f792d7f96c04a5d00c43d44e4cdae4a11fd2bb846f8587391096f72c",
+        "environment_sha256": "8959e484a6f047232d18991bbeffdbb119be1c8474b6b5915f8f2ccdfceebb5d",
+        "inventory_sha256": "fc02c0a4352087796ea345fee2eae8212bcfc8be62424411b7e1a00f51fbbe37",
         "profile": null,
         "version": 2
       },
@@ -7791,9 +7791,6 @@
           ]
         },
         {
-          "hash_name": "vsl8a1hdwq8hm9l414wdzwp4379mscpk-rust-1.91.1"
-        },
-        {
           "hash_name": "vxj97sr0682n7f91cjb2h3a1nhkffw3f-pango-1.57.1",
           "nar_hash": "sha256:09j27ix2m21ynpfiszvzjhqvap66n4wbv0bl478kpk0w32nxvd1p",
           "nar_size": 1109088,
@@ -8142,6 +8139,9 @@
             "z5vl4h3y81vsyn6y58jma7sgmsf7q5d6-lvm2-2.03.41-lib",
             "zfz5bw98zyc9ik2fhah54g1xr0zl18pj-cryptsetup-2.8.8"
           ]
+        },
+        {
+          "hash_name": "zlz95jf79ppmnapj07y3savxvlz77rz8-rust-1.91.1"
         },
         {
           "hash_name": "zn3isxdyymr2zbh2y5xn5ir1zhn7hi1k-lz4-1.10.0-lib",
@@ -10415,7 +10415,7 @@
           }
         },
         "lockSourcePath": "enve.lock",
-        "projectSha256": "debc04bf50f96bdc6d65264cdae9893979b3e1451e47ffd41532615ac6414e2f"
+        "projectSha256": "feb5d11cc45715f6464be103d8867e812d99982f99d6c6a64df181fdc89d9068"
       },
       "environment": {
         "AWS_ENDPOINT_URL": "http://127.0.0.1:${ENVE_SERVICE_SEAWEEDFS_PORT}",
@@ -11321,7 +11321,7 @@
             "wgxz9zr5a70v52nkqinbarf56f1c5jsi-bash-interactive-5.3p15",
             "xs601a79fywk3qwsz74gl66p7hv2p2sm-zlib-1.3.2-dev"
           ],
-          "closure": "vsl8a1hdwq8hm9l414wdzwp4379mscpk-rust-1.91.1",
+          "closure": "zlz95jf79ppmnapj07y3savxvlz77rz8-rust-1.91.1",
           "version": "1.91.1"
         },
         "seaweedfs": {
@@ -11425,8 +11425,8 @@
     },
     "x86_64-linux": {
       "binding": {
-        "environment_sha256": "3b5c94a042c4f03d4637d16ae87adb3dcdd3d02e2126888f92dd7afc7aff9dec",
-        "inventory_sha256": "a4d0c5e90f94c1e8ad5dcbf06884b21a087fd86aba24381aaabc2e9a7eef84a9",
+        "environment_sha256": "8959e484a6f047232d18991bbeffdbb119be1c8474b6b5915f8f2ccdfceebb5d",
+        "inventory_sha256": "29e5202fcc20aeac2b2859291baf85034a04d3f80ee9c6dbd3d31507087fdbcd",
         "profile": null,
         "version": 2
       },
@@ -12167,9 +12167,6 @@
           ]
         },
         {
-          "hash_name": "7k0qpf4lap19ky1jgz32lwhz36kc5c6i-rust-1.91.1"
-        },
-        {
           "hash_name": "7svipfslpzd55jd6rz42k6daaqmdi47b-libfido2-1.17.0",
           "nar_hash": "sha256:0yhh596hzfrbv5yzjalc9i8802lyqmr9yhb7r4zf9811z14aqr99",
           "nar_size": 1205016,
@@ -12566,6 +12563,9 @@
             "bpmz1nbs4swi2fxsyp2gk391bj6a0q8s-perl5.42.3-Net-SMTP-SSL-1.04",
             "g05qk8pfkmiy9zh00is27f338ikjh3v9-perl5.42.3-IO-Socket-SSL-2.083"
           ]
+        },
+        {
+          "hash_name": "brgyjakf1qcj15wq0j54j9mpjmj1v0j0-rust-1.91.1"
         },
         {
           "hash_name": "bwidwan0rmszlq3lgpfzp4i0rcb04k6c-gmp-with-cxx-6.3.0-dev",
@@ -17381,7 +17381,7 @@
           }
         },
         "lockSourcePath": "enve.lock",
-        "projectSha256": "debc04bf50f96bdc6d65264cdae9893979b3e1451e47ffd41532615ac6414e2f"
+        "projectSha256": "feb5d11cc45715f6464be103d8867e812d99982f99d6c6a64df181fdc89d9068"
       },
       "environment": {
         "AWS_ENDPOINT_URL": "http://127.0.0.1:${ENVE_SERVICE_SEAWEEDFS_PORT}",
@@ -18287,7 +18287,7 @@
             "wgw25d181h0qks7qsfp1bh7c5nd3f0s7-zlib-1.3.2",
             "ycrbcy9sg4knpnik6a01dk70l0m673x7-findutils-4.11.0"
           ],
-          "closure": "7k0qpf4lap19ky1jgz32lwhz36kc5c6i-rust-1.91.1",
+          "closure": "brgyjakf1qcj15wq0j54j9mpjmj1v0j0-rust-1.91.1",
           "version": "1.91.1"
         },
         "seaweedfs": {

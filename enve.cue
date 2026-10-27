@@ -9,7 +9,8 @@ import (
 // archives: no nixpkgs snapshot has it beside the pins below, and a newer clippy fails
 // upstream's `-D warnings` lint on lints 1.91 doesn't have (~110 errors at the pin). On Linux
 // its binaries expect a distribution's glibc: auto-patchelf points their interpreter and RPATH
-// at the snapshot's, and RPATHs into the output become $ORIGIN-relative again.
+// at the snapshot's, and RPATHs into the output become $ORIGIN-relative again, relative to
+// each binary's own directory (lib/rustlib/<target>/bin/rust-lld's is ../../..).
 _rust: schema.#ArchiveBuildSpec & {
 	pname:   "rust"
 	version: "1.91.1"
@@ -79,7 +80,10 @@ _rust: schema.#ArchiveBuildSpec & {
 				fixed=
 				for entry in ${rpath//:/ }; do
 					case "$entry" in
-					"$outreal"/lib | "$out"/lib) entry='$ORIGIN/../lib' ;;
+					"$outreal"/lib | "$out"/lib)
+						rel=$(realpath --relative-to="$(dirname "$elf")" "$out/lib")
+						case "$rel" in .) entry='$ORIGIN' ;; *) entry='$ORIGIN'/$rel ;; esac
+						;;
 					"$root"/*) entry="/nix/store/${entry#"$root"/}" ;;
 					esac
 					case ":$fixed:" in *":$entry:"*) ;; *) fixed=${fixed:+$fixed:}$entry ;; esac
@@ -91,6 +95,10 @@ _rust: schema.#ArchiveBuildSpec & {
 		"$out/bin/cargo" --version
 		"$out/bin/cargo-clippy" --version
 		"$out/bin/rustfmt" --version
+		for bin in "$out"/lib/rustlib/*/bin; do
+			"$bin/rust-objcopy" --version
+			"$bin/rust-lld" -flavor gnu --version
+		done
 		"""
 }
 

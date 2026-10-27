@@ -452,7 +452,12 @@ jobs:
       id: cache_backend_templates_publication
       if: ${{ (!cancelled() && (github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch') && contains(format(',{0},', matrix.caches), ',backend-templates,') && steps.cache_backend_templates.outputs.cache-hit != 'true') && steps.outputs-lookup.outputs.cache-hit != 'true' }}
       continue-on-error: true
-      run: $RUN_PREFIX python3 showcase/scripts/template_publications.py "$HOME/.cache/enact/snapshots/v3"
+      run: |-
+        RUN_PREFIX=""
+        if command -v enve >/dev/null 2>&1 && [ -f "enve.lock" ]; then
+          RUN_PREFIX="enve run --locked -- "
+        fi
+        $RUN_PREFIX python3 showcase/scripts/template_publications.py "$HOME/.cache/enact/snapshots/v3"
     - name: Prune Rust caches before saving
       if: ${{ ((github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch') && matrix.cargo_targets != '' && (matrix.shard_index == '' || matrix.shard_index == 1 || matrix.shard_index == '1')) && steps.outputs-lookup.outputs.cache-hit != 'true' }}
       continue-on-error: true
@@ -2959,7 +2964,12 @@ jobs:
       id: cache_backend_templates_publication
       if: "!cancelled() && (github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch') && contains(format(',{0},', matrix.caches), ',backend-templates,') && steps.cache_backend_templates.outputs.cache-hit != 'true'"
       continue-on-error: true
-      run: $RUN_PREFIX python3 showcase/scripts/template_publications.py "$HOME/.cache/enact/snapshots/v3"
+      run: |-
+        RUN_PREFIX=""
+        if command -v enve >/dev/null 2>&1 && [ -f "enve.lock" ]; then
+          RUN_PREFIX="enve run --locked -- "
+        fi
+        $RUN_PREFIX python3 showcase/scripts/template_publications.py "$HOME/.cache/enact/snapshots/v3"
     - name: Prune Rust caches before saving
       if: (github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch') && matrix.cargo_targets != '' && (matrix.shard_index == '' || matrix.shard_index == 1 || matrix.shard_index == '1')
       continue-on-error: true
@@ -3454,7 +3464,12 @@ jobs:
       id: cache_backend_templates_publication
       if: "!cancelled() && (github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch') && contains(format(',{0},', matrix.caches), ',backend-templates,') && steps.cache_backend_templates.outputs.cache-hit != 'true'"
       continue-on-error: true
-      run: $RUN_PREFIX python3 showcase/scripts/template_publications.py "$HOME/.cache/enact/snapshots/v3"
+      run: |-
+        RUN_PREFIX=""
+        if command -v enve >/dev/null 2>&1 && [ -f "enve.lock" ]; then
+          RUN_PREFIX="enve run --locked -- "
+        fi
+        $RUN_PREFIX python3 showcase/scripts/template_publications.py "$HOME/.cache/enact/snapshots/v3"
     - name: Prune Rust caches before saving
       if: (github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch') && matrix.cargo_targets != '' && (matrix.shard_index == '' || matrix.shard_index == 1 || matrix.shard_index == '1')
       continue-on-error: true

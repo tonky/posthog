@@ -405,9 +405,7 @@ export class PostgresPersonRepository
                 AND posthog_persondistinctid.distinct_id = batch.distinct_id
             WHERE
                 posthog_persondistinctid.is_deleted = false
-                AND posthog_person.is_deleted = false
-                -- Lets the planner prune person partitions; the join alone locks all of them.
-                AND posthog_person.team_id = ANY($1::integer[])`
+                AND posthog_person.is_deleted = false`
 
         const { rows } = await this.postgres.query<RawPerson & { distinct_id: string }>(
             useReadReplica ? PostgresUse.PERSONS_READ : PostgresUse.PERSONS_WRITE,
@@ -516,9 +514,7 @@ export class PostgresPersonRepository
                 posthog_person.last_seen_at
             FROM posthog_person
             WHERE (posthog_person.team_id, posthog_person.uuid) IN (SELECT * FROM UNNEST($1::integer[], $2::uuid[]))
-                AND posthog_person.is_deleted = false
-                -- Lets the planner prune person partitions; the IN list alone locks all of them.
-                AND posthog_person.team_id = ANY($1::integer[])`
+                AND posthog_person.is_deleted = false`
 
         const { rows } = await this.postgres.query<RawPerson>(
             useReadReplica ? PostgresUse.PERSONS_READ : PostgresUse.PERSONS_WRITE,
@@ -2154,7 +2150,6 @@ export class PostgresPersonRepository
         try {
             // Use UNNEST to pass arrays, keeping query structure constant for prepared statement reuse
             // Note: batch column names are prefixed with 'new_' to avoid any potential confusion with table columns
-            // The team_id = ANY filter lets the planner prune partitions; the join alone locks all of them.
             const { rows } = await this.postgres.query<RawPerson>(
                 PostgresUse.PERSONS_WRITE,
                 `
@@ -2177,7 +2172,6 @@ export class PostgresPersonRepository
                     $8::text[]
                 ) AS batch(batch_uuid, batch_team_id, new_properties, new_properties_last_updated_at, new_properties_last_operation, new_is_identified, new_created_at, new_last_seen_at)
                 WHERE p.uuid = batch.batch_uuid AND p.team_id = batch.batch_team_id AND p.is_deleted = false
-                  AND p.team_id = ANY($2::integer[])
                 RETURNING ${PERSON_COLUMNS_PREFIXED}
                 `,
                 [
