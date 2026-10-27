@@ -44,9 +44,10 @@ if [ "${1:-}" = "--rust-ingestion-e2e" ]; then
         }
     done
     set --
-    # The Rust jobs' build settings (rust_ci_env.sh), so the consumer's build shares the
-    # workspace target dir's artifacts with theirs.
-    export CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0
+    # The Rust jobs' build settings, so the consumer's build shares the workspace target dir's
+    # artifacts with theirs (and links as theirs).
+    # shellcheck source=rust_ci_env.sh
+    source showcase/scripts/rust_ci_env.sh
 fi
 
 # The broker list settings the plugin server reads from env: every *_METADATA_BROKER_LIST name

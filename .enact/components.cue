@@ -185,7 +185,8 @@ _buildOnceKey: [
 	"showcase/scripts/build_quill.sh",
 ]
 
-// The builds a job starting with build_mcp_ui_apps.sh restores: the UI apps and quill's dist.
+// The builds a job starting with build_mcp_ui_apps.sh restores: the UI apps and quill's dist,
+// which it reads too (CI restores what a job needs, not what mcp:ui_apps needs in turn).
 _mcpUiAppsNeeds: ["mcp:ui_apps", "quill:build"]
 
 // ci-mcp-ui-apps.yml's `ui-apps` filter: what `mcp:build` (check_mcp_ui_apps.sh) runs for.
@@ -1186,9 +1187,10 @@ pipeline: schema.#Pipeline & {
 				// Its build, which every job needing its dist runs (frontend, mcp, e2e, storybook).
 				"showcase/scripts/build_quill.sh",
 			]
-			// Once per source state for every job that needs its dist (build_quill.sh). The
-			// mcp jobs restore it (`needs`); a job running turbo's prepare builds quill again
-			// without turbo's cache (CI has none), so the frontend's and storybook's don't.
+			// Once per source state for every job that needs its dist (build_quill.sh): the UI
+			// apps' build and the mcp jobs (`needs`). A job running turbo's prepare builds quill
+			// again without turbo's cache (CI has none), so the frontend's and storybook's
+			// builds don't: needing it would only start them a build level later.
 			jobs: build: {
 				services: false
 				builds:   true
@@ -1502,6 +1504,8 @@ pipeline: schema.#Pipeline & {
 				"posthog/plugins/**",
 				"posthog/cdp/filter_globals.json",
 				"showcase/scripts/run_nodejs_tests.sh",
+				// The Rust jobs' build settings the ingestion e2e's consumer builds with.
+				"showcase/scripts/rust_ci_env.sh",
 				// The maildev service only this suite starts (its lockfile and installer).
 				"infra/maildev/**",
 			], _rustWorkspaceEveryCrate, _djangoMigrations])
@@ -1533,16 +1537,24 @@ pipeline: schema.#Pipeline & {
 			// serve the Django template its database clones, which a cache miss builds through a
 			// pytest session that sets ClickHouse up too. A recording traces each test file in a
 			// jest of its own on the shard's instance, set up once (the runner's recorder, Linux).
-			recorder: "own_linux"
-			recorded_by: ["enact-node"]
-			// A shard's jest runs ~10 min here (ci-nodejs.yml's tests job: 45 min), and a cold
-			// shard bootstraps the Django template first (see base's test): the default step
-			// limit, 600 s without recorded durations, killed every shard mid-suite.
-			test: {
-				command: "../showcase/scripts/run_nodejs_tests.sh {targets}"
-				timeout: "90m"
+			jobs: test: {
+				name:     "Test"
+				recorder: "own_linux"
+				recorded_by: ["enact-node"]
+				shards: 3
+				// A shard is jest's 4 workers (upstream's --maxWorkers=4) on a service instance
+				// of its own: undeclared, three shards packed into one tonky-ci slot, and the
+				// host's memory ran out with shard 1 at 5.0 GB. Asked with a fifth more.
+				resources: {cpus: 4, memory_mb: 6144}
+				// A shard's jest runs ~10 min here (ci-nodejs.yml's tests job: 45 min), and a
+				// cold shard bootstraps the Django template first (see base's test): the default
+				// step limit, 600 s without recorded durations, killed every shard mid-suite.
+				tasks: [{
+					name:    "Run Tests"
+					command: "../showcase/scripts/run_nodejs_tests.sh {targets}"
+					timeout: "90m"
+				}]
 			}
-			shards: 3
 			// The lanes' files: both scripts ignore postgres-parity, service-e2e and dev/.
 			target_scope: {
 				tests: ["nodejs/{src,tests}/**/*.test.ts"]
@@ -1730,11 +1742,12 @@ pipeline: schema.#Pipeline & {
 				needs: _mcpUiAppsNeeds
 				tasks: [{command: "../../showcase/scripts/build_mcp_ui_apps.sh && pnpm typecheck"}]
 			}
-			// The UI apps (build_mcp_ui_apps.sh), once per source state: CI builds them in a job
-			// of its own, which the jobs starting with them restore with quill's dist
-			// (`needs`), finding both current.
+			// The UI apps (build_mcp_ui_apps.sh), once per source state, after quill's dist
+			// (`needs`): CI builds them in a job of its own, which the jobs starting with them
+			// restore with quill's dist, finding both current.
 			jobs: ui_apps: {
 				services: false
+				needs: ["quill:build"]
 				// quill's and the UI apps' vite builds peak at 2.3 GB.
 				resources: {cpus: 2.0, memory_mb: 3072}
 				outputs: {
@@ -1789,6 +1802,8 @@ pipeline: schema.#Pipeline & {
 			depends_on: ["test_env", "geoip"]
 			watch_paths: [
 				"showcase/scripts/live_posthog.sh",
+				// The Rust jobs' build settings its Rust services build with.
+				"showcase/scripts/rust_ci_env.sh",
 				"bin/celery-queues.env",
 			]
 		}
@@ -1843,8 +1858,8 @@ pipeline: schema.#Pipeline & {
 				"showcase/scripts/node_reads.mjs",
 			], _liveCaptureRust, _liveIngestionNode])
 			// Upstream: one job (no shards since #46853), 6 Playwright and 4 granian workers on
-			// depot-ubuntu-24.04-8, 45 minutes. Here a tonky-ci slot, 6 CPUs and 13 GB:
-			// run_e2e_tests.sh scales both worker counts to the job's CPUs.
+			// depot-ubuntu-24.04-8, 45 minutes. Here a tonky-ci slot, 6 CPUs and what its 13 GB
+			// leave usable: run_e2e_tests.sh scales both worker counts to the job's CPUs.
 			// The builds (build_e2e.sh) run in a task of their own, before the tests': the
 			// frontend's build:products rewrites the tracked frontend/src/products.tsx,
 			// productScenes.tsx and products.json as committed, and a rewrite while the tests'
@@ -1854,7 +1869,7 @@ pipeline: schema.#Pipeline & {
 				// run_e2e_tests.sh records (live_footprint.py).
 				recorder:  "own"
 				shards:    1
-				resources: {cpus: 6, memory_mb: 13312}
+				resources: {cpus: 6, memory_mb: 11264}
 				// The frontend's dist, built once (_frontendBuild) and restored.
 				needs: ["frontend:build"]
 				tasks: [{

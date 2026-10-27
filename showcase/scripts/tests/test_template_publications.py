@@ -147,6 +147,18 @@ class PublicationTest(unittest.TestCase):
                     path.symlink_to(target)
                 self.check(root, False, 1)
 
+    def test_the_cold_build_note_beside_the_publications_is_no_publication(self) -> None:
+        with tempfile.TemporaryDirectory() as work:
+            root = Path(work).resolve() / "v3"
+            root.mkdir()
+            (root / "cold-build-seconds").write_text("612\n")
+            self.check(root, False)
+            publish(root)
+            self.check(root, True)
+            (root / "cold-build-seconds").unlink()
+            (root / "cold-build-seconds").mkdir()
+            self.check(root, False, 1)
+
     def test_one_bad_publication_refuses_the_entire_archive(self) -> None:
         with tempfile.TemporaryDirectory() as work:
             root = Path(work).resolve() / "v3"

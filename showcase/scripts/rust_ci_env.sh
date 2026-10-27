@@ -22,6 +22,12 @@ export CARGO_INCREMENTAL=0
 # job building in the workspace's target dir sets the same, or each builds its own copies.
 export CARGO_PROFILE_DEV_DEBUG=0
 export RUST_BACKTRACE=1
+# x86_64 Linux links through the environment's compiler wrapper (GNU ld), as aarch64 does.
+# Since Rust 1.90 rustc links that target with its own lld, which records no RUNPATH: what
+# links the env's openssl (sqlx's macros, ingestion-consumer) loaded the host's libssl.so.3,
+# which upstream's Ubuntu runners have and tonky-ci's x86_64 runners don't. A target's
+# rustflags replace rust/.cargo/config.toml's [build] ones, so its tokio_unstable is repeated.
+export CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS="--cfg tokio_unstable -C linker-features=-lld"
 
 # `cargo build --config "$(cd rust && rust_no_assertions)"`: the workspace's own crates
 # without debug assertions or overflow checks, as upstream's images, for the runners of a

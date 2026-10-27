@@ -12,6 +12,8 @@ from pathlib import Path
 
 # A dump pair and the migrations it applied (what a later key's miss tops up from).
 SNAPSHOT_FILES = ("postgres.dump", "persons.dump", "migrations.json")
+# test_databases.sh's note of how long this machine's last cold build took, beside the keys.
+COLD_BUILD_SECONDS = "cold-build-seconds"
 
 
 class PublicationError(ValueError):
@@ -82,7 +84,12 @@ def verify_tree(root: Path) -> int:
     if not root.exists():
         return 0
     require_kind(root, stat.S_IFDIR)
-    publications = [Publication.load(directory) for directory in sorted(root.iterdir())]
+    entries = sorted(root.iterdir())
+    for note in (entry for entry in entries if entry.name == COLD_BUILD_SECONDS):
+        require_kind(note, stat.S_IFREG)
+    publications = [
+        Publication.load(directory) for directory in entries if directory.name != COLD_BUILD_SECONDS
+    ]
     for publication in publications:
         publication.verify()
     return len(publications)

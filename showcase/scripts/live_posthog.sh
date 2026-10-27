@@ -138,18 +138,19 @@ live_migrate() {
 # Recording, the build's artifacts (a no-op rebuild) and the workspace's graph go to
 # live_rust_footprint, with each package's binary (`$live_bin/<package>`) by its root file.
 live_rust_roots=()
+live_cargo() { (source showcase/scripts/rust_ci_env.sh && cd rust && env -u REDIS_URL cargo "$@"); }
 live_build_rust() { # <package...>
-    local args=() package root profile
+    local args=() package root
     for package in "$@"; do args+=(-p "$package"); done
-    profile="$(source showcase/scripts/rust_ci_env.sh && cd rust && rust_no_assertions)"
-    local build=(env -u REDIS_URL CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0
-        cargo build "${args[@]}" --config "$profile")
-    (cd rust && "${build[@]}")
+    # In rust/, with rust_ci_env.sh's build settings: the Rust jobs sharing its target dir build
+    # with them.
+    args=(build "${args[@]}" --config "$(source showcase/scripts/rust_ci_env.sh && cd rust && rust_no_assertions)")
+    live_cargo "${args[@]}"
     live_bin="$(cd rust && cargo metadata --no-deps --format-version 1 | jq -r .target_directory)/debug"
     [ -n "$live_recording" ] || return 0
     mkdir -p "$live_recording/rust"
-    (cd rust && "${build[@]}" --message-format json >>"$live_recording/rust/artifacts.jsonl" &&
-        cargo metadata --format-version 1 >"$live_recording/rust/metadata.json")
+    live_cargo "${args[@]}" --message-format json >>"$live_recording/rust/artifacts.jsonl" &&
+        (cd rust && cargo metadata --format-version 1 >"$live_recording/rust/metadata.json")
     for package in "$@"; do
         root="$(jq -r --arg p "$package" '.workspace_members as $members | .packages[]
             | select(.name == $p and (.id | IN($members[]))) | .targets[]
