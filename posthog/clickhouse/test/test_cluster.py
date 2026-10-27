@@ -3,7 +3,7 @@ import json
 import uuid
 from collections import defaultdict
 from collections.abc import Callable, Iterator, Mapping
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from posthog.test.base import materialized
@@ -12,7 +12,7 @@ from unittest.mock import Mock, patch, sentinel
 from clickhouse_driver import Client
 from clickhouse_driver.errors import ServerException
 
-from posthog.clickhouse.client import connection
+from posthog.clickhouse.client import connection, sync_execute
 from posthog.clickhouse.client.connection import ClickHouseCredentials, ClickHouseUser, NodeRole, Workload
 from posthog.clickhouse.cluster import (
     AUTHENTICATION_FAILED,
@@ -143,6 +143,11 @@ def test_exception_summary(snapshot, cluster: ClickhouseCluster) -> None:
         cluster.map_all_hosts(Query("invalid query")).result()
 
     assert replace_memory_addresses_and_ips(e.value.message) == snapshot
+
+    # The snapshot holds a Linux server's stack trace; a macOS build of ClickHouse (run natively,
+    # outside a container) reports Poco's constructor as frame 0.
+    if sync_execute("SELECT value FROM system.build_options WHERE name = 'SYSTEM'") == [("Darwin",)]:
+        pytest.skip("the snapshot's stack frames are a Linux ClickHouse build's")
 
     with pytest.raises(ExceptionGroup) as e:
         cluster.map_all_hosts(Query("SELECT * FROM invalid_table_name")).result()
@@ -424,6 +429,34 @@ def test_find_existing_mutations_handles_delimiter_shaped_parameter_value(cluste
     assert all(not mutations for mutations in existing.values()), (
         "expected no pre-existing mutation for this delimiter-shaped parameter"
     )
+
+
+def test_find_existing_mutations_renders_tz_aware_datetimes_before_connecting() -> None:
+    """Regression test: commands were rendered with `client.connection.context` before the client had
+    connected, so `server_info` was None and a tz-aware datetime parameter (e.g. an event removal time
+    range) raised `'NoneType' object has no attribute 'get_timezone'`. The lookup must also render in the
+    server timezone, as submission does, or a non-UTC server would never match its stored mutation.
+    """
+    runner = LightweightDeleteMutationRunner(
+        table=EVENTS_DATA_TABLE(),
+        predicate="team_id = %(team_id)s AND timestamp >= %(start_time)s",
+        parameters={"team_id": 1, "start_time": datetime(2026, 1, 1, tzinfo=UTC)},
+    )
+    client = Client("unconnected-host")
+    assert client.connection.context.server_info is None
+
+    def fake_execute(query: str, params: dict | None = None, **kwargs) -> list[tuple]:
+        if query == "SELECT 1":  # connecting populates server_info, here a non-UTC server
+            client.connection.context.server_info = Mock(get_timezone=Mock(return_value="America/New_York"))
+            return [(1,)]
+        return [(None,)]
+
+    with patch.object(client, "execute", side_effect=fake_execute) as execute:
+        assert runner.find_existing_mutations(client) == {}
+
+    connect_call, lookup_call = execute.call_args_list
+    assert connect_call.args == ("SELECT 1",)
+    assert "'2025-12-31 19:00:00'" in lookup_call.args[1]["__command_0"]
 
 
 def test_alter_mutation_multiple_commands(cluster: ClickhouseCluster) -> None:

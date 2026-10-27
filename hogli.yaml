@@ -1278,18 +1278,6 @@ environment:
         bin_script: report-jest-timings
         description: 'Render a Jest test-speed report from timing artifacts'
         hidden: true
-    run:seaweedfs:
-        bin_script: run-seaweedfs
-        description: 'TODO: add description for run-seaweedfs'
-        hidden: true
-    enact:
-        bin_script: enact
-        description: 'TODO: add description for enact'
-        hidden: true
-    enve:
-        bin_script: enve
-        description: 'TODO: add description for enve'
-        hidden: true
     profile_migrations:
         bin_script: profile_migrations
         description: 'Profile Django migrations on fresh DBs and render a per-op timing report'
@@ -1305,8 +1293,4 @@ environment:
     rasterize:recording:file:
         bin_script: rasterize-recording-file
         description: 'Render a recording JSONL file to video with the rasterizer'
-        hidden: true
-    sqlx:
-        bin_script: sqlx
-        description: 'TODO: add description for sqlx'
         hidden: true

@@ -996,7 +996,7 @@ async def test_external_data_job_workflow_with_schema(team, **kwargs):
                 DATAWAREHOUSE_LOCAL_ACCESS_KEY=settings.OBJECT_STORAGE_ACCESS_KEY_ID,
                 DATAWAREHOUSE_LOCAL_ACCESS_SECRET=settings.OBJECT_STORAGE_SECRET_ACCESS_KEY,
                 DATAWAREHOUSE_LOCAL_BUCKET_REGION="us-east-1",
-                DATAWAREHOUSE_BUCKET_DOMAIN="objectstorage:19000",
+                DATAWAREHOUSE_BUCKET_DOMAIN=settings.DATAWAREHOUSE_BUCKET_DOMAIN,
             ),
         ):
             async with await WorkflowEnvironment.start_time_skipping() as activity_environment:
@@ -1093,7 +1093,7 @@ async def test_run_postgres_job(
         DATAWAREHOUSE_LOCAL_ACCESS_KEY=settings.OBJECT_STORAGE_ACCESS_KEY_ID,
         DATAWAREHOUSE_LOCAL_ACCESS_SECRET=settings.OBJECT_STORAGE_SECRET_ACCESS_KEY,
         DATAWAREHOUSE_LOCAL_BUCKET_REGION="us-east-1",
-        DATAWAREHOUSE_BUCKET_DOMAIN="objectstorage:19000",
+        DATAWAREHOUSE_BUCKET_DOMAIN=settings.DATAWAREHOUSE_BUCKET_DOMAIN,
     ):
         await activity_environment.run(import_data_activity_sync, job_1_inputs)
 

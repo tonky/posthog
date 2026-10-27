@@ -488,6 +488,15 @@ pub struct Config {
     #[envconfig(from = "FLAG_DEFINITIONS_SELF_HEAL_ENABLED", default = "true")]
     pub flag_definitions_self_heal_enabled: FlexBool,
 
+    // Second gate on the self-heal path, for the S3-hit trigger only. A cache miss is a 503
+    // and is rare; an S3 hit is a successful response and can be orders of magnitude more
+    // frequent, so the two triggers need separate switches. Default off so the enqueue rate
+    // can be watched in one environment before the rest follow. Has no effect while
+    // FLAG_DEFINITIONS_SELF_HEAL_ENABLED is off, which stays the switch that stops every
+    // enqueue.
+    #[envconfig(from = "FLAG_DEFINITIONS_REBUILD_ON_S3_HIT_ENABLED", default = "false")]
+    pub flag_definitions_rebuild_on_s3_hit_enabled: FlexBool,
+
     // Cluster switch for the /flags/definitions reader. When enabled, the flags-with-cohorts
     // payload and its ETag both come from the dedicated flags Redis instead of the shared one.
     //
@@ -687,6 +696,10 @@ pub struct Config {
 
     #[envconfig(from = "FLAGS_SESSION_REPLAY_QUOTA_CHECK", default = "false")]
     pub flags_session_replay_quota_check: bool,
+
+    /// Serve the v3 record on `/flags?v=3` and above. Off, those requests get the v2 record.
+    #[envconfig(from = "FLAGS_V3_RESPONSE_ENABLED", default = "false")]
+    pub flags_v3_response_enabled: bool,
 
     // Flag definitions rate limiting
     // Default rate limit for all teams (requests per minute)
@@ -1113,15 +1126,24 @@ impl Config {
             "TEST_PERSONS_DATABASE_URL",
             "postgres://posthog:posthog@localhost:5432/posthog_persons",
         );
+        let redis_url = url("TEST_REDIS_URL", "redis://localhost:6379/");
+        // The cookieless client dials host and port: the same Redis as redis_url.
+        let (cookieless_redis_host, cookieless_redis_port) = redis_url
+            .trim_start_matches("redis://")
+            .trim_end_matches('/')
+            .rsplit_once(':')
+            .and_then(|(host, port)| Some((host.to_string(), port.parse().ok()?)))
+            .unwrap_or_else(|| ("localhost".to_string(), 6379));
         Self {
             continuous_profiling: ContinuousProfilingConfig::default(),
             address: SocketAddr::from_str("127.0.0.1:0").unwrap(),
-            redis_url: url("TEST_REDIS_URL", "redis://localhost:6379/"),
+            redis_url,
             redis_reader_url: "".to_string(),
             flags_redis_url: "".to_string(),
             flags_redis_reader_url: "".to_string(),
             flags_redis_enabled: FlexBool(false),
             flag_definitions_self_heal_enabled: FlexBool(false),
+            flag_definitions_rebuild_on_s3_hit_enabled: FlexBool(false),
             flag_definitions_dedicated_redis_enabled: FlexBool(false),
             redis_response_timeout_ms: 100,
             redis_connection_timeout_ms: 5000,
@@ -1168,13 +1190,14 @@ impl Config {
             cookieless_disabled: false,
             cookieless_identifies_ttl_seconds: 345600,
             cookieless_salt_ttl_seconds: 345600,
-            cookieless_redis_host: "localhost".to_string(),
-            cookieless_redis_port: 6379,
+            cookieless_redis_host,
+            cookieless_redis_port,
             new_analytics_capture_endpoint: "/i/v0/e/".to_string(),
             new_analytics_capture_excluded_team_ids: TeamIdCollection::None,
             element_chain_as_string_excluded_teams: TeamIdCollection::None,
             debug: FlexBool(false),
             flags_session_replay_quota_check: false,
+            flags_v3_response_enabled: false,
             flag_definitions_default_rate_per_minute: 600,
             flag_definitions_rate_limits: FlagDefinitionsRateLimits::default(),
             flag_definitions_conditional_rate_per_minute: 6000,
@@ -1377,6 +1400,7 @@ mod tests {
         assert_eq!(config.new_analytics_capture_endpoint, "/i/v0/e/");
         assert_eq!(config.debug, FlexBool(false));
         assert!(!config.flags_session_replay_quota_check);
+        assert!(!config.flags_v3_response_enabled);
         assert_eq!(config.skip_writes, FlexBool(false));
         // Bot filter ships in LogOnly mode by default — pin the safe
         // posture so a future env-var rename / refactor can't silently

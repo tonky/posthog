@@ -26,7 +26,9 @@ use std::time::Duration;
 use tokio::sync::Mutex as TokioMutex;
 use uuid::Uuid;
 
-const KAFKA_BROKERS: &str = "localhost:9092";
+static KAFKA_BROKERS: std::sync::LazyLock<&str> = std::sync::LazyLock::new(|| {
+    std::env::var("KAFKA_HOSTS").map_or("localhost:9092", |v| &*v.leak())
+});
 
 // Global mutex to serialize Kafka integration tests
 static KAFKA_TEST_MUTEX: OnceLock<TokioMutex<()>> = OnceLock::new();
@@ -34,7 +36,7 @@ static KAFKA_TEST_MUTEX: OnceLock<TokioMutex<()>> = OnceLock::new();
 /// Helper to create Kafka topics before tests
 async fn create_kafka_topic(topic: &str) -> Result<()> {
     let admin_client: AdminClient<_> = ClientConfig::new()
-        .set("bootstrap.servers", KAFKA_BROKERS)
+        .set("bootstrap.servers", *KAFKA_BROKERS)
         .create()?;
 
     let new_topic = NewTopic::new(topic, 1, TopicReplication::Fixed(1));
@@ -123,7 +125,7 @@ async fn consume_messages_with_metadata(
     timeout: Duration,
 ) -> Result<Vec<(Option<String>, CapturedEventHeaders, String)>> {
     let consumer: StreamConsumer = ClientConfig::new()
-        .set("bootstrap.servers", KAFKA_BROKERS)
+        .set("bootstrap.servers", *KAFKA_BROKERS)
         .set("group.id", format!("test-{}", Uuid::new_v4()))
         .set("auto.offset.reset", "earliest")
         .set("enable.auto.commit", "false")
@@ -177,10 +179,13 @@ async fn test_person_processing_filter_with_kafka() -> Result<()> {
         "FORCE_DISABLE_PERSON_PROCESSING",
         "token1:user1,token2:user3",
     );
-    std::env::set_var("KAFKA_HOSTS", KAFKA_BROKERS);
+    std::env::set_var("KAFKA_HOSTS", *KAFKA_BROKERS);
     std::env::set_var(
         "DATABASE_URL",
-        "postgres://posthog:posthog@localhost:5432/posthog",
+        std::env::var("DATABASE_URL")
+            .map_or("postgres://posthog:posthog@localhost:5432/posthog", |v| {
+                &*v.leak()
+            }),
     );
 
     let config = Config::init_from_env()?;
@@ -275,10 +280,13 @@ async fn test_empty_person_processing_filter() -> Result<()> {
 
     // Empty filter - all events should have keys
     std::env::set_var("FORCE_DISABLE_PERSON_PROCESSING", "");
-    std::env::set_var("KAFKA_HOSTS", KAFKA_BROKERS);
+    std::env::set_var("KAFKA_HOSTS", *KAFKA_BROKERS);
     std::env::set_var(
         "DATABASE_URL",
-        "postgres://posthog:posthog@localhost:5432/posthog",
+        std::env::var("DATABASE_URL")
+            .map_or("postgres://posthog:posthog@localhost:5432/posthog", |v| {
+                &*v.leak()
+            }),
     );
 
     let config = Config::init_from_env()?;

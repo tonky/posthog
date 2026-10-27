@@ -29,8 +29,12 @@ use kafka_assigner::types::{
 use kafka_assigner_proto::kafka_assigner::v1::kafka_assigner_client::KafkaAssignerClient;
 use kafka_assigner_proto::kafka_assigner::v1::kafka_assigner_server::KafkaAssignerServer;
 
-pub const ETCD_ENDPOINT: &str = "http://localhost:2379";
-pub const KAFKA_BROKERS: &str = "localhost:9092";
+pub static ETCD_ENDPOINT: std::sync::LazyLock<&str> = std::sync::LazyLock::new(|| {
+    std::env::var("ETCD_ENDPOINT").map_or("http://localhost:2379", |v| &*v.leak())
+});
+pub static KAFKA_BROKERS: std::sync::LazyLock<&str> = std::sync::LazyLock::new(|| {
+    std::env::var("KAFKA_HOSTS").map_or("localhost:9092", |v| &*v.leak())
+});
 pub const WAIT_TIMEOUT: Duration = Duration::from_secs(10);
 pub const POLL_INTERVAL: Duration = Duration::from_millis(100);
 pub const NUM_PARTITIONS: u32 = 8;
@@ -185,7 +189,7 @@ pub async fn drive_handoffs_to_completion(store: &KafkaAssignerStore) {
 
 pub async fn create_kafka_topic(topic: &str, num_partitions: i32) {
     let admin_client: AdminClient<DefaultClientContext> = ClientConfig::new()
-        .set("bootstrap.servers", KAFKA_BROKERS)
+        .set("bootstrap.servers", *KAFKA_BROKERS)
         .create()
         .expect("failed to create Kafka admin client");
 

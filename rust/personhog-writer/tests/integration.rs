@@ -1281,7 +1281,7 @@ async fn e2e_produce_to_kafka_and_verify_pg_write() {
     let (flush_tx, flush_rx) = mpsc::channel::<FlushBatch>(2);
 
     let client_config = ClientConfig::new()
-        .set("bootstrap.servers", KAFKA_BOOTSTRAP)
+        .set("bootstrap.servers", *KAFKA_BOOTSTRAP)
         .set(
             "group.id",
             format!("e2e-pg-writer-{}", uuid::Uuid::new_v4()),

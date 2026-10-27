@@ -19,7 +19,9 @@ def postgres_config():
     return {
         "user": settings.PG_USER,
         "password": settings.PG_PASSWORD,
-        "database": "exports_test_database",
+        # A database per test worker: the run's shards share one Postgres server (upstream's
+        # CI runs one per job), and one shard's teardown dropped the schema another's tests used.
+        "database": f"exports_test_database{settings.XDIST_SUFFIX}",
         "schema": "exports_test_schema",
         "host": settings.PG_HOST,
         "port": int(settings.PG_PORT),
@@ -92,7 +94,7 @@ def table_name(ateam, interval):
 
 @pytest_asyncio.fixture
 async def postgres_batch_export(ateam, table_name, postgres_config, interval, exclude_events, temporal_client):
-    from posthog.temporal.tests.utils.models import acreate_batch_export, adelete_batch_export
+    from products.batch_exports.backend.tests.temporal.utils.models import acreate_batch_export, adelete_batch_export
 
     destination_data = {
         "type": "Postgres",

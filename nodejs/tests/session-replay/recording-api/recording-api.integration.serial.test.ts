@@ -52,8 +52,8 @@ const mockOutputs = {
 } as unknown as IngestionOutputs<ReplayEventsOutput | SessionFeaturesOutput>
 
 // Dev-stack services backing the DynamoDBKeyStore block
-const DYNAMODB_ENDPOINT = 'http://127.0.0.1:18010'
-const S3_ENDPOINT = 'http://127.0.0.1:19000'
+const DYNAMODB_ENDPOINT = process.env.DYNAMODB_ENDPOINT ?? 'http://127.0.0.1:18010'
+const S3_ENDPOINT = process.env.OBJECT_STORAGE_ENDPOINT ?? 'http://127.0.0.1:19000'
 const S3_BUCKET = 'posthog'
 const S3_PREFIX = 'session_recordings_recording_api_test'
 const S3_CREDENTIALS = { accessKeyId: 'object_storage_root_user', secretAccessKey: 'object_storage_root_password' }

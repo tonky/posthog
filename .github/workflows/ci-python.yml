@@ -1,7 +1,16 @@
 # This workflow runs generic Python tests global to Dagster and PostHog.
 name: Python CI
 on:
-    workflow_dispatch:
+    push:
+        branches:
+            - master
+    pull_request:
+    schedule:
+        # Where master's coverage for these checks comes from. The merge queue's
+        # trunk-merge/** run gates every commit before it lands, so the push lane does
+        # not repeat them.
+        # Offset from the other hourly CI crons so the runs do not all fire at once.
+        - cron: '43 * * * *'
 
 permissions:
     contents: read

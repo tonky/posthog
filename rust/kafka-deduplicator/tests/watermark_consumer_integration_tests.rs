@@ -19,14 +19,16 @@ use time::OffsetDateTime;
 use tokio::sync::oneshot;
 use uuid::Uuid;
 
-const KAFKA_BROKERS: &str = "localhost:9092";
+static KAFKA_BROKERS: std::sync::LazyLock<&str> = std::sync::LazyLock::new(|| {
+    std::env::var("KAFKA_HOSTS").map_or("localhost:9092", |v| &*v.leak())
+});
 const TEST_TOPIC_BASE: &str = "kdedup-watermark-consumer-integration-test";
 
 async fn create_topic_with_partitions(topic: &str, num_partitions: i32) -> Result<()> {
     use rdkafka::client::DefaultClientContext;
 
     let admin_client: AdminClient<DefaultClientContext> = ClientConfig::new()
-        .set("bootstrap.servers", KAFKA_BROKERS)
+        .set("bootstrap.servers", *KAFKA_BROKERS)
         .create()?;
 
     let new_topic = NewTopic::new(topic, num_partitions, TopicReplication::Fixed(1));
@@ -56,7 +58,7 @@ async fn send_test_messages_to_partition(
     messages: Vec<(String, String)>,
 ) -> Result<()> {
     let producer: FutureProducer = ClientConfig::new()
-        .set("bootstrap.servers", KAFKA_BROKERS)
+        .set("bootstrap.servers", *KAFKA_BROKERS)
         .set("message.timeout.ms", "5000")
         .create()?;
 
@@ -132,7 +134,7 @@ async fn test_watermark_consumer_reads_to_high_watermark_then_closes() -> Result
     }
 
     let group_id = format!("watermark-consumer-{}", Uuid::now_v7());
-    let config = ConsumerConfigBuilder::for_watermark_consumer(KAFKA_BROKERS, &group_id).build();
+    let config = ConsumerConfigBuilder::for_watermark_consumer(*KAFKA_BROKERS, &group_id).build();
 
     let assignments: Vec<PartitionOffset> = partitions_to_use
         .iter()

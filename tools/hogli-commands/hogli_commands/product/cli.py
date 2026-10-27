@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import click
 
 from .baseline import regenerate_baseline as do_regenerate_baseline
-from .lint import detect_changed_product_targets, lint_all_products, lint_changed_products, lint_owners, lint_product
+from .lint import lint_all_products, lint_owners, lint_product
 from .maturity import generate_codegen_report, generate_detail, generate_report, score_all_products, score_product
 from .scaffold import bootstrap_product
 
@@ -62,81 +60,40 @@ def cmd_bootstrap(
     )
 
 
-@click.command(name="product:lint", help="Check product structure and isolation rules")
-@click.argument("names", nargs=-1)
+@click.command(name="product:lint", help="Check product structure for misplaced files")
+@click.argument("name", required=False)
 @click.option("--all", "lint_all", is_flag=True, help="Lint all products")
-@click.option(
-    "--changed",
-    is_flag=True,
-    help="Lint only products changed on this branch/worktree (default when no name is provided)",
-)
-@click.option(
-    "--against",
-    default=None,
-    help="Base git ref for diff detection (e.g. origin/master)",
-)
-@click.option(
-    "--parallel/--no-parallel",
-    default=True,
-    help="Run checks across products in parallel (default: true)",
-)
 @click.option(
     "--regenerate-baseline",
     is_flag=True,
     help="Rewrite products/isolation_baseline.txt from the current tree (adding a line needs DevEx review)",
 )
-def cmd_lint(
-    names: tuple[str, ...],
-    lint_all: bool,
-    changed: bool,
-    against: str | None,
-    parallel: bool,
-    regenerate_baseline: bool,
-) -> None:
+def cmd_lint(name: str | None, lint_all: bool, regenerate_baseline: bool) -> None:
     if regenerate_baseline:
-        if names or lint_all or changed:
-            raise click.UsageError("--regenerate-baseline takes no product name and does not combine with other flags")
+        if name or lint_all:
+            raise click.UsageError("--regenerate-baseline takes no product name and does not combine with --all")
         do_regenerate_baseline()
         return
 
-    if lint_all and names:
-        raise click.UsageError("--all does not combine with specific product names or paths")
-
     if lint_all:
-        lint_all_products(parallel=parallel)
+        lint_all_products()
         return
 
-    resolved_names: list[str] = []
-    for arg in names:
-        parts = Path(arg).parts
-        if len(parts) >= 2 and parts[0] == "products":
-            resolved_names.append(parts[1])
-        else:
-            resolved_names.append(arg)
+    if not name:
+        raise click.UsageError("Provide a product name or use --all")
 
-    if resolved_names:
-        unique_names = list(dict.fromkeys(resolved_names))
-        if len(unique_names) == 1:
-            target = unique_names[0]
-            click.echo(f"Linting product '{target}'...\n")
-            issues = lint_product(target, verbose=True, detailed=True)
-            click.echo("")
+    click.echo(f"Linting product '{name}'...\n")
+    issues = lint_product(name, verbose=True, detailed=True)
+    click.echo("")
 
-            if not issues:
-                click.echo("✓ All checks passed")
-                return
+    if not issues:
+        click.echo("✓ All checks passed")
+        return
 
-            click.echo("Issues:\n")
-            for issue in issues:
-                click.echo(f"  • {issue}")
-            raise SystemExit(1)
-        else:
-            lint_changed_products(unique_names, check_tach=False, check_baseline=False)
-            return
-
-    # Neither names nor --all passed (or explicit --changed): default to smart changed-product scoping
-    changed_products, check_tach, check_baseline = detect_changed_product_targets(against=against)
-    lint_changed_products(changed_products, check_tach=check_tach, check_baseline=check_baseline)
+    click.echo("Issues:\n")
+    for issue in issues:
+        click.echo(f"  • {issue}")
+    raise SystemExit(1)
 
 
 @click.command(

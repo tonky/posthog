@@ -56,7 +56,7 @@ export function getDefaultMetricsIngestionConsumerConfig(): MetricsIngestionCons
         METRICS_INGESTION_CONSUMER_DLQ_TOPIC: KAFKA_METRICS_INGESTION_DLQ,
         METRICS_INGESTION_CONSUMER_CLICKHOUSE_TOPIC: KAFKA_METRICS_CLICKHOUSE,
         METRICS_REDIS_HOST: '127.0.0.1',
-        METRICS_REDIS_PORT: 6379,
+        METRICS_REDIS_PORT: Number(process.env.REDIS_PORT ?? 6379),
         METRICS_REDIS_PASSWORD: '',
         METRICS_REDIS_TLS: isProdEnv() ? true : false,
         METRICS_LIMITER_ENABLED_TEAMS: isProdEnv() ? '' : '*',
@@ -69,7 +69,7 @@ export function getDefaultMetricsIngestionConsumerConfig(): MetricsIngestionCons
         // Overlapping fields with CommonConfig, included for standalone usage
         // ok to connect to localhost over plaintext
         // nosemgrep: trailofbits.generic.redis-unencrypted-transport.redis-unencrypted-transport
-        REDIS_URL: 'redis://127.0.0.1',
+        REDIS_URL: process.env.REDIS_URL ?? 'redis://127.0.0.1',
         REDIS_POOL_MIN_SIZE: 1,
         REDIS_POOL_MAX_SIZE: 3,
         KAFKA_CLIENT_RACK: undefined,

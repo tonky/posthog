@@ -22,7 +22,9 @@ use personhog_coordination::routing_table::{RoutingTable, RoutingTableConfig, St
 use personhog_coordination::store::PersonhogStore;
 use personhog_coordination::strategy::AssignmentStrategy;
 
-pub const ETCD_ENDPOINT: &str = "http://localhost:2379";
+pub static ETCD_ENDPOINT: std::sync::LazyLock<&str> = std::sync::LazyLock::new(|| {
+    std::env::var("ETCD_ENDPOINT").map_or("http://localhost:2379", |v| &*v.leak())
+});
 pub const WAIT_TIMEOUT: Duration = Duration::from_secs(10);
 pub const POLL_INTERVAL: Duration = Duration::from_millis(100);
 
@@ -48,7 +50,7 @@ pub async fn test_store_with_prefix(test_name: &str) -> (Arc<PersonhogStore>, St
 /// lease expired (etcd partition, missed heartbeats) while the process
 /// itself is still running.
 pub async fn revoke_lease_of_key(key: &str) {
-    let mut client = etcd_client::Client::connect([ETCD_ENDPOINT], None)
+    let mut client = etcd_client::Client::connect([*ETCD_ENDPOINT], None)
         .await
         .expect("connect raw etcd client");
     let resp = client.get(key, None).await.expect("get key");

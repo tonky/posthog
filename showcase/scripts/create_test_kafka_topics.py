@@ -1,15 +1,23 @@
 #!/usr/bin/env python3
 # ruff: noqa: T201, B007
 """
-Pre-provisions all required Kafka topics for PostHog and PostHog test runs.
-Compatible with Tansu and Redpanda. Uses confluent_kafka for fast, reliable topic management.
+Creates the Kafka topics one backend test worker writes (`--worker shard1`).
+Fails when the broker is unreachable.
 """
 
-import sys
-import time
+from __future__ import annotations
 
+import argparse
+import os
+import sys
+from pathlib import Path
+
+from confluent_kafka import KafkaError, KafkaException
 from confluent_kafka.admin import AdminClient, NewTopic
 
+# The topics the code produces to. Every topic a ClickHouse Kafka table consumes is read from
+# upstream's own list (docker/kafka/topics.txt, which posthog/clickhouse/test/test_schema.py keeps
+# in step with schema.py) rather than copied here.
 BASE_TOPICS = [
     "clickhouse_events_json",
     "exceptions_ingestion",
@@ -69,66 +77,74 @@ BASE_TOPICS = [
     "ingestion-traces-dlq",
 ]
 
-TARGET_PARTITIONS = 16
+# Brokers auto-create topics with one partition (redpanda in upstream's compose, kafka's
+# num.partitions=1 under enve): pre-creating them as such only takes the first produce's wait.
+PARTITIONS = 1
 
 
-def main():
-    broker = "127.0.0.1:19092"
-    if len(sys.argv) > 1:
-        broker = sys.argv[1]
+UPSTREAM_TOPICS = Path(__file__).resolve().parents[2] / "docker/kafka/topics.txt"
 
+
+def listed_topics(listing: Path = UPSTREAM_TOPICS) -> set[str]:
+    lines = (line.strip() for line in listing.read_text().splitlines())
+    return {line for line in lines if line and not line.startswith("#")}
+
+
+def topic_names(listing: Path = UPSTREAM_TOPICS) -> list[str]:
+    return sorted(listed_topics(listing) | set(BASE_TOPICS))
+
+
+def worker_topics(worker: str | None, listing: Path = UPSTREAM_TOPICS) -> list[str]:
+    """The topics a test worker uses, named as posthog/settings/data_stores.py (and nodejs's
+    kafka-topics.ts) suffix them: `_test`, plus `_<PYTEST_XDIST_WORKER>` when the worker sets one.
+    Besides, topics.txt's own names, as docker-compose's kafka-init creates them: a few Kafka
+    tables name their topic with no suffix (kafka_metrics_avro4's clickhouse_metrics,
+    kafka_precalculated_events' clickhouse_prefiltered_events), and on a broker without them
+    those tables never get a partition."""
+    suffix = "_test" + (f"_{worker}" if worker else "")
+    return sorted({f"{topic}{suffix}" for topic in topic_names(listing)} | listed_topics(listing))
+
+
+def parse_args(argv: list[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--worker", help="the PYTEST_XDIST_WORKER the topics are suffixed with")
+    # No fixed default: a named service instance (E7) runs Kafka on a port of its own, and a
+    # fixed one would reach another run's broker.
+    parser.add_argument(
+        "--broker",
+        default=os.environ.get("KAFKA_HOSTS", "").split(",")[0],
+        help="bootstrap server (default: the first of $KAFKA_HOSTS)",
+    )
+    args = parser.parse_args(argv)
+    if not args.broker:
+        parser.error("no broker: pass --broker or set KAFKA_HOSTS")
+    return args
+
+
+def main(argv: list[str]) -> int:
+    args = parse_args(argv)
+    admin = AdminClient({"bootstrap.servers": args.broker, "socket.timeout.ms": 5000})
     try:
-        admin = AdminClient({"bootstrap.servers": broker, "socket.timeout.ms": 5000})
+        existing = admin.list_topics(timeout=10).topics
     except Exception as e:
-        print(f"Warning: Could not connect to Kafka broker at {broker}: {e}", file=sys.stderr)
-        return
+        print(f"Kafka broker {args.broker} is unreachable: {e}", file=sys.stderr)
+        return 1
 
-    try:
-        md = admin.list_topics(timeout=5)
-        existing = md.topics
-    except Exception as e:
-        print(f"Warning: Could not list topics: {e}", file=sys.stderr)
-        existing = {}
-
-    needed = set(BASE_TOPICS)
-    for t in BASE_TOPICS:
-        needed.add(f"{t}_test")
-        for gw in range(16):
-            needed.add(f"{t}_test_gw{gw}")
-
-    # Check for topics that need partition expansion or creation
-    underpartitioned = [t for t in needed if t in existing and len(existing[t].partitions) < TARGET_PARTITIONS]
-    missing = [t for t in needed if t not in existing]
-
-    if underpartitioned:
-        print(
-            f"Deleting {len(underpartitioned)} underpartitioned topics to re-create with {TARGET_PARTITIONS} partitions..."
-        )
-        del_futures = admin.delete_topics(underpartitioned)
-        for t, f in del_futures.items():
-            try:
-                f.result(timeout=5)
-            except Exception:
-                pass
-        time.sleep(0.3)
-        missing.extend(underpartitioned)
-
+    missing = [t for t in worker_topics(args.worker) if t not in existing]
     if not missing:
-        print(f"All {len(needed)} Kafka topics exist with >= {TARGET_PARTITIONS} partitions.")
-        return
-
-    print(f"Provisioning {len(missing)} Kafka topics ({TARGET_PARTITIONS} partitions) on {broker}...")
-    to_create = [NewTopic(t, num_partitions=TARGET_PARTITIONS, replication_factor=1) for t in missing]
-    create_futures = admin.create_topics(to_create)
-    success = 0
-    for t, f in create_futures.items():
+        return 0
+    futures = admin.create_topics([NewTopic(t, num_partitions=PARTITIONS, replication_factor=1) for t in missing])
+    failed = 0
+    for topic, future in futures.items():
         try:
-            f.result(timeout=5)
-            success += 1
-        except Exception as e:
-            print(f"Notice creating topic {t}: {e}", file=sys.stderr)
-    print(f"Successfully provisioned {success}/{len(missing)} topics.")
+            future.result(timeout=30)
+        except KafkaException as e:
+            if e.args[0].code() != KafkaError.TOPIC_ALREADY_EXISTS:
+                print(f"Could not create topic {topic}: {e}", file=sys.stderr)
+                failed += 1
+    print(f"Created {len(missing) - failed}/{len(missing)} Kafka topics on {args.broker}.")
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main(sys.argv[1:]))

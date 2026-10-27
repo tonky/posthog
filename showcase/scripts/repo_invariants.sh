@@ -3,11 +3,7 @@
 # Runs on its own database clones so it never touches the templates or the
 # test shards that run at the same time.
 set -euo pipefail
-junit=()
-if [[ -n "${ENACT_REPLAY_RESULTS:-}" ]]; then
-    mkdir -p "$ENACT_REPLAY_RESULTS"
-    junit=(--junit-xml "$ENACT_REPLAY_RESULTS/repo-invariants.xml")
-fi
+export PATH="$PWD/bin:$PATH"
 reuse=()
 # Same probe as run_sharded_pytest.sh: the harness starts services around the
 # run, so the runner's ENACT_SERVICES_ACTIVE flag says nothing about them.
@@ -20,5 +16,14 @@ if [ -n "${PGPORT:-}" ] && pg_isready -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -q;
     reuse=(--reuse-db)
 fi
 NUM_WORKERS="${PYTEST_NUM_WORKERS:-$(nproc 2>/dev/null || echo 2)}"
-exec env -u E2E_TESTING python3 showcase/scripts/backend_runtime.py exec uv run --no-sync python -m pytest \
-    -n "$NUM_WORKERS" -p no:cacheprovider -o pythonhashseed=0 "${reuse[@]}" "${junit[@]}" posthog/test/repo_invariants
+# The import budget times django.setup() in child processes: beside the other workers it
+# measured their load. It runs after them, on its own, as upstream runs the directory (one
+# process, no xdist).
+timed=posthog/test/repo_invariants/test_startup_import_budget.py::test_no_new_heavy_imports_at_setup
+pytest() {
+    # The backend runtime is installed before the run (ci.cue's toolchain.python.install).
+    env -u E2E_TESTING python3 showcase/scripts/backend_runtime.py exec uv run --no-sync python -m pytest \
+        -p no:cacheprovider -o pythonhashseed=0 ${reuse[@]+"${reuse[@]}"} "$@"
+}
+pytest -n "$NUM_WORKERS" posthog/test/repo_invariants --deselect "$timed"
+pytest "$timed"

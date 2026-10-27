@@ -65,6 +65,7 @@ from .isolation import (
     COMPUTED_WIRING_LOCATIONS,
     MODEL_CROSSINGS,
     FacadeShapeFinding,
+    _iter_facade_modules,
     facade_model_crossings,
     facade_shape_findings,
 )
@@ -270,8 +271,7 @@ def product_model_labels(products: Iterable[str] | None = None) -> dict[str, str
 
 
 def _is_test_module(path: Path) -> bool:
-    rel = path.relative_to(REPO_ROOT) if path.is_relative_to(REPO_ROOT) else path
-    if "test" in rel.parts or "tests" in rel.parts:
+    if "test" in path.parts or "tests" in path.parts:
         return True
     return path.name.startswith("test_") or path.name.endswith("_test.py") or path.name == "conftest.py"
 
@@ -279,8 +279,7 @@ def _is_test_module(path: Path) -> bool:
 def _is_out_of_scope_module(path: Path) -> bool:
     """Tests reach concrete classes through testing doors, so they are not consumers. A migration
     reaches a model through the historical registry, which is the only way a migration can."""
-    rel = path.relative_to(REPO_ROOT) if path.is_relative_to(REPO_ROOT) else path
-    return _is_test_module(path) or "migrations" in rel.parts
+    return _is_test_module(path) or "migrations" in path.parts
 
 
 @dataclass(frozen=True, slots=True)
@@ -381,8 +380,7 @@ def _candidates(kind_hint: _KindHint | None = None) -> list[_Candidate]:
     found = []
     for root in SCANNED_ROOTS:
         for path in sorted((REPO_ROOT / root).rglob("*.py")):
-            rel = path.relative_to(REPO_ROOT) if path.is_relative_to(REPO_ROOT) else path
-            if SKIPPED_DIRS.intersection(rel.parts):
+            if SKIPPED_DIRS.intersection(path.parts):
                 continue
             source = path.read_bytes()
             dotted = _dotted_module(path)
@@ -811,12 +809,14 @@ def _wiring_location_exports(product: str, location: str) -> dict[_Export, str]:
         module = _dotted_module(path)
         for name in _top_level_names(tree):
             exports[_Export(module, name)] = label
-    for facade_path in sorted((PRODUCTS_DIR / product / "backend" / "facade").glob("*.py")):
+    for facade_path in _iter_facade_modules(PRODUCTS_DIR / product / "backend"):
         tree = ast_parse_safe(facade_path)
         if tree is None:
             continue
         for name, source in _lazy_reexports(tree, product, _module_exists).items():
-            if (REPO_ROOT / source.replace(".", "/")).with_suffix(".py").is_relative_to(root):
+            # The source is a module or a package, so test both the package directory and the .py file.
+            source_path = REPO_ROOT / source.replace(".", "/")
+            if source_path.is_relative_to(root) or source_path.with_suffix(".py").is_relative_to(root):
                 exports[_Export(_dotted_module(facade_path), name)] = label
     return exports
 

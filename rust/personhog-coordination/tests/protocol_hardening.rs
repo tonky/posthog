@@ -885,7 +885,7 @@ async fn legacy_ack_without_handoff_id_does_not_satisfy_quorum() {
 
     // Write the ack exactly as an old binary would: raw JSON with no
     // `handoff_id` field at all.
-    let mut raw = etcd_client::Client::connect([common::ETCD_ENDPOINT], None)
+    let mut raw = etcd_client::Client::connect([*common::ETCD_ENDPOINT], None)
         .await
         .expect("connect raw etcd client");
     raw.put(
@@ -2045,7 +2045,7 @@ async fn the_reconcile_pass_reasserts_freeze_acks() {
     })
     .await;
 
-    let mut raw = etcd_client::Client::connect(["http://localhost:2379"], None)
+    let mut raw = etcd_client::Client::connect([*common::ETCD_ENDPOINT], None)
         .await
         .expect("raw client");
     raw.delete(format!("{prefix}freeze_acks/0/rra-router"), None)
@@ -2336,7 +2336,7 @@ async fn reconcile_failures_within_budget_are_tolerated_and_heal() {
     // before reaching the ack write, so the ack must stay absent while
     // the run survives the failures.
     fail.store(true, Ordering::SeqCst);
-    let mut raw = etcd_client::Client::connect(["http://localhost:2379"], None)
+    let mut raw = etcd_client::Client::connect([*common::ETCD_ENDPOINT], None)
         .await
         .expect("raw client");
     raw.delete(format!("{prefix}freeze_acks/0/rtf-router"), None)
@@ -2936,10 +2936,10 @@ async fn lease_loss_during_graceful_drain_self_fences_promptly() {
 /// registration, and its partitions — no self-fence, no re-warm.
 #[tokio::test]
 async fn a_connection_blip_does_not_fence_the_pod() {
-    let proxy = FlakyProxy::start("127.0.0.1:2379").await;
+    let proxy = FlakyProxy::start(common::ETCD_ENDPOINT.trim_start_matches("http://")).await;
     let prefix = format!("/test-keepalive-blip-{}/", uuid::Uuid::new_v4());
     let pod_store = store_at(&proxy.endpoint, &prefix).await;
-    let direct_store = store_at(ETCD_ENDPOINT, &prefix).await;
+    let direct_store = store_at(*ETCD_ENDPOINT, &prefix).await;
 
     let cancel = CancellationToken::new();
     let (handler, events) = MockHandoffHandler::new();
@@ -2996,10 +2996,10 @@ async fn a_connection_blip_does_not_fence_the_pod() {
 /// third of the TTL for the fence to complete before expiry.
 #[tokio::test]
 async fn a_sustained_outage_fences_at_the_renewal_margin() {
-    let proxy = FlakyProxy::start("127.0.0.1:2379").await;
+    let proxy = FlakyProxy::start(common::ETCD_ENDPOINT.trim_start_matches("http://")).await;
     let prefix = format!("/test-keepalive-margin-{}/", uuid::Uuid::new_v4());
     let pod_store = store_at(&proxy.endpoint, &prefix).await;
-    let direct_store = store_at(ETCD_ENDPOINT, &prefix).await;
+    let direct_store = store_at(*ETCD_ENDPOINT, &prefix).await;
 
     let cancel = CancellationToken::new();
     let (handler, events) = MockHandoffHandler::new();
@@ -3233,7 +3233,7 @@ async fn pod_retries_resume_after_a_failed_attempt() {
 /// expire while the process is otherwise perfectly healthy.
 #[tokio::test]
 async fn authority_lapses_when_renewals_stop() {
-    let proxy = FlakyProxy::start("127.0.0.1:2379").await;
+    let proxy = FlakyProxy::start(common::ETCD_ENDPOINT.trim_start_matches("http://")).await;
     let prefix = format!("/test-authority-lapse-{}/", uuid::Uuid::new_v4());
     let pod_store = store_at(&proxy.endpoint, &prefix).await;
 
@@ -3258,7 +3258,7 @@ async fn authority_lapses_when_renewals_stop() {
     let token = cancel.child_token();
     tokio::spawn(async move { pod.run(token).await });
 
-    let store = store_at(ETCD_ENDPOINT, &prefix).await;
+    let store = store_at(*ETCD_ENDPOINT, &prefix).await;
     put_handoff(&store, 0, None, "lapse-pod", HandoffPhase::Warming).await;
     wait_for_event(&events, HandoffEvent::Warmed(0)).await;
     assert!(
@@ -3323,7 +3323,7 @@ async fn authority_lapses_when_renewals_stop() {
 #[tokio::test]
 async fn authority_is_surrendered_when_the_registration_is_deleted() {
     let prefix = format!("/test-registration-delete-{}/", uuid::Uuid::new_v4());
-    let store = store_at(ETCD_ENDPOINT, &prefix).await;
+    let store = store_at(*ETCD_ENDPOINT, &prefix).await;
 
     let cancel = CancellationToken::new();
     let (handler, events) = MockHandoffHandler::new();
@@ -3377,7 +3377,7 @@ async fn authority_is_surrendered_when_the_registration_is_deleted() {
 #[tokio::test]
 async fn a_deleted_registration_starts_a_new_session() {
     let prefix = format!("/test-registration-resession-{}/", uuid::Uuid::new_v4());
-    let store = store_at(ETCD_ENDPOINT, &prefix).await;
+    let store = store_at(*ETCD_ENDPOINT, &prefix).await;
 
     let cancel = CancellationToken::new();
     let (handler, events) = MockHandoffHandler::new();
@@ -3432,7 +3432,7 @@ async fn a_deleted_registration_starts_a_new_session() {
 #[tokio::test]
 async fn a_foreign_deletion_under_the_pods_prefix_does_not_cost_the_session() {
     let prefix = format!("/test-registration-foreign-{}/", uuid::Uuid::new_v4());
-    let store = store_at(ETCD_ENDPOINT, &prefix).await;
+    let store = store_at(*ETCD_ENDPOINT, &prefix).await;
 
     let cancel = CancellationToken::new();
     let (handler, events) = MockHandoffHandler::new();
@@ -3459,7 +3459,7 @@ async fn a_foreign_deletion_under_the_pods_prefix_does_not_cost_the_session() {
 
     // A key under the prefix whose final segment matches the pod's name,
     // but which is not its registration.
-    let mut raw = etcd_client::Client::connect([common::ETCD_ENDPOINT], None)
+    let mut raw = etcd_client::Client::connect([*common::ETCD_ENDPOINT], None)
         .await
         .expect("connect raw etcd client");
     let decoy = format!("{prefix}pods/decoy/exact-pod");
@@ -3505,7 +3505,7 @@ async fn a_foreign_deletion_under_the_pods_prefix_does_not_cost_the_session() {
 #[tokio::test]
 async fn an_operator_delete_of_a_live_registration_revokes_its_lease() {
     let prefix = format!("/test-registration-operator-del-{}/", uuid::Uuid::new_v4());
-    let store = store_at(ETCD_ENDPOINT, &prefix).await;
+    let store = store_at(*ETCD_ENDPOINT, &prefix).await;
 
     let cancel = CancellationToken::new();
     let (handler, events) = MockHandoffHandler::new();
@@ -3533,7 +3533,7 @@ async fn an_operator_delete_of_a_live_registration_revokes_its_lease() {
     wait_for_event(&events, HandoffEvent::Warmed(0)).await;
 
     let key = format!("{prefix}pods/operator-del-pod");
-    let mut raw = etcd_client::Client::connect([common::ETCD_ENDPOINT], None)
+    let mut raw = etcd_client::Client::connect([*common::ETCD_ENDPOINT], None)
         .await
         .expect("connect raw etcd client");
     let resp = raw.get(key.as_str(), None).await.expect("get registration");
@@ -4361,7 +4361,7 @@ async fn a_pending_new_owner_is_hinted_but_not_warmed() {
 #[tokio::test]
 async fn a_standby_waits_on_the_leader_key_rather_than_campaigning() {
     let prefix = format!("/test-standby-watch-{}/", uuid::Uuid::new_v4());
-    let store = store_at(ETCD_ENDPOINT, &prefix).await;
+    let store = store_at(*ETCD_ENDPOINT, &prefix).await;
 
     let standby = Arc::new(Coordinator::new(
         Arc::clone(&store),
@@ -4422,7 +4422,7 @@ async fn a_standby_waits_on_the_leader_key_rather_than_campaigning() {
     // create, guarded on the key being absent — so the event is built
     // here rather than provoked, to hold the discriminator itself.
     let leader_key = format!("{prefix}coordinator/leader");
-    let mut raw = etcd_client::Client::connect([ETCD_ENDPOINT], None)
+    let mut raw = etcd_client::Client::connect([*ETCD_ENDPOINT], None)
         .await
         .expect("connect raw etcd client");
     raw.put(
@@ -4944,7 +4944,7 @@ async fn the_sweep_spares_a_membership_a_live_handoff_refers_to() {
 /// period.
 #[tokio::test]
 async fn a_coordinator_that_cannot_reach_etcd_keeps_trying_and_still_stops_on_request() {
-    let proxy = FlakyProxy::start("127.0.0.1:2379").await;
+    let proxy = FlakyProxy::start(common::ETCD_ENDPOINT.trim_start_matches("http://")).await;
     let prefix = format!("/test-coordinator-retries-{}/", uuid::Uuid::new_v4());
     // Connect while the proxy is healthy: the failure under test is a
     // connection that dies later, not one that never opened.
@@ -5021,7 +5021,7 @@ async fn a_coordinator_that_cannot_reach_etcd_keeps_trying_and_still_stops_on_re
 /// not happen.
 #[tokio::test]
 async fn a_standby_stops_promptly_when_etcd_is_dark() {
-    let proxy = FlakyProxy::start("127.0.0.1:2379").await;
+    let proxy = FlakyProxy::start(common::ETCD_ENDPOINT.trim_start_matches("http://")).await;
     let prefix = format!("/test-standby-cancel-{}/", uuid::Uuid::new_v4());
     // Connected and used while healthy: the failure under test is a call
     // that cannot complete, not a store that never opened.
@@ -5098,9 +5098,9 @@ async fn a_standby_stops_promptly_when_etcd_is_dark() {
 /// as a run failure, fails the bound here.
 #[tokio::test]
 async fn a_standby_with_a_severed_watch_still_takes_an_open_election() {
-    let proxy = FlakyProxy::start("127.0.0.1:2379").await;
+    let proxy = FlakyProxy::start(common::ETCD_ENDPOINT.trim_start_matches("http://")).await;
     let prefix = format!("/test-severed-watch-{}/", uuid::Uuid::new_v4());
-    let direct = store_at(ETCD_ENDPOINT, &prefix).await;
+    let direct = store_at(*ETCD_ENDPOINT, &prefix).await;
     let watched = store_at(&proxy.endpoint, &prefix).await;
 
     let lease_id = direct.grant_lease(60).await.expect("lease");
@@ -5163,7 +5163,7 @@ async fn a_standby_with_a_severed_watch_still_takes_an_open_election() {
 /// assertion window excludes.
 #[tokio::test]
 async fn a_pod_asked_to_stop_while_etcd_hangs_exits_inside_its_bounds() {
-    let proxy = FlakyProxy::start("127.0.0.1:2379").await;
+    let proxy = FlakyProxy::start(common::ETCD_ENDPOINT.trim_start_matches("http://")).await;
     let prefix = format!("/test-pod-teardown-{}/", uuid::Uuid::new_v4());
     let store = store_at(&proxy.endpoint, &prefix).await;
     let cancel = CancellationToken::new();
@@ -5220,7 +5220,7 @@ async fn a_pod_asked_to_stop_while_etcd_hangs_exits_inside_its_bounds() {
 /// exit is prompt against a store that answers nothing.
 #[tokio::test]
 async fn a_router_asked_to_stop_while_etcd_hangs_exits_inside_its_bounds() {
-    let proxy = FlakyProxy::start("127.0.0.1:2379").await;
+    let proxy = FlakyProxy::start(common::ETCD_ENDPOINT.trim_start_matches("http://")).await;
     let prefix = format!("/test-router-teardown-{}/", uuid::Uuid::new_v4());
     let store = store_at(&proxy.endpoint, &prefix).await;
     let cancel = CancellationToken::new();
@@ -5531,7 +5531,7 @@ async fn a_cached_absent_membership_still_requires_every_live_router() {
 #[tokio::test]
 async fn a_freeze_ack_batch_lands_every_key_across_the_chunk_boundary() {
     let prefix = format!("/test-ack-batch-{}/", uuid::Uuid::new_v4());
-    let store = store_at(ETCD_ENDPOINT, &prefix).await;
+    let store = store_at(*ETCD_ENDPOINT, &prefix).await;
 
     let acks: Vec<RouterFreezeAck> = (0u32..130)
         .map(|partition| RouterFreezeAck {

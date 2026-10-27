@@ -465,7 +465,10 @@ fn make_config(addr: &str) -> property_defs_rs::config::Config {
     // Set env vars exactly once to avoid data races across concurrent test cases.
     static INIT_ENV: std::sync::Once = std::sync::Once::new();
     INIT_ENV.call_once(|| {
-        std::env::set_var("KAFKA__BOOTSTRAP_SERVERS", "localhost:9092");
+        std::env::set_var(
+            "KAFKA__BOOTSTRAP_SERVERS",
+            std::env::var("KAFKA_HOSTS").map_or("localhost:9092", |v| &*v.leak()),
+        );
         std::env::set_var("KAFKA__TOPIC", "test_topic");
     });
     let mut config = property_defs_rs::config::Config::init_with_defaults().unwrap();

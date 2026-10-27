@@ -249,20 +249,26 @@ def test_compile_hogql_predicate_emits_unqualified_materialized_column(team, sna
     references, so ``sharded_events.mat_$current_url`` would fail with "Missing
     columns" even when the column exists on every replica.
     """
+    from posthog.test.base import cleanup_materialized_columns
+
     from posthog.models.data_deletion_request import compile_hogql_predicate
 
     from ee.clickhouse.materialized_columns.analyze import materialize
 
     materialize("events", "$current_url")
-
-    request = DataDeletionRequest(
-        **_base_kwargs(
-            team_id=team.id,
-            events=["$pageview"],
-            hogql_predicate="properties.$current_url LIKE '%message=%'",
+    try:
+        request = DataDeletionRequest(
+            **_base_kwargs(
+                team_id=team.id,
+                events=["$pageview"],
+                hogql_predicate="properties.$current_url LIKE '%message=%'",
+            )
         )
-    )
-    sql, _ = compile_hogql_predicate(request)
+        sql, _ = compile_hogql_predicate(request)
+    finally:
+        # The column outlives the test otherwise: later tests in the process print
+        # properties.$current_url as it.
+        cleanup_materialized_columns()
     assert "events.`mat_$current_url`" not in sql
     assert "sharded_events.`mat_$current_url`" not in sql
     assert "`mat_$current_url`" in sql

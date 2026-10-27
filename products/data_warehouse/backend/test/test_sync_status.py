@@ -5,6 +5,8 @@ from unittest.mock import MagicMock
 
 from parameterized import parameterized
 
+from posthog.settings import DATAWAREHOUSE_BUCKET_DOMAIN
+
 from products.data_warehouse.backend.sync_status import get_warehouse_sync_warnings
 from products.warehouse_sources.backend.facade.models import (
     DataWarehouseCredential,
@@ -36,7 +38,7 @@ class TestWarehouseSyncWarnings(BaseTest):
             team=self.team,
             external_data_source=self.source,
             credential=self.credential,
-            url_pattern="http://host.docker.internal:19000/test/*.parquet",
+            url_pattern=f"http://{DATAWAREHOUSE_BUCKET_DOMAIN}/test/*.parquet",
             columns={"id": "String"},
         )
         self.now = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)

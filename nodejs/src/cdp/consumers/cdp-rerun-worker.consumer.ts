@@ -80,7 +80,7 @@ export class CdpRerunWorkerConsumer extends CdpConsumerBase<PluginsServerConfig>
         // uses self-signed certs with a hostname mismatch, same as the
         // session-replay recording-api client.
         const chScheme = this.config.CLICKHOUSE_SECURE ? 'https' : 'http'
-        const chPort = this.config.CLICKHOUSE_SECURE ? 8443 : 8123
+        const chPort = process.env.CLICKHOUSE_HTTP_PORT ?? (this.config.CLICKHOUSE_SECURE ? 8443 : 8123)
         this.clickhouseClient = createClickHouseClient({
             url: `${chScheme}://${this.config.CLICKHOUSE_HOST}:${chPort}`,
             username: this.config.CLICKHOUSE_USER,

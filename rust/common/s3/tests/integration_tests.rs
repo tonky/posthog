@@ -4,11 +4,14 @@ use aws_sdk_s3::Client as AwsS3SdkClient;
 use common_s3::{S3Client, S3Error, S3Impl};
 
 const TEST_BUCKET: &str = "test-bucket";
-const S3_ENDPOINT: &str = "http://127.0.0.1:19000"; // MinIO
+// MinIO
+static S3_ENDPOINT: std::sync::LazyLock<&str> = std::sync::LazyLock::new(|| {
+    std::env::var("OBJECT_STORAGE_ENDPOINT").map_or("http://127.0.0.1:19000", |v| &*v.leak())
+});
 
 async fn create_test_s3_client() -> (S3Impl, AwsS3SdkClient) {
     let config = aws_config::defaults(BehaviorVersion::latest())
-        .endpoint_url(S3_ENDPOINT)
+        .endpoint_url(*S3_ENDPOINT)
         .region(Region::new("us-east-1"))
         .credentials_provider(aws_sdk_s3::config::Credentials::new(
             "object_storage_root_user",

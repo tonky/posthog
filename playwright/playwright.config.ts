@@ -1,4 +1,10 @@
 import { defineConfig, devices } from '@playwright/test'
+import path from 'path'
+
+// PLAYWRIGHT_RESULTS_DIR, when set, takes the run's reports, test artifacts and screenshots: a
+// run's own directory, which starts empty as CI's cleaned one does, outside the checkout's sources.
+const resultsDir = process.env.PLAYWRIGHT_RESULTS_DIR ? path.resolve(process.env.PLAYWRIGHT_RESULTS_DIR) : null
+const resultsPath = (name: string): string => (resultsDir ? path.join(resultsDir, name) : name)
 
 /**
  * Read environment variables from file.
@@ -49,16 +55,19 @@ export default defineConfig({
         // Enforces `mode: "run"` quarantine entries — tolerates their failures so
         // flaky tests can't block CI (schema: .test_quarantine.json). No-op when empty.
         ['./playwright.quarantine.reporter.ts'],
-        ['html', { open: 'never' }],
-        ...(process.env.CI ? [['junit', { outputFile: 'junit-results.xml', includeRetries: true }] as const] : []),
-        ...(process.env.CI ? [['json', { outputFile: 'results.json' }] as const] : []),
+        ['html', { open: 'never', ...(resultsDir ? { outputFolder: resultsPath('playwright-report') } : {}) }],
+        ...(process.env.CI
+            ? [['junit', { outputFile: resultsPath('junit-results.xml'), includeRetries: true }] as const]
+            : []),
+        ...(process.env.CI ? [['json', { outputFile: resultsPath('results.json') }] as const] : []),
     ],
     /* Shared settings for all the projects below. See https://playwright.dev/docs/api/class-testoptions. */
     use: {
         /* Maximum time each action such as `click()` can take. Defaults to 0 (no limit). */
         actionTimeout: 0,
         /* Base URL to use in actions like `await page.goto('/')`. */
-        baseURL: process.env.CI ? 'http://localhost:8000' : process.env.BASE_URL || 'http://localhost:8080',
+        // BASE_URL first: a CI run whose PostHog listens on a port of its own.
+        baseURL: process.env.BASE_URL || (process.env.CI ? 'http://localhost:8000' : 'http://localhost:8080'),
 
         /* Collect trace when retrying the failed test. See https://playwright.dev/docs/trace-viewer */
         trace: 'on-first-retry',
@@ -70,7 +79,8 @@ export default defineConfig({
     },
 
     /* Configure centralized screenshot directory */
-    snapshotDir: './__snapshots__',
+    snapshotDir: resultsPath('__snapshots__'),
+    ...(resultsDir ? { outputDir: resultsPath('test-results') } : {}),
 
     /* Configure projects for major browsers */
     projects: [

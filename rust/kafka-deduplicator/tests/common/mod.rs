@@ -11,14 +11,16 @@ use chrono::{DateTime, Utc};
 use kafka_deduplicator::checkpoint::{hash_prefix_for_partition, CheckpointMetadata};
 
 // MinIO configuration matching docker-compose.dev.yml
-pub const MINIO_ENDPOINT: &str = "http://localhost:19000";
+pub static MINIO_ENDPOINT: std::sync::LazyLock<&str> = std::sync::LazyLock::new(|| {
+    std::env::var("OBJECT_STORAGE_ENDPOINT").map_or("http://localhost:19000", |v| &*v.leak())
+});
 pub const MINIO_ACCESS_KEY: &str = "object_storage_root_user";
 pub const MINIO_SECRET_KEY: &str = "object_storage_root_password";
 
 /// Creates a MinIO S3 client configured for local testing.
 pub async fn create_minio_client() -> AwsS3Client {
     let config = aws_config::defaults(BehaviorVersion::latest())
-        .endpoint_url(MINIO_ENDPOINT)
+        .endpoint_url(*MINIO_ENDPOINT)
         .region(Region::new("us-east-1"))
         .credentials_provider(aws_sdk_s3::config::Credentials::new(
             MINIO_ACCESS_KEY,

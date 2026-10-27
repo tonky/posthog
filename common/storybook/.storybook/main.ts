@@ -5,6 +5,7 @@ import * as path from 'path'
 import { mergeConfig, type Rollup } from 'vite'
 
 import { frontendResolvePlugin } from './plugins/vite-frontend-resolve-plugin.ts'
+import { enactChunksPlugin } from './plugins/vite-enact-chunks-plugin.ts'
 import { moduleGraphPlugin } from './plugins/vite-module-graph-plugin.ts'
 import { sqlRawPlugin } from './plugins/vite-sql-raw-plugin.ts'
 
@@ -30,6 +31,7 @@ const SINGLETON_PACKAGES = [
     'kea-subscriptions',
     'kea-waitfor',
     'kea-window-values',
+    '@testing-library/dom',
 ]
 
 const createStoriesPathFor = (storyPath: string): string => `../../../${storyPath}/**/*.stories.@(js|jsx|ts|tsx)`
@@ -69,7 +71,13 @@ const config: StorybookConfig = {
 
     viteFinal: (viteConfig) =>
         mergeConfig(viteConfig, {
-            plugins: [frontendResolvePlugin(REPO_ROOT), tailwindcss(), sqlRawPlugin(), moduleGraphPlugin(REPO_ROOT)],
+            plugins: [
+                frontendResolvePlugin(REPO_ROOT),
+                tailwindcss(),
+                sqlRawPlugin(),
+                moduleGraphPlugin(REPO_ROOT),
+                enactChunksPlugin(REPO_ROOT),
+            ],
             resolve: {
                 dedupe: SINGLETON_PACKAGES,
                 alias: {

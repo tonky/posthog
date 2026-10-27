@@ -1,3 +1,4 @@
+import os
 from datetime import datetime
 from functools import cache
 from typing import TYPE_CHECKING, Optional, cast
@@ -45,7 +46,10 @@ def build_function_call(postgres_table_name: str, context: Optional[HogQLContext
     table = add_param(postgres_table_name)
 
     if settings.DEBUG or settings.TEST:
-        address = add_param("db:5432")  # docker container for postgres from clickhouse
+        # docker container for postgres from clickhouse (by the host CLICKHOUSE_POSTGRES_HOST names, where
+        # there's no docker network), on the port Django reaches it on
+        host = os.environ.get("CLICKHOUSE_POSTGRES_HOST", "db")
+        address = add_param(f"{host}:{settings.DATABASES['default']['PORT']}")
 
         # Extract model name from postgres table name (e.g., "posthog_group" -> "group")
         model_name = postgres_table_name.replace("posthog_", "")

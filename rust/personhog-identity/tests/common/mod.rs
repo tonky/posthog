@@ -43,9 +43,11 @@ impl TestContext {
     }
 
     pub async fn new_with_tables(tables: IdentityTables) -> Self {
-        let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-            "postgres://posthog:posthog@localhost:5432/posthog_persons".to_string()
-        });
+        let database_url = std::env::var("TEST_PERSONS_DATABASE_URL")
+            .or_else(|_| std::env::var("DATABASE_URL"))
+            .unwrap_or_else(|_| {
+                "postgres://posthog:posthog@localhost:5432/posthog_persons".to_string()
+            });
         let pool = PgPool::connect(&database_url)
             .await
             .expect("Failed to connect to test database");

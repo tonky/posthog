@@ -56,7 +56,9 @@ use common::{
 };
 
 // Infrastructure configuration
-const KAFKA_BROKERS: &str = "localhost:9092";
+static KAFKA_BROKERS: std::sync::LazyLock<&str> = std::sync::LazyLock::new(|| {
+    std::env::var("KAFKA_HOSTS").map_or("localhost:9092", |v| &*v.leak())
+});
 const TEST_BUCKET: &str = "test-kafka-deduplicator-e2e";
 const TEST_TOPIC_BASE: &str = "kdedup-e2e-rebalance-test";
 
@@ -66,7 +68,7 @@ const TEST_TOPIC_BASE: &str = "kdedup-e2e-rebalance-test";
 
 async fn create_topic_with_partitions(topic: &str, num_partitions: i32) -> Result<()> {
     let admin_client: AdminClient<DefaultClientContext> = ClientConfig::new()
-        .set("bootstrap.servers", KAFKA_BROKERS)
+        .set("bootstrap.servers", *KAFKA_BROKERS)
         .create()?;
 
     let new_topic = NewTopic::new(topic, num_partitions, TopicReplication::Fixed(1));
@@ -136,7 +138,7 @@ fn create_captured_event() -> CapturedEvent {
 
 async fn send_test_messages(topic: &str, partition: i32, count: usize) -> Result<()> {
     let producer: FutureProducer = ClientConfig::new()
-        .set("bootstrap.servers", KAFKA_BROKERS)
+        .set("bootstrap.servers", *KAFKA_BROKERS)
         .set("message.timeout.ms", "5000")
         .create()?;
 
@@ -347,7 +349,7 @@ async fn test_rebalance_with_checkpoint_import() -> Result<()> {
     // Create consumer config
     let mut config = ClientConfig::new();
     config
-        .set("bootstrap.servers", KAFKA_BROKERS)
+        .set("bootstrap.servers", *KAFKA_BROKERS)
         .set("group.id", &group_id)
         .set("enable.auto.commit", "false")
         .set("auto.offset.reset", "earliest")

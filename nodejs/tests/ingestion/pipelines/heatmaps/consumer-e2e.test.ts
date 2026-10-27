@@ -98,6 +98,8 @@ describe('Heatmaps consumer E2E', () => {
         const registryConfig = {
             ...getDefaultKafkaUpstreamProducerEnvConfig(),
             ...getDefaultKafkaDownstreamProducerEnvConfig(),
+            KAFKA_INGESTION_UPSTREAM_PRODUCER_METADATA_BROKER_LIST: process.env.KAFKA_HOSTS ?? '',
+            KAFKA_INGESTION_DOWNSTREAM_PRODUCER_METADATA_BROKER_LIST: process.env.KAFKA_HOSTS ?? '',
         }
         const sharedScope: HeatmapsSharedScope = newScope('heatmaps-e2e-shared', (b) =>
             b

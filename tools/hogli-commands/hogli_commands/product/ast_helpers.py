@@ -5,7 +5,6 @@ from __future__ import annotations
 import re
 import ast
 import warnings
-import functools
 import importlib.util
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
@@ -15,7 +14,6 @@ from pathlib import Path
 _CONTRACT_STRIP_RE = re.compile(r"(Contract|Data|DTO|Out|In|Response|Request)$")
 
 
-@functools.lru_cache(maxsize=4096)
 def ast_parse_safe(file_path: Path) -> ast.Module | None:
     try:
         with warnings.catch_warnings():
@@ -23,10 +21,6 @@ def ast_parse_safe(file_path: Path) -> ast.Module | None:
             return ast.parse(file_path.read_text())
     except (SyntaxError, OSError):
         return None
-
-
-def clear_ast_cache() -> None:
-    ast_parse_safe.cache_clear()
 
 
 def get_imported_module_names(tree: ast.Module) -> set[str]:

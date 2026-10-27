@@ -20,16 +20,18 @@ use tempfile::TempDir;
 use tokio::sync::Mutex as TokioMutex;
 use uuid::Uuid;
 
-const KAFKA_BROKERS: &str = "localhost:9092";
+static KAFKA_BROKERS: std::sync::LazyLock<&str> = std::sync::LazyLock::new(|| {
+    std::env::var("KAFKA_HOSTS").map_or("localhost:9092", |v| &*v.leak())
+});
 
 // Global mutex to serialize Kafka integration tests (using async-aware Tokio Mutex)
 static KAFKA_TEST_MUTEX: OnceLock<TokioMutex<()>> = OnceLock::new();
 
 /// Helper to create Kafka topics before tests
 async fn create_kafka_topics(topics: Vec<&str>) -> Result<()> {
-    println!("Creating Kafka admin client for broker: {KAFKA_BROKERS}");
+    println!("Creating Kafka admin client for broker: {}", *KAFKA_BROKERS);
     let admin_client: AdminClient<_> = ClientConfig::new()
-        .set("bootstrap.servers", KAFKA_BROKERS)
+        .set("bootstrap.servers", *KAFKA_BROKERS)
         .create()?;
 
     println!("Creating {} topics", topics.len());
@@ -132,7 +134,7 @@ async fn produce_duplicate_events_with_timestamp(
 ) -> Result<()> {
     println!("Creating producer for topic: {topic}");
     let producer: FutureProducer = ClientConfig::new()
-        .set("bootstrap.servers", KAFKA_BROKERS)
+        .set("bootstrap.servers", *KAFKA_BROKERS)
         .set("message.timeout.ms", "5000")
         .create()?;
 
@@ -188,7 +190,7 @@ async fn consume_output_messages(
 ) -> Result<Vec<(Value, Option<OwnedHeaders>)>> {
     println!("Creating consumer for output topic: {topic}");
     let consumer: StreamConsumer = ClientConfig::new()
-        .set("bootstrap.servers", KAFKA_BROKERS)
+        .set("bootstrap.servers", *KAFKA_BROKERS)
         .set("group.id", group_id)
         .set("auto.offset.reset", "earliest")
         .set("enable.auto.commit", "false")

@@ -20,15 +20,7 @@ self-hosted-runner:
 paths:
     '.github/workflows/**/*.yml':
         ignore:
-            - 'property ".+" is not defined in object type'
-            - 'shellcheck reported issue in this script: SC2046'
-            - 'shellcheck reported issue in this script: SC2086'
-            - 'step must run script with "run" section or run action with "uses" section'
-            - 'shellcheck reported issue in this script: SC2016'
+            - 'property ".+" is not defined in object type \{changes: string\}'
     '.github/workflows/**/*.yaml':
         ignore:
-            - 'property ".+" is not defined in object type'
-            - 'shellcheck reported issue in this script: SC2046'
-            - 'shellcheck reported issue in this script: SC2086'
-            - 'step must run script with "run" section or run action with "uses" section'
-            - 'shellcheck reported issue in this script: SC2016'
+            - 'property ".+" is not defined in object type \{changes: string\}'

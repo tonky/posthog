@@ -48,9 +48,18 @@ use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use tonic::transport::{Channel, Server};
 
-pub const ETCD_ENDPOINT: &str = "http://localhost:2379";
-pub const KAFKA_BOOTSTRAP: &str = "localhost:9092";
-pub const PERSONS_DB_URL: &str = "postgres://posthog:posthog@localhost:5432/posthog_persons";
+pub static ETCD_ENDPOINT: std::sync::LazyLock<&str> = std::sync::LazyLock::new(|| {
+    std::env::var("ETCD_ENDPOINT").map_or("http://localhost:2379", |v| &*v.leak())
+});
+pub static KAFKA_BOOTSTRAP: std::sync::LazyLock<&str> = std::sync::LazyLock::new(|| {
+    std::env::var("KAFKA_HOSTS").map_or("localhost:9092", |v| &*v.leak())
+});
+pub static PERSONS_DB_URL: std::sync::LazyLock<&str> = std::sync::LazyLock::new(|| {
+    std::env::var("TEST_PERSONS_DATABASE_URL").map_or(
+        "postgres://posthog:posthog@localhost:5432/posthog_persons",
+        |v| &*v.leak(),
+    )
+});
 pub const WAIT_TIMEOUT: Duration = Duration::from_secs(10);
 pub const POLL_INTERVAL: Duration = Duration::from_millis(100);
 pub const NUM_PARTITIONS: u32 = 4;
@@ -345,7 +354,7 @@ impl Drop for TestTopic {
 /// correctness, and a failing test has already said what went wrong.
 pub async fn delete_broker_topic(topic: &str) {
     let Ok(admin) = ClientConfig::new()
-        .set("bootstrap.servers", KAFKA_BOOTSTRAP)
+        .set("bootstrap.servers", *KAFKA_BOOTSTRAP)
         .create::<AdminClient<DefaultClientContext>>()
     else {
         return;
@@ -408,7 +417,7 @@ pub fn unique_topic() -> String {
 /// is not the one routing and warming expect.
 pub async fn create_broker_topic(topic: &str, partitions: i32) {
     let admin: AdminClient<DefaultClientContext> = ClientConfig::new()
-        .set("bootstrap.servers", KAFKA_BOOTSTRAP)
+        .set("bootstrap.servers", *KAFKA_BOOTSTRAP)
         .create()
         .expect("admin client");
     let new_topic = NewTopic::new(topic, partitions, TopicReplication::Fixed(1));
@@ -697,7 +706,7 @@ pub fn test_cached_person() -> CachedPerson {
 
 /// Create a PG pool for the local persons database.
 pub async fn create_persons_pool() -> sqlx::postgres::PgPool {
-    sqlx::postgres::PgPool::connect(PERSONS_DB_URL)
+    sqlx::postgres::PgPool::connect(*PERSONS_DB_URL)
         .await
         .expect("failed to connect to persons DB")
 }
@@ -844,7 +853,7 @@ fn handoff_handler_with(
     inflight: Arc<personhog_leader::inflight::InflightTracker>,
     authority: Arc<AuthorityClock>,
 ) -> personhog_leader::coordination::LeaderHandoffHandler {
-    let mut warming = test_warming_config("test", topic, KAFKA_BOOTSTRAP);
+    let mut warming = test_warming_config("test", topic, *KAFKA_BOOTSTRAP);
     warming.topic = topic.to_string();
     personhog_leader::coordination::LeaderHandoffHandler::new(
         Arc::new(PartitionedCache::new(1 << 20)),

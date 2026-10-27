@@ -32,12 +32,13 @@ use capture::setup;
 use common_continuous_profiling::ContinuousProfilingConfig;
 use limiters::redis::{QuotaResource, OVERFLOW_LIMITER_CACHE_KEY, QUOTA_LIMITER_CACHE_KEY};
 
-pub const TEST_KAFKA_HOSTS: &str = "kafka:9092";
+pub static TEST_KAFKA_HOSTS: std::sync::LazyLock<&str> =
+    std::sync::LazyLock::new(|| std::env::var("KAFKA_HOSTS").map_or("kafka:9092", |v| &*v.leak()));
 
 /// Settings for the `INGESTION` producer every test server publishes through.
 pub fn test_producer_env() -> HashMap<String, String> {
     [
-        ("METADATA_BROKER_LIST", TEST_KAFKA_HOSTS),
+        ("METADATA_BROKER_LIST", *TEST_KAFKA_HOSTS),
         ("LINGER_MS", "0"), // Send messages as soon as possible
         ("QUEUE_BUFFERING_MAX_KBYTES", "10240"),
         ("MESSAGE_TIMEOUT_MS", "10000"), // 10s, ACKs can be slow on low volumes, should be tuned
@@ -52,7 +53,8 @@ pub static DEFAULT_CONFIG: Lazy<Config> = Lazy::new(|| Config {
     print_sink: false,
     noop_sink: false,
     address: SocketAddr::from_str("127.0.0.1:0").unwrap(),
-    redis_url: "redis://localhost:6379/".to_string(),
+    redis_url: std::env::var("TEST_REDIS_URL")
+        .unwrap_or_else(|_| "redis://localhost:6379/".to_string()),
     redis_response_timeout_ms: 100,
     redis_connection_timeout_ms: 5000,
     global_rate_limit_enabled: false,
@@ -156,7 +158,7 @@ pub static DEFAULT_CONFIG: Lazy<Config> = Lazy::new(|| Config {
 pub fn v1_sink_env_for_topic(sink: &str, topic: &str) -> HashMap<String, String> {
     let prefix = format!("CAPTURE_V1_SINK_{}_", sink.to_uppercase());
     [
-        ("KAFKA_HOSTS", TEST_KAFKA_HOSTS),
+        ("KAFKA_HOSTS", *TEST_KAFKA_HOSTS),
         ("KAFKA_TOPIC_MAIN", topic),
         ("KAFKA_TOPIC_HISTORICAL", topic),
         ("KAFKA_TOPIC_OVERFLOW", topic),
@@ -442,7 +444,7 @@ impl EphemeralTopic {
         let mut config = ClientConfig::new();
         let group_id = random_string("capture_it", 12);
         config.set("group.id", &group_id);
-        config.set("bootstrap.servers", TEST_KAFKA_HOSTS);
+        config.set("bootstrap.servers", *TEST_KAFKA_HOSTS);
         config.set("debug", "consumer,cgrp,topic,fetch");
         config.set("socket.timeout.ms", "30000");
         // RedPanda compatibility settings
@@ -683,7 +685,7 @@ impl Drop for EphemeralTopic {
 
 async fn delete_topic(topic: String) {
     let mut config = ClientConfig::new();
-    config.set("bootstrap.servers", TEST_KAFKA_HOSTS);
+    config.set("bootstrap.servers", *TEST_KAFKA_HOSTS);
     let admin = AdminClient::from_config(&config).expect("failed to create admin client");
     admin
         .delete_topics(&[&topic], &AdminOptions::default())

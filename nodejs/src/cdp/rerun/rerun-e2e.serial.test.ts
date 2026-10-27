@@ -40,7 +40,7 @@ import { RERUN_QUEUE_NAME } from './rerun-job.types'
 
 const ActualKafkaProducerWrapper = jest.requireActual('~/common/kafka/producer').KafkaProducerWrapper
 
-const NODE_DB_URL = 'postgres://posthog:posthog@localhost:5432/test_cyclotron_node'
+const NODE_DB_URL = `postgres://posthog:posthog@localhost:${process.env.PGPORT ?? '5432'}/test_cyclotron_node`
 
 interface PersistedRow {
     invocation_id: string

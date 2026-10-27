@@ -12,6 +12,8 @@ test.describe('System Status', () => {
     })
 
     test('System Status loaded', async ({ page }) => {
+        // The home scene focuses its input once it mounts, which closes an open menu: wait for it first.
+        await expect(page.locator('#homepage-input')).toBeFocused()
         await page.locator('[data-attr=help-menu-button]').click()
         await page.locator('[data-attr=help-menu-admin-button]').click()
         await page.locator('[data-attr=help-menu-instance-panel-button]').click()

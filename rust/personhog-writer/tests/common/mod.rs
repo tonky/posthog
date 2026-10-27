@@ -14,8 +14,15 @@ use rdkafka::mocking::MockCluster;
 use rdkafka::producer::{DefaultProducerContext, FutureProducer};
 use sqlx::postgres::PgPool;
 
-pub const PERSONS_DB_URL: &str = "postgres://posthog:posthog@localhost:5432/posthog_persons";
-pub const KAFKA_BOOTSTRAP: &str = "localhost:9092";
+pub static PERSONS_DB_URL: std::sync::LazyLock<&str> = std::sync::LazyLock::new(|| {
+    std::env::var("TEST_PERSONS_DATABASE_URL").map_or(
+        "postgres://posthog:posthog@localhost:5432/posthog_persons",
+        |v| &*v.leak(),
+    )
+});
+pub static KAFKA_BOOTSTRAP: std::sync::LazyLock<&str> = std::sync::LazyLock::new(|| {
+    std::env::var("KAFKA_HOSTS").map_or("localhost:9092", |v| &*v.leak())
+});
 pub const TOPIC: &str = "personhog_updates";
 pub const TARGET_TABLE: &str = "personhog_person_tmp";
 
@@ -90,7 +97,7 @@ pub async fn create_local_kafka_producer() -> FutureProducer<KafkaContext> {
 
 /// Connect to the local persons database.
 pub async fn create_test_pool() -> PgPool {
-    PgPool::connect(PERSONS_DB_URL)
+    PgPool::connect(*PERSONS_DB_URL)
         .await
         .expect("failed to connect to persons DB")
 }

@@ -30,7 +30,10 @@ use capture::v1::test_utils::{self, prepared, WrappedEventMut};
 
 fn v1_kafka_config(topic: &str) -> capture::v1::sinks::kafka::config::Config {
     let env: std::collections::HashMap<String, String> = [
-        ("HOSTS", "kafka:9092"),
+        (
+            "HOSTS",
+            std::env::var("KAFKA_HOSTS").map_or("kafka:9092", |v| &*v.leak()),
+        ),
         ("TOPIC_MAIN", topic),
         ("TOPIC_HISTORICAL", topic),
         ("TOPIC_OVERFLOW", topic),

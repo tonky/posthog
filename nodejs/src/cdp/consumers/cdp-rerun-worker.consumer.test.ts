@@ -71,7 +71,7 @@ describe('CdpRerunWorkerConsumer', () => {
         hub = await createHub()
         // The worker needs the cyclotron-v2 node db to exist; pretend it does so the
         // consumer constructs cleanly. Real queue interactions are mocked below.
-        hub.CYCLOTRON_NODE_DATABASE_URL = 'postgres://posthog:posthog@localhost:5432/test_cyclotron_node'
+        hub.CYCLOTRON_NODE_DATABASE_URL = `postgres://posthog:posthog@localhost:${process.env.PGPORT ?? '5432'}/test_cyclotron_node`
 
         consumer = new CdpRerunWorkerConsumer(hub, createCdpConsumerDeps(hub), buildMockJobQueues())
 

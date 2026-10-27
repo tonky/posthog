@@ -359,6 +359,7 @@ def get_http_client(**overrides):
 
     kwargs = {
         "host": settings.CLICKHOUSE_HOST,
+        "port": settings.CLICKHOUSE_HTTP_PORT,
         "database": settings.CLICKHOUSE_DATABASE,
         "secure": settings.CLICKHOUSE_SECURE,
         "user": settings.CLICKHOUSE_USER,  # kwargs have user not username
@@ -498,6 +499,7 @@ def default_client(
     """
     return ClickHouseClient(
         host=host,
+        port=settings.CLICKHOUSE_TCP_PORT,
         **({"send_receive_timeout": send_receive_timeout} if send_receive_timeout is not None else {}),
         # We set "system" here as we don't necessarily have a "default" database,
         # which is what the clickhouse_driver would use by default. We are
@@ -555,6 +557,7 @@ def _make_ch_pool(
 ) -> ChPool:
     kwargs = {
         "host": settings.CLICKHOUSE_HOST,
+        "port": settings.CLICKHOUSE_TCP_PORT,
         "database": settings.CLICKHOUSE_DATABASE,
         "secure": settings.CLICKHOUSE_SECURE,
         "user": settings.CLICKHOUSE_USER,
@@ -571,6 +574,10 @@ def _make_ch_pool(
         "send_receive_timeout": 30 if settings.TEST else 999_999_999,
         **overrides,
     }
+    # A cluster host without a port of its own (ClickhouseCluster passes None outside DEBUG
+    # and E2E) takes the configured one too.
+    if kwargs["port"] is None:
+        kwargs["port"] = settings.CLICKHOUSE_TCP_PORT
 
     if credential_provider is not None:
         # kwargs["password"] is only the lazy seed here; RefreshingChPool re-stamps every pulled client.

@@ -9,7 +9,7 @@ import {
 import { UrlCrawlHistoryItem } from './crawl-history'
 import { DynamoDBCrawlHistory } from './dynamodb-crawl-history'
 
-const DYNAMODB_ENDPOINT = 'http://127.0.0.1:18010'
+const DYNAMODB_ENDPOINT = process.env.DYNAMODB_ENDPOINT ?? 'http://127.0.0.1:18010'
 const TABLE_NAME = `ai-research-image-fetch-crawl-history-test-${process.pid}-${Date.now()}`
 const NOW_MS = 1_700_000_000_000
 const NOW_SECONDS = Math.floor(NOW_MS / 1000)

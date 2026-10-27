@@ -186,7 +186,7 @@ async fn unowned_partition_returns_failed_precondition() {
         Arc::new(InflightTracker::new()),
         NUM_PARTITIONS,
         Arc::new(DirtyIndex::new(1_000_000)),
-        test_recovery(&_mock_cluster.topic, KAFKA_BOOTSTRAP),
+        test_recovery(&_mock_cluster.topic, *KAFKA_BOOTSTRAP),
         PropertySizeLimits::new(655360, 524288),
         WarningsProducer::new(kafka_producer, "clickhouse_ingestion_warnings".to_string()),
         Arc::new(DashMap::new()),
@@ -272,7 +272,7 @@ async fn missing_partition_metadata_returns_invalid_argument() {
         Arc::new(InflightTracker::new()),
         NUM_PARTITIONS,
         Arc::new(DirtyIndex::new(1_000_000)),
-        test_recovery(&_mock_cluster.topic, KAFKA_BOOTSTRAP),
+        test_recovery(&_mock_cluster.topic, *KAFKA_BOOTSTRAP),
         PropertySizeLimits::new(655360, 524288),
         WarningsProducer::new(kafka_producer, "clickhouse_ingestion_warnings".to_string()),
         Arc::new(DashMap::new()),
@@ -361,7 +361,7 @@ async fn mismatched_partition_metadata_returns_invalid_argument() {
         Arc::new(InflightTracker::new()),
         NUM_PARTITIONS,
         Arc::new(DirtyIndex::new(1_000_000)),
-        test_recovery(&_mock_cluster.topic, KAFKA_BOOTSTRAP),
+        test_recovery(&_mock_cluster.topic, *KAFKA_BOOTSTRAP),
         PropertySizeLimits::new(655360, 524288),
         WarningsProducer::new(kafka_producer, "clickhouse_ingestion_warnings".to_string()),
         Arc::new(DashMap::new()),
@@ -445,7 +445,7 @@ async fn writes_fenced_after_drain_reads_still_served() {
     let (_mock_cluster, kafka_producer) = create_test_kafka().await;
     let inflight = Arc::new(InflightTracker::new());
     let dirty_index = Arc::new(DirtyIndex::new(1_000_000));
-    let recovery = test_recovery(&_mock_cluster.topic, KAFKA_BOOTSTRAP);
+    let recovery = test_recovery(&_mock_cluster.topic, *KAFKA_BOOTSTRAP);
     // One set for both: a second would fence the first at the broker.
     let fenced =
         common::fenced_producers_acquired(&_mock_cluster.topic, NUM_PARTITIONS as i32).await;
@@ -466,7 +466,7 @@ async fn writes_fenced_after_drain_reads_still_served() {
     );
     // The handler shares the cache, inflight tracker, dirty index, and
     // recovery pool with the service, exactly as main.rs wires them.
-    let warming = test_warming_config("fence-pod", &_mock_cluster.topic, KAFKA_BOOTSTRAP);
+    let warming = test_warming_config("fence-pod", &_mock_cluster.topic, *KAFKA_BOOTSTRAP);
     let pools = Arc::new(WarmClientPools::new(
         &warming.kafka,
         "fence-pod",
@@ -582,7 +582,7 @@ async fn drain_fences_before_waiting_on_inflight() {
     let (_mock_cluster, kafka_producer) = create_test_kafka().await;
     let inflight = Arc::new(InflightTracker::new());
     let dirty_index = Arc::new(DirtyIndex::new(1_000_000));
-    let recovery = test_recovery(&_mock_cluster.topic, KAFKA_BOOTSTRAP);
+    let recovery = test_recovery(&_mock_cluster.topic, *KAFKA_BOOTSTRAP);
     // One set for both: a second would fence the first at the broker.
     let fenced =
         common::fenced_producers_acquired(&_mock_cluster.topic, NUM_PARTITIONS as i32).await;
@@ -601,7 +601,7 @@ async fn drain_fences_before_waiting_on_inflight() {
         common::live_authority(),
         std::sync::Arc::new(personhog_leader::emitted::EmittedVersions::new(1_000_000)),
     );
-    let warming = test_warming_config("fence-race-pod", &_mock_cluster.topic, KAFKA_BOOTSTRAP);
+    let warming = test_warming_config("fence-race-pod", &_mock_cluster.topic, *KAFKA_BOOTSTRAP);
     let pools = Arc::new(WarmClientPools::new(
         &warming.kafka,
         "fence-race-pod",
@@ -920,7 +920,7 @@ async fn update_produces_person_state_to_kafka() {
         Arc::new(InflightTracker::new()),
         NUM_PARTITIONS,
         Arc::new(DirtyIndex::new(1_000_000)),
-        test_recovery(&mock_cluster.topic, KAFKA_BOOTSTRAP),
+        test_recovery(&mock_cluster.topic, *KAFKA_BOOTSTRAP),
         PropertySizeLimits::new(655360, 524288),
         WarningsProducer::new(kafka_producer, "clickhouse_ingestion_warnings".to_string()),
         Arc::new(DashMap::new()),
@@ -1037,7 +1037,7 @@ async fn kafka_produce_failure_leaves_cache_unchanged() {
         Arc::new(InflightTracker::new()),
         NUM_PARTITIONS,
         Arc::new(DirtyIndex::new(1_000_000)),
-        test_recovery(&mock_cluster.topic, KAFKA_BOOTSTRAP),
+        test_recovery(&mock_cluster.topic, *KAFKA_BOOTSTRAP),
         PropertySizeLimits::new(655360, 524288),
         WarningsProducer::new(kafka_producer, "clickhouse_ingestion_warnings".to_string()),
         Arc::new(DashMap::new()),
@@ -1174,7 +1174,7 @@ async fn e2e_update_produces_to_local_kafka() {
         Arc::new(InflightTracker::new()),
         NUM_PARTITIONS,
         Arc::new(DirtyIndex::new(1_000_000)),
-        test_recovery(&topic, KAFKA_BOOTSTRAP),
+        test_recovery(&topic, *KAFKA_BOOTSTRAP),
         PropertySizeLimits::new(655360, 524288),
         WarningsProducer::new(kafka_producer, "clickhouse_ingestion_warnings".to_string()),
         Arc::new(DashMap::new()),
@@ -1232,7 +1232,7 @@ async fn e2e_update_produces_to_local_kafka() {
 
     // Consume from local Kafka and verify the message
     let consumer: BaseConsumer = ClientConfig::new()
-        .set("bootstrap.servers", KAFKA_BOOTSTRAP)
+        .set("bootstrap.servers", *KAFKA_BOOTSTRAP)
         .set("group.id", format!("e2e-test-{}", uuid::Uuid::new_v4()))
         .create()
         .expect("failed to create local Kafka consumer");
@@ -2613,7 +2613,7 @@ async fn an_unresolved_version_is_never_reused() {
         Arc::new(InflightTracker::new()),
         NUM_PARTITIONS,
         Arc::new(DirtyIndex::new(1_000_000)),
-        test_recovery(&_mock_cluster.topic, KAFKA_BOOTSTRAP),
+        test_recovery(&_mock_cluster.topic, *KAFKA_BOOTSTRAP),
         PropertySizeLimits::new(655360, 524288),
         WarningsProducer::new(kafka_producer, "clickhouse_ingestion_warnings".to_string()),
         Arc::new(DashMap::new()),
@@ -2694,7 +2694,7 @@ async fn a_fenced_write_that_bounces_does_not_hand_its_version_back() {
         Arc::new(InflightTracker::new()),
         NUM_PARTITIONS,
         Arc::new(DirtyIndex::new(1_000_000)),
-        test_recovery(&_mock_cluster.topic, KAFKA_BOOTSTRAP),
+        test_recovery(&_mock_cluster.topic, *KAFKA_BOOTSTRAP),
         PropertySizeLimits::new(655360, 524288),
         WarningsProducer::new(kafka_producer, "clickhouse_ingestion_warnings".to_string()),
         Arc::new(DashMap::new()),
@@ -2813,7 +2813,7 @@ async fn an_unknown_outcome_keeps_its_version(
         Arc::new(InflightTracker::new()),
         NUM_PARTITIONS,
         Arc::new(DirtyIndex::new(1_000_000)),
-        test_recovery(&_mock_cluster.topic, KAFKA_BOOTSTRAP),
+        test_recovery(&_mock_cluster.topic, *KAFKA_BOOTSTRAP),
         PropertySizeLimits::new(655360, 524288),
         WarningsProducer::new(kafka_producer, "clickhouse_ingestion_warnings".to_string()),
         Arc::new(DashMap::new()),
@@ -2901,7 +2901,7 @@ async fn scalar_fields_merge_rather_than_assign() {
         Arc::new(InflightTracker::new()),
         NUM_PARTITIONS,
         Arc::new(DirtyIndex::new(1_000_000)),
-        test_recovery(&_mock_cluster.topic, KAFKA_BOOTSTRAP),
+        test_recovery(&_mock_cluster.topic, *KAFKA_BOOTSTRAP),
         PropertySizeLimits::new(655360, 524288),
         WarningsProducer::new(kafka_producer, "clickhouse_ingestion_warnings".to_string()),
         Arc::new(DashMap::new()),

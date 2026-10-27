@@ -47,7 +47,7 @@ async fn test_s3_gzip_minio_integration() {
     let client = match create_minio_client().await.list_buckets().send().await {
         Ok(_) => create_minio_client().await,
         Err(_) => {
-            eprintln!("MinIO unreachable at {}, skipping test", MINIO_ENDPOINT);
+            eprintln!("MinIO unreachable at {}, skipping test", *MINIO_ENDPOINT);
             return;
         }
     };
@@ -82,7 +82,7 @@ async fn test_s3_gzip_minio_integration() {
         "bucket": TEST_BUCKET,
         "prefix": prefix,
         "region": "us-east-1",
-        "endpoint_url": MINIO_ENDPOINT,
+        "endpoint_url": *MINIO_ENDPOINT,
         "allow_internal_ips": true
     }))
     .expect("source config from json");

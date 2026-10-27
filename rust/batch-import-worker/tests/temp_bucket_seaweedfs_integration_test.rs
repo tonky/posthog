@@ -21,13 +21,15 @@ use object_store::{ObjectStore, ObjectStoreExt};
 use std::io::Write;
 use uuid::Uuid;
 
-const SEAWEEDFS_ENDPOINT: &str = "http://localhost:8333";
+static SEAWEEDFS_ENDPOINT: std::sync::LazyLock<&str> = std::sync::LazyLock::new(|| {
+    std::env::var("OBJECT_STORAGE_ENDPOINT").map_or("http://localhost:8333", |v| &*v.leak())
+});
 const TEST_BUCKET: &str = "posthog";
 
 fn seaweedfs_store() -> Arc<dyn ObjectStore> {
     let store = AmazonS3Builder::new()
         .with_bucket_name(TEST_BUCKET)
-        .with_endpoint(SEAWEEDFS_ENDPOINT)
+        .with_endpoint(*SEAWEEDFS_ENDPOINT)
         .with_region("us-east-1")
         .with_allow_http(true)
         .with_virtual_hosted_style_request(false)
@@ -58,7 +60,10 @@ async fn seaweedfs_reachable(store: &Arc<dyn ObjectStore>) -> bool {
         Ok(Ok(_)) | Ok(Err(object_store::Error::NotFound { .. }))
     );
     if !reachable && std::env::var("CI").is_ok() {
-        panic!("SeaweedFS unreachable at {SEAWEEDFS_ENDPOINT} in CI — the dev stack must be up");
+        panic!(
+            "SeaweedFS unreachable at {} in CI — the dev stack must be up",
+            *SEAWEEDFS_ENDPOINT
+        );
     }
     reachable
 }
@@ -68,7 +73,10 @@ async fn test_temp_bucket_seaweedfs_round_trip() {
     let store = seaweedfs_store();
 
     if !seaweedfs_reachable(&store).await {
-        eprintln!("SeaweedFS unreachable at {SEAWEEDFS_ENDPOINT}, skipping test");
+        eprintln!(
+            "SeaweedFS unreachable at {}, skipping test",
+            *SEAWEEDFS_ENDPOINT
+        );
         return;
     }
 
@@ -143,7 +151,10 @@ fn open_plaintext_stream_from_bytes(data: &[u8]) -> batch_import_worker::staging
 async fn test_data_error_pause_quarantines_staged_part_and_resume_redownloads() {
     let store = seaweedfs_store();
     if !seaweedfs_reachable(&store).await {
-        eprintln!("SeaweedFS unreachable at {SEAWEEDFS_ENDPOINT}, skipping test");
+        eprintln!(
+            "SeaweedFS unreachable at {}, skipping test",
+            *SEAWEEDFS_ENDPOINT
+        );
         return;
     }
 
@@ -228,7 +239,10 @@ async fn test_data_error_pause_quarantines_staged_part_and_resume_redownloads() 
 async fn test_remote_staged_source_round_trip_on_seaweedfs() {
     let store = seaweedfs_store();
     if !seaweedfs_reachable(&store).await {
-        eprintln!("SeaweedFS unreachable at {SEAWEEDFS_ENDPOINT}, skipping test");
+        eprintln!(
+            "SeaweedFS unreachable at {}, skipping test",
+            *SEAWEEDFS_ENDPOINT
+        );
         return;
     }
 

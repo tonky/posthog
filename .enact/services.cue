@@ -30,5 +30,12 @@ pipeline: schema.#Pipeline & {
 			name:  "temporal"
 			enact: kind: schema.#ServiceKind.Temporal
 		}
+		// The coordination store the personhog and kafka-assigner tests use: no kind of enact's.
+		etcd: name: "etcd"
+		// A cluster-enabled Redis (one node, every slot): no kind of enact's, whose Redis kind
+		// numbers a database per shard, which a cluster has one of.
+		"valkey-cluster": name: "valkey-cluster"
+		// Azure's blob storage, emulated: no kind of enact's (it derives nothing from it).
+		azurite: name: "azurite"
 	}
 }

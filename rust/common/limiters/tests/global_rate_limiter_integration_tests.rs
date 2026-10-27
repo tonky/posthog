@@ -9,7 +9,9 @@ use limiters::global_rate_limiter::{
     GlobalRateLimiterConfig, GlobalRateLimiterImpl,
 };
 
-const REDIS_URL: &str = "redis://localhost:6379/";
+static REDIS_URL: std::sync::LazyLock<&str> = std::sync::LazyLock::new(|| {
+    std::env::var("TEST_REDIS_URL").map_or("redis://localhost:6379/", |v| &*v.leak())
+});
 const POLL_INTERVAL: Duration = Duration::from_millis(100);
 const POLL_TIMEOUT: Duration = Duration::from_secs(3);
 
@@ -30,7 +32,10 @@ async fn setup_redis() -> Option<RedisClient> {
     match RedisClient::new(REDIS_URL.to_string()).await {
         Ok(client) => Some(client),
         Err(_) => {
-            eprintln!("Skipping integration test: Redis not available at {REDIS_URL}");
+            eprintln!(
+                "Skipping integration test: Redis not available at {}",
+                *REDIS_URL
+            );
             None
         }
     }

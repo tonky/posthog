@@ -44,7 +44,10 @@ const TEST_TEAM_TOKEN = `THIS IS NOT A TOKEN FOR TEAM ${TEST_TEAM_ID}`
 // Each worker serves its WorkerIngest stream on its HTTP port plus this offset;
 // the Rust consumer derives the stream address the same way.
 const GRPC_PORT_OFFSET = 1
-const POSTGRES_URL = 'postgres://posthog:posthog@localhost:5432'
+const POSTGRES_URL = `postgres://posthog:posthog@localhost:${process.env.PGPORT ?? '5432'}`
+const DJANGO_DATABASE_URL = process.env.DATABASE_URL ?? `${POSTGRES_URL}/test_posthog`
+const KAFKA_HOSTS = process.env.KAFKA_HOSTS ?? 'localhost:9092'
+const REDIS_URL = process.env.REDIS_URL ?? 'redis://127.0.0.1'
 const NODE_WORKER_COUNT = 2
 const RUST_BATCH_SIZE = 10
 const E2E_EVENT_COUNT = RUST_BATCH_SIZE * 2
@@ -352,15 +355,15 @@ describe('Rust ingestion consumer with Node ingestion API workers', () => {
 })
 
 function configureParentTestEnv(): void {
-    process.env.KAFKA_HOSTS = 'localhost:9092'
-    process.env.KAFKA_PRODUCER_METADATA_BROKER_LIST = 'localhost:9092'
-    process.env.DATABASE_URL = `${POSTGRES_URL}/test_posthog`
+    process.env.KAFKA_HOSTS = KAFKA_HOSTS
+    process.env.KAFKA_PRODUCER_METADATA_BROKER_LIST = KAFKA_HOSTS
+    process.env.DATABASE_URL = DJANGO_DATABASE_URL
     process.env.PERSONS_DATABASE_URL = `${POSTGRES_URL}/test_persons`
     process.env.PERSONS_READONLY_DATABASE_URL = `${POSTGRES_URL}/test_persons`
     process.env.BEHAVIORAL_COHORTS_DATABASE_URL = `${POSTGRES_URL}/test_behavioral_cohorts`
     process.env.CLICKHOUSE_HOST = 'localhost'
     process.env.CLICKHOUSE_DATABASE = 'posthog_test'
-    process.env.REDIS_URL = 'redis://127.0.0.1'
+    process.env.REDIS_URL = REDIS_URL
 }
 
 async function startNodeIngestionApiWorkers(count: number): Promise<NodeWorker[]> {
@@ -513,7 +516,7 @@ function startRustIngestionConsumer(
         env: {
             ...serviceProcessEnv(),
             RUST_LOG: 'info',
-            KAFKA_HOSTS: 'localhost:9092',
+            KAFKA_HOSTS,
             INGESTION_CONSUMER_CONSUME_TOPIC: currentIngestionTopic,
             INGESTION_CONSUMER_GROUP_ID: groupId,
             // Rust's generic KAFKA_CONSUMER_* parser maps this name to invalid rdkafka key "offset.reset".
@@ -547,20 +550,20 @@ function serviceProcessEnv(): NodeJS.ProcessEnv {
 
 function testDependencyEnv(): NodeJS.ProcessEnv {
     return {
-        DATABASE_URL: `${POSTGRES_URL}/test_posthog`,
+        DATABASE_URL: DJANGO_DATABASE_URL,
         PERSONS_DATABASE_URL: `${POSTGRES_URL}/test_persons`,
         PERSONS_READONLY_DATABASE_URL: `${POSTGRES_URL}/test_persons`,
         BEHAVIORAL_COHORTS_DATABASE_URL: `${POSTGRES_URL}/test_behavioral_cohorts`,
         CYCLOTRON_NODE_DATABASE_URL: `${POSTGRES_URL}/test_cyclotron_node`,
-        KAFKA_HOSTS: 'localhost:9092',
-        KAFKA_PRODUCER_METADATA_BROKER_LIST: 'localhost:9092',
-        KAFKA_WARPSTREAM_PRODUCER_METADATA_BROKER_LIST: 'localhost:9092',
-        KAFKA_INGESTION_PRODUCER_METADATA_BROKER_LIST: 'localhost:9092',
+        KAFKA_HOSTS,
+        KAFKA_PRODUCER_METADATA_BROKER_LIST: KAFKA_HOSTS,
+        KAFKA_WARPSTREAM_PRODUCER_METADATA_BROKER_LIST: KAFKA_HOSTS,
+        KAFKA_INGESTION_PRODUCER_METADATA_BROKER_LIST: KAFKA_HOSTS,
         CLICKHOUSE_HOST: 'localhost',
         CLICKHOUSE_DATABASE: 'posthog_test',
         CLICKHOUSE_SECURE: 'false',
         CLICKHOUSE_VERIFY: 'false',
-        REDIS_URL: 'redis://127.0.0.1',
+        REDIS_URL,
         SITE_URL: 'https://example.com',
     }
 }

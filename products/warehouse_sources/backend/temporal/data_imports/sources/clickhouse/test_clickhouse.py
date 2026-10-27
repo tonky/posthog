@@ -1649,7 +1649,7 @@ class TestPagedReadFallback:
     def make_table(self) -> Iterator[Callable[[str], str]]:
         admin = clickhouse_connect.get_client(
             host=settings.CLICKHOUSE_HOST,
-            port=8123,
+            port=int(os.environ.get("CLICKHOUSE_HTTP_PORT", "8123")),
             username=settings.CLICKHOUSE_USER,
             password=settings.CLICKHOUSE_PASSWORD,
         )
@@ -1679,7 +1679,7 @@ class TestPagedReadFallback:
     def _read(self, table: str, host_limits: dict, **source_kwargs) -> pa.Table:
         @contextmanager
         def tunnel():
-            yield (settings.CLICKHOUSE_HOST, 8123)
+            yield (settings.CLICKHOUSE_HOST, int(os.environ.get("CLICKHOUSE_HTTP_PORT", "8123")))
 
         real_query_settings = ch_module._query_settings
         with (
@@ -1764,7 +1764,7 @@ class TestIncrementalResumeAgainstServer:
     def make_table(self) -> Iterator[Callable[[str], str]]:
         admin = clickhouse_connect.get_client(
             host=settings.CLICKHOUSE_HOST,
-            port=8123,
+            port=int(os.environ.get("CLICKHOUSE_HTTP_PORT", "8123")),
             username=settings.CLICKHOUSE_USER,
             password=settings.CLICKHOUSE_PASSWORD,
         )
@@ -1813,7 +1813,7 @@ class TestIncrementalResumeAgainstServer:
     def test_incremental_resume_reads_only_rows_after_the_cursor(self, make_table, ts_type, last_value, expected_ids):
         @contextmanager
         def tunnel():
-            yield (settings.CLICKHOUSE_HOST, 8123)
+            yield (settings.CLICKHOUSE_HOST, int(os.environ.get("CLICKHOUSE_HTTP_PORT", "8123")))
 
         response = ch_module.clickhouse_source(
             tunnel=tunnel,

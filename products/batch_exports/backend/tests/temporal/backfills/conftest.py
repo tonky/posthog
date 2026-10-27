@@ -6,7 +6,8 @@ import pytest
 import temporalio.client
 
 from posthog.temporal.tests.utils.events import generate_test_events_in_clickhouse
-from posthog.temporal.tests.utils.models import acreate_batch_export, adelete_batch_export
+
+from products.batch_exports.backend.tests.temporal.utils.models import acreate_batch_export, adelete_batch_export
 
 
 async def wait_for_workflows(
@@ -27,7 +28,8 @@ async def wait_for_workflows(
             past expected_count is expected rather than an exact match.
         timeout: Wait for at most this amount of seconds.
     """
-    query = f'TemporalScheduledById="{schedule_id}" order by StartTime asc'
+    # No ORDER BY: Temporal's SQL visibility store rejects it; sorted by start time below instead.
+    query = f'TemporalScheduledById="{schedule_id}"'
     workflows = [workflow async for workflow in temporal_client.list_workflows(query=query)]
     elapsed = 0.0
     delay = 0.2
@@ -46,7 +48,7 @@ async def wait_for_workflows(
     if assert_exact:
         assert len(workflows) == expected_count
 
-    return workflows
+    return sorted(workflows, key=lambda workflow: workflow.start_time)
 
 
 async def assert_backfill_details_in_workflow_events(

@@ -41,7 +41,7 @@ async fn read_committed_count(topic: &str) -> usize {
     use rdkafka::{ClientConfig, Message, Offset, TopicPartitionList};
 
     let consumer: StreamConsumer = ClientConfig::new()
-        .set("bootstrap.servers", KAFKA_BOOTSTRAP)
+        .set("bootstrap.servers", *KAFKA_BOOTSTRAP)
         .set(
             "group.id",
             format!("fence-abort-probe-{}", uuid::Uuid::new_v4()),

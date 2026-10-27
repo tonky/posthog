@@ -216,6 +216,9 @@ class TestCommandExecAuditPatching(TestCase):
     def test_executable_overrides_binary(self) -> None:
         true_path = shutil.which("true")
         assert true_path is not None
+        # A multicall coreutils (nixpkgs builds it so) picks the tool by argv[0], which this test sets.
+        if os.path.basename(os.path.realpath(true_path)) == "coreutils":
+            self.skipTest("true is coreutils' multicall binary, which runs the tool argv[0] names")
         with structlog.testing.capture_logs() as logs:
             subprocess.run(["ignored"], executable=true_path, check=True)
         entry = self._find(logs, "subprocess.Popen")

@@ -369,12 +369,12 @@ export function getDefaultCommonConfig(): CommonConfig {
         // Redis
         // ok to connect to localhost over plaintext
         // nosemgrep: trailofbits.generic.redis-unencrypted-transport.redis-unencrypted-transport
-        REDIS_URL: 'redis://127.0.0.1',
+        REDIS_URL: process.env.REDIS_URL ?? 'redis://127.0.0.1',
         INGESTION_REDIS_HOST: '',
-        INGESTION_REDIS_PORT: 6379,
+        INGESTION_REDIS_PORT: Number(process.env.REDIS_PORT ?? 6379),
         POSTHOG_REDIS_PASSWORD: '',
         POSTHOG_REDIS_HOST: '',
-        POSTHOG_REDIS_PORT: 6379,
+        POSTHOG_REDIS_PORT: Number(process.env.REDIS_PORT ?? 6379),
         REDIS_POOL_MIN_SIZE: 1,
         REDIS_POOL_MAX_SIZE: 3,
 

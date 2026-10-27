@@ -2,6 +2,9 @@ import { execFileSync } from 'node:child_process'
 
 import { expect, LOGIN_PASSWORD, LOGIN_USERNAME, test } from '../utils/playwright-test-core'
 
+// The run's Postgres, which CI serves on 5432 (PGPORT from the run's env when it runs elsewhere)
+const PG_PORT = process.env.PGPORT ?? '5432'
+
 async function callProjectApi(
     page: import('@playwright/test').Page,
     path: string,
@@ -52,7 +55,7 @@ test.describe('SQL Editor dual-mode synced Postgres source', () => {
 
         try {
             execFileSync('psql', [
-                'postgresql://posthog:posthog@127.0.0.1:5432/posthog',
+                `postgresql://posthog:posthog@127.0.0.1:${PG_PORT}/posthog`,
                 '-c',
                 `
                     DROP TABLE IF EXISTS ${tableName};
@@ -80,7 +83,7 @@ test.describe('SQL Editor dual-mode synced Postgres source', () => {
                         payload: {
                             source_type: 'Postgres',
                             host: 'localhost',
-                            port: '5432',
+                            port: PG_PORT,
                             database: 'posthog',
                             user: 'posthog',
                             password: 'posthog',
@@ -159,7 +162,7 @@ test.describe('SQL Editor dual-mode synced Postgres source', () => {
             }
             try {
                 execFileSync('psql', [
-                    'postgresql://posthog:posthog@127.0.0.1:5432/posthog',
+                    `postgresql://posthog:posthog@127.0.0.1:${PG_PORT}/posthog`,
                     '-c',
                     `DROP TABLE IF EXISTS ${tableName};`,
                 ])

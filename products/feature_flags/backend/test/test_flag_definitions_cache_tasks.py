@@ -1,3 +1,5 @@
+import os
+
 from unittest.mock import MagicMock, patch
 
 from django.conf import settings
@@ -39,7 +41,7 @@ class TestRefreshExpiringFlagDefinitionsCacheEntries(PushGatewayTaskTestMixin, T
     @override_settings(
         FLAG_DEFINITIONS_CACHE_REFRESH_LIMIT=7,
         FLAG_DEFINITIONS_CACHE_REFRESH_TTL_THRESHOLD_HOURS=3,
-        FLAGS_REDIS_URL="redis://localhost:6379",
+        FLAGS_REDIS_URL=f"redis://localhost:{os.getenv('REDIS_PORT', '6379')}",
     )
     @patch("products.feature_flags.backend.tasks.get_cache_stats", return_value={})
     @patch("products.feature_flags.backend.tasks.refresh_expiring_flags_caches")

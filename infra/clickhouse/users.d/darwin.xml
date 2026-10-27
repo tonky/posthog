@@ -1,0 +1,26 @@
+<!-- macOS only (start.sh lays users.d/<platform>.xml over upstream's users-dev.xml). The official
+     macOS build's JIT fails to link the code it compiles: Code: 263 "Could not find symbol _bzero"
+     (or _memset_pattern16), in test_usage_report's TestQuerySplitting and the session replay
+     score_chunk pipeline. Upstream's ClickHouse runs in a Linux container everywhere, where it links.
+     Without JIT a query interprets its expressions: the same results, compiled code's speed aside.
+     Every profile upstream's users-dev.xml defines that doesn't inherit default is listed
+     (test_clickhouse_config.py checks). -->
+<clickhouse>
+    <profiles>
+        <default>
+            <compile_expressions>0</compile_expressions>
+            <compile_aggregate_expressions>0</compile_aggregate_expressions>
+            <compile_sort_description>0</compile_sort_description>
+        </default>
+        <readonly>
+            <compile_expressions>0</compile_expressions>
+            <compile_aggregate_expressions>0</compile_aggregate_expressions>
+            <compile_sort_description>0</compile_sort_description>
+        </readonly>
+        <autoresearch>
+            <compile_expressions>0</compile_expressions>
+            <compile_aggregate_expressions>0</compile_aggregate_expressions>
+            <compile_sort_description>0</compile_sort_description>
+        </autoresearch>
+    </profiles>
+</clickhouse>

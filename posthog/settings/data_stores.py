@@ -320,6 +320,8 @@ CLICKHOUSE_SATELLITE_CLUSTERS: list[str] = [
     s.strip() for s in os.getenv("CLICKHOUSE_SATELLITE_CLUSTERS", "ai_events,aux,ops,sessions").split(",") if s.strip()
 ]
 CLICKHOUSE_CA: str | None = os.getenv("CLICKHOUSE_CA", None)
+# The native protocol's port; unset, the driver's default (9000, 9440 secure).
+CLICKHOUSE_TCP_PORT: int | None = get_from_env("CLICKHOUSE_TCP_PORT", None, type_cast=int, optional=True)
 CLICKHOUSE_SECURE: bool = get_from_env("CLICKHOUSE_SECURE", not TEST and not DEBUG, type_cast=str_to_bool)
 CLICKHOUSE_VERIFY: bool = get_from_env("CLICKHOUSE_VERIFY", True, type_cast=str_to_bool)
 CLICKHOUSE_ENABLE_STORAGE_POLICY: bool = get_from_env("CLICKHOUSE_ENABLE_STORAGE_POLICY", False, type_cast=str_to_bool)
@@ -455,10 +457,11 @@ CLICKHOUSE_LLM_ANALYTICS_MAX_CONCURRENT_QUERIES: int = get_from_env(
 )
 
 _clickhouse_http_protocol = "http://"
-_clickhouse_http_port = "8123"
+_clickhouse_http_port = os.getenv("CLICKHOUSE_HTTP_PORT", "8123")
 if CLICKHOUSE_SECURE:
     _clickhouse_http_protocol = "https://"
-    _clickhouse_http_port = "8443"
+    _clickhouse_http_port = os.getenv("CLICKHOUSE_HTTP_PORT", "8443")
+CLICKHOUSE_HTTP_PORT: int = int(_clickhouse_http_port)
 
 CLICKHOUSE_HTTP_URL: str = f"{_clickhouse_http_protocol}{CLICKHOUSE_HOST}:{_clickhouse_http_port}/"
 
@@ -483,14 +486,10 @@ TOKENS_HISTORICAL_DATA = os.getenv("TOKENS_HISTORICAL_DATA", "").split(",")
 
 # The last case happens when someone upgrades Heroku but doesn't have Redis installed yet. Collectstatic gets called before we can provision Redis.
 if TEST or DEBUG or IS_COLLECT_STATIC:
-    base_redis = os.getenv("REDIS_URL", "redis://redis7/")
-    if PYTEST_XDIST_WORKER_NUM is not None and base_redis:
-        from urllib.parse import urlparse, urlunparse
-
-        parsed = urlparse(base_redis)
-        REDIS_URL = urlunparse((parsed.scheme, parsed.netloc, f"/{PYTEST_XDIST_WORKER_NUM}", "", "", ""))
+    if PYTEST_XDIST_WORKER_NUM is not None:
+        REDIS_URL = os.getenv("REDIS_URL", f"redis://redis7/{PYTEST_XDIST_WORKER_NUM}")
     else:
-        REDIS_URL = base_redis
+        REDIS_URL = os.getenv("REDIS_URL", "redis://redis7/")
 else:
     REDIS_URL = os.getenv("REDIS_URL", "")
 
@@ -670,6 +669,8 @@ HOGQL_LANGUAGE_SERVICE_URL = get_from_env(
 HOGQL_LANGUAGE_SERVICE_SIGNING_KEYS = get_list(
     get_from_env("HOGQL_LANGUAGE_SERVICE_SIGNING_KEYS", "local-development-key" if DEBUG and not TEST else "")
 )
+
+MCP_SERVER_URL: str = get_from_env("MCP_SERVER_URL", "http://localhost:8787/mcp" if DEBUG and not TEST else "")
 
 # Definitions fleet, which serves remote_config (the eval fleet 404s it). Falls back until set per env.
 FEATURE_FLAGS_DEFINITIONS_SERVICE_URL = os.getenv("FEATURE_FLAGS_DEFINITIONS_SERVICE_URL", FEATURE_FLAGS_SERVICE_URL)

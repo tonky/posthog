@@ -7,6 +7,7 @@ import pandas as pd
 
 from posthog.models.team import Team
 from posthog.settings import (
+    DATAWAREHOUSE_BUCKET_DOMAIN,
     OBJECT_STORAGE_ACCESS_KEY_ID,
     OBJECT_STORAGE_BUCKET,
     OBJECT_STORAGE_ENDPOINT,
@@ -100,7 +101,8 @@ def create_data_warehouse_table_from_csv(
         team=team,
         external_data_source=source,
         credential=credential,
-        url_pattern=f"http://host.docker.internal:19000/{folder}/*.csv",
+        # ClickHouse reads the table: the bucket as it reaches it, as saved queries' url_pattern.
+        url_pattern=f"http://{DATAWAREHOUSE_BUCKET_DOMAIN}/{folder}/*.csv",
         columns=table_columns,
         options={"csv_allow_double_quotes": True},
     )

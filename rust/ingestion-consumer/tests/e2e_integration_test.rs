@@ -45,13 +45,15 @@ use ingestion_worker_proto::ingestion::worker::v1::{
     StreamReady, SubBatchAck, SubBatchStatus,
 };
 
-const KAFKA_BROKERS: &str = "localhost:9092";
+static KAFKA_BROKERS: std::sync::LazyLock<&str> = std::sync::LazyLock::new(|| {
+    std::env::var("KAFKA_HOSTS").map_or("localhost:9092", |v| &*v.leak())
+});
 
 // ── Kafka helpers ──────────────────────────────────────────────────────────
 
 async fn create_topic(name: &str, partitions: i32) {
     let admin: AdminClient<DefaultClientContext> = ClientConfig::new()
-        .set("bootstrap.servers", KAFKA_BROKERS)
+        .set("bootstrap.servers", *KAFKA_BROKERS)
         .create()
         .expect("admin client");
     let topic = NewTopic::new(name, partitions, TopicReplication::Fixed(1));
@@ -67,7 +69,7 @@ async fn create_topic(name: &str, partitions: i32) {
 
 fn make_producer() -> FutureProducer {
     ClientConfig::new()
-        .set("bootstrap.servers", KAFKA_BROKERS)
+        .set("bootstrap.servers", *KAFKA_BROKERS)
         .set("message.timeout.ms", "5000")
         .create()
         .expect("producer")
@@ -463,7 +465,7 @@ fn make_kafka_consumer_with_context(
 ) -> StreamConsumer<SentinelContext> {
     let mut config = ClientConfig::new();
     config
-        .set("bootstrap.servers", KAFKA_BROKERS)
+        .set("bootstrap.servers", *KAFKA_BROKERS)
         .set("group.id", group_id)
         .set("auto.offset.reset", "earliest")
         .set("enable.auto.commit", "false")
@@ -755,7 +757,7 @@ impl Harness {
     /// `None` while nothing is committed.
     fn committed_offset(&self, partition: i32) -> Option<i64> {
         let probe: BaseConsumer = ClientConfig::new()
-            .set("bootstrap.servers", KAFKA_BROKERS)
+            .set("bootstrap.servers", *KAFKA_BROKERS)
             .set("group.id", &self.group_id)
             .create()
             .expect("committed-offset probe");

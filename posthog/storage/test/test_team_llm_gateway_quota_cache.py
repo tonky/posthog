@@ -1,3 +1,4 @@
+import os
 from datetime import UTC, datetime, timedelta
 
 from posthog.test.base import BaseTest
@@ -34,6 +35,7 @@ from posthog.storage.team_llm_gateway_quota_cache import (
     reconcile_quota_projection,
     team_llm_gateway_quota_hypercache as hypercache,
 )
+from posthog.storage.test.cluster_cache import reject_multi_key_commands
 
 from ee.billing.quota_limiting import (
     QuotaLimitingCaches,
@@ -43,7 +45,9 @@ from ee.billing.quota_limiting import (
     remove_limited_team_tokens,
 )
 
-_GATEWAY_REDIS_URL = "redis://localhost:6379/15"
+_GATEWAY_REDIS_URL = (
+    f"redis://localhost:{os.getenv('REDIS_PORT', '6379')}/{os.getenv('AI_GATEWAY_TEST_REDIS_DB', '15')}"
+)
 _NOW = datetime(2026, 9, 22, 12, 0, 0, tzinfo=UTC)
 
 
@@ -191,6 +195,16 @@ class TestProjectTeamQuota(QuotaProjectionTestMixin):
         # A plain delete, never a miss sentinel.
         self.assertIsNone(hypercache.cache_client.get(hypercache.get_cache_key(self.team)))
         self.assertNotIn(self.team.id, projected_team_ids())
+
+    def test_lifting_the_limit_deletes_the_blob_on_a_cluster(self, mock_settings):
+        self._enable(mock_settings)
+        _limit(self.team, QuotaResource.AI_CREDITS, (timezone.now() + timedelta(days=3)).timestamp())
+        project_team_quota(self.team)
+
+        _unlimit(self.team, QuotaResource.AI_CREDITS)
+        with reject_multi_key_commands(hypercache.cache_client):
+            self.assertIs(project_team_quota(self.team), False)
+        self.assertIsNone(hypercache.cache_client.get(hypercache.get_cache_key(self.team)))
 
     def test_expired_score_is_ignored(self, mock_settings):
         self._enable(mock_settings)
@@ -473,6 +487,18 @@ class TestReconcileQuotaProjection(QuotaProjectionTestMixin):
         second = reconcile_quota_projection()
         self.assertEqual(second, {"candidates": 1, "written": 1, "cleared": 0, "failed": 0})
         self.assertEqual(projected_team_ids(), {self.team.id})
+
+    def test_reconcile_reads_one_key_per_command(self, mock_settings):
+        mock_settings.AI_GATEWAY_REDIS_URL = _GATEWAY_REDIS_URL
+        # A reachable deactivated org with no blob is the path that checks blob presence.
+        Organization.objects.filter(pk=self.organization.pk).update(is_active=False)
+        with patch.object(
+            hypercache.cache_client, "get_many", side_effect=RuntimeError("CROSSSLOT Keys in request don't hash")
+        ):
+            reconcile_quota_projection()
+        blob = get_team_quota_blob(self.team)
+        assert blob is not None
+        self.assertTrue(blob["org_deactivated"])
 
     def test_reconcile_counts_failed_writes_and_clears_apart(self, mock_settings):
         mock_settings.AI_GATEWAY_REDIS_URL = _GATEWAY_REDIS_URL

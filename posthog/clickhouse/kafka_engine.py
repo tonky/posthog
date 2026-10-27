@@ -121,6 +121,11 @@ def kafka_engine(
     use_named_collection: bool = True,
     named_collection: str | None = None,
 ) -> str:
+    if settings.TEST:
+        # Each pytest-xdist worker consumes in groups of its own, as its topics carry its suffix
+        # (settings SUFFIX): a dropped Kafka table's consumer stays a member of its group until
+        # its session expires, and holds up the group's other consumers, other workers' too.
+        group = f"{group}{settings.XDIST_SUFFIX}"
     if use_named_collection:
         assert kafka_host is None, "Can't set kafka_host when using named collection"
         # Use explicit named_collection if provided, otherwise default to MSK
