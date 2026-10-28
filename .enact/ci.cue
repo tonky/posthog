@@ -33,9 +33,24 @@ pipeline: schema.#Pipeline & {
 			".github/workflows/update-ai-costs.yml",
 			".github/workflows/update-sandbox-agent-version.yml",
 		]
-		// Each job asks for the smallest runner size it fits on ibp8; concurrent runners
-		// share its host budget (agentic/KNOWLEDGE.md tonky-ci).
+		// Each host serves its declared size labels under its shared CPU/RAM budget
+		// (agentic/KNOWLEDGE.md tonky-ci); available counts hosts, not runner slots.
 		workers: {
+			"mac1": {
+				labels: ["self-hosted", "Linux", "ARM64", "tonky-ci"]
+				tier:         "dedicated"
+				available:    1
+				cost_per_min: 0.010
+				pool: {
+					cpus:      4
+					memory_mb: 8192
+					sizes: {
+						"tonky-ci-s": {cpus: 2, memory_mb: 4096}
+						"tonky-ci-m": {cpus: 4, memory_mb: 8192}
+					}
+				}
+				timeout_minutes: 90
+			}
 			"standard": {
 				labels: ["self-hosted", "Linux", "X64", "tonky-ci"]
 				tier:            "dedicated"
@@ -59,7 +74,8 @@ pipeline: schema.#Pipeline & {
 			layout:   "staged"
 			services: "on_demand"
 			stages: [
-				_preflightStage,
+				// The ARM VM can run these checks while ibp8 serves the test matrix.
+				_preflightStage & {runner: "mac1"},
 				_testStage,
 			]
 		}

@@ -1,4 +1,7 @@
-"""run_nodejs_tests.sh runs the jest files it is given, and only those.
+"""The actual runner reuses managed installs and dispatches only the jest files it is given.
+
+Preparation and dispatch fixtures mock dependencies and services; optional real Jest checks
+require the nodejs install.
 
 The package's test:parallel script ends in --testPathIgnorePatterns, an array option, so the
 paths the runner appended became more ignore patterns: given five files, the lane ran the
@@ -52,6 +55,93 @@ elif tool in ("pnpm", "enact"):
     elif "--listTests" in args:
         print("\n".join(row["tests"]))
 '''
+
+
+PREPARE_STUB = r'''import json, os, subprocess, sys
+from pathlib import Path
+tool, args = Path(sys.argv[0]).name, sys.argv[1:]
+with open(os.environ["CALL_LOG"], "a") as log:
+    log.write(json.dumps({"tool": tool, "args": args}) + "\n")
+if tool == "exclusive.sh":
+    sys.exit(subprocess.call(args[1:]))
+'''
+
+
+class NodejsPreparationTest(unittest.TestCase):
+    """Execute the real outer runner, with dependency builds and services logged stubs."""
+
+    def setUp(self) -> None:
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name).resolve()
+        scripts = self.root / "showcase/scripts"
+        scripts.mkdir(parents=True)
+        (scripts / "run_nodejs_tests.sh").write_text(RUNNER.read_text())
+        (scripts / "test_databases.sh").write_text(
+            'with_templates() { "$@"; }\nfresh_django_clone() { :; }\n'
+        )
+        tools = self.root / "stubs"
+        tools.mkdir()
+        stub = tools / "tool.py"
+        stub.write_text(f"#!{sys.executable}\n" + PREPARE_STUB)
+        stub.chmod(0o755)
+        for name in ("pnpm", "enve"):
+            (tools / name).symlink_to(stub)
+        for name in ("exclusive.sh", "build_hogvm.sh"):
+            (scripts / name).symlink_to(stub)
+        (self.root / "bin").mkdir()
+        (self.root / "bin/turbo").symlink_to(stub)
+        (self.root / "nodejs").mkdir()
+
+    def run_outer(self, prepared: str | None, store: str | None = None, shard: int = 1) -> list[dict]:
+        log = self.root / f"calls-{shard}.jsonl"
+        env = {k: v for k, v in os.environ.items() if not k.startswith(("ENACT_", "ENVE_", "NODEJS_"))}
+        env.update(PATH=f"{self.root / 'stubs'}:{env['PATH']}", CALL_LOG=str(log),
+                   PGUSER="posthog", PGHOST="127.0.0.1", PGPORT="1",
+                   ENACT_SHARD_INDEX=str(shard), ENACT_SHARD_TOTAL="2")
+        if prepared is not None:
+            env["ENACT_PREPARED"] = prepared
+        if store is not None:
+            env["ENACT_PNPM_STORE"] = store
+        out = subprocess.run(["bash", str(self.root / "showcase/scripts/run_nodejs_tests.sh")],
+                             cwd=self.root / "nodejs", env=env, capture_output=True, text=True)
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        calls = [json.loads(line) for line in log.read_text().splitlines()]
+        self.assertEqual(sum(call["tool"] == "enve" for call in calls), 1, calls)
+        self.assertEqual(sum(call["tool"] == "build_hogvm.sh" for call in calls), 1, calls)
+        self.assertEqual(sum(call["tool"] == "turbo" for call in calls), 1, calls)
+        return calls
+
+    def test_managed_prepare_skips_the_install_and_lock_for_every_shard(self) -> None:
+        for prepared in ("node", "node,python", " python , node "):
+            for shard in (1, 2):
+                with self.subTest(prepared=prepared, shard=shard):
+                    (self.root / f"calls-{shard}.jsonl").unlink(missing_ok=True)
+                    calls = self.run_outer(prepared, str(self.root / "configured store"), shard)
+                    self.assertFalse(any(call["tool"] == "pnpm" for call in calls), calls)
+                    self.assertFalse(any(call["tool"] == "exclusive.sh" and call["args"][0] == "node-modules"
+                                         for call in calls), calls)
+
+    def assert_fallback(self, calls: list[dict], store: str) -> None:
+        installs = [call for call in calls if call["tool"] == "pnpm"]
+        self.assertEqual(len(installs), 1, calls)
+        self.assertEqual(installs[0]["args"], ["--filter=@posthog/nodejs...", "install", "--frozen-lockfile",
+                                               "--prefer-offline", "--store-dir", store])
+        locks = [call for call in calls if call["tool"] == "exclusive.sh" and call["args"][0] == "node-modules"]
+        self.assertEqual(len(locks), 1, calls)
+
+    def test_manual_fallback_uses_the_managed_default_store(self) -> None:
+        self.assert_fallback(self.run_outer(None), str(self.root / ".enact/state/pnpm-store"))
+
+    def test_unprepared_fallback_preserves_the_configured_store_with_spaces(self) -> None:
+        store = str(self.root / "configured store")
+        self.assert_fallback(self.run_outer("python", store), store)
+
+    def test_similarly_named_ecosystems_do_not_claim_a_node_prepare(self) -> None:
+        for prepared in ("nodejs,python", "pre-node,python", "node-extra", "n o d e", "NODE", ""):
+            with self.subTest(prepared=prepared):
+                (self.root / "calls-1.jsonl").unlink(missing_ok=True)
+                self.assert_fallback(self.run_outer(prepared), str(self.root / ".enact/state/pnpm-store"))
 
 
 class NodejsRecordingDispatchTest(unittest.TestCase):

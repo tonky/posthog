@@ -292,12 +292,17 @@ export NODEJS_DJANGO_DATABASE_URL="postgres://${PGUSER}:${PGPASSWORD:-posthog}@$
 export NODE_OPTIONS="${NODE_OPTIONS:---max_old_space_size=4096}"
 unset PYTEST_XDIST_WORKER TOX_PARALLEL_ENV
 
-# The shards install into one node_modules and build one dist: one at a time (exclusive.sh).
+# A managed node prepare already installed this checkout; do not reinstall or take its
+# node-modules lock in every shard. Manual runs keep the same store as managed installs.
+# The shards build one dist: one at a time (exclusive.sh).
 # turbo.json's build keys its cache on SHARD_INDEX and SHARD_COUNT (CI's shards are machines of
 # their own): with them each shard missed it and rebuilt @posthog/hogvm (`rm -rf dist` first)
 # under the jest of a shard already running ("Cannot find module '@posthog/hogvm'"). Without
 # them the first shard builds and the others restore its cached outputs.
-showcase/scripts/exclusive.sh node-modules pnpm --filter=@posthog/nodejs... install --frozen-lockfile
+if [[ ! "${ENACT_PREPARED:-}" =~ (^|,)[[:space:]]*node[[:space:]]*(,|$) ]]; then
+    showcase/scripts/exclusive.sh node-modules pnpm --filter=@posthog/nodejs... install --frozen-lockfile \
+        --prefer-offline --store-dir "${ENACT_PNPM_STORE:-$PWD/.enact/state/pnpm-store}"
+fi
 showcase/scripts/build_hogvm.sh
 showcase/scripts/exclusive.sh nodejs-build env -u SHARD_INDEX -u SHARD_COUNT bin/turbo --filter=@posthog/nodejs prepare
 
