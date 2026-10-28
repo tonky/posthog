@@ -5,10 +5,13 @@ data-warehouse funnel tests failed. Needs the running service and boto3 (the bac
 `enve run --locked -- .venv/bin/python -m unittest showcase/scripts/tests/test_object_storage.py`.
 """
 
+import json
 import os
 import socket
+import subprocess
 import unittest
 import uuid
+from pathlib import Path
 
 # The env's endpoint only: a fixed default would reach whichever server holds that port (another
 # run's, or a VM's forwarded one), not this run's.
@@ -30,6 +33,37 @@ try:
     import boto3
 except ImportError:
     boto3 = None
+
+
+class ObjectStorageEnvironmentTest(unittest.TestCase):
+    """Service-local credentials cannot turn anonymous readiness into authenticated S3."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        root = Path(__file__).resolve().parents[3]
+        env = {**os.environ, "AWS_ACCESS_KEY_ID": "fixture-cache-key", "AWS_SECRET_ACCESS_KEY": "fixture-cache-secret"}
+
+        def exported(expression: str) -> dict:
+            out = subprocess.run(
+                ["enve", "cue", "export", "-q", "-e", expression, "enve.cue"],
+                cwd=root, env=env, capture_output=True, text=True, timeout=30,
+            )
+            if out.returncode != 0:
+                raise AssertionError(f"enve cue export failed: {out.stderr}")
+            return json.loads(out.stdout)
+
+        cls.services = exported("profiles.dev.services")
+        cls.client_environment = exported("profiles.dev.environment")
+
+    def test_both_fixture_daemons_clear_ambient_cache_credentials(self) -> None:
+        for service in ("seaweedfs", "seaweedfs-open"):
+            for key in ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"):
+                with self.subTest(service=service, key=key):
+                    self.assertEqual(self.services[service]["environment"].get(key), "")
+
+    def test_outer_clients_keep_their_cache_credentials(self) -> None:
+        for key in ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"):
+            self.assertNotIn(key, self.client_environment, "clear credentials on the service, never on its clients")
 
 
 @unittest.skipUnless(boto3 and reachable(), "needs boto3 and the seaweedfs service (OBJECT_STORAGE_ENDPOINT)")

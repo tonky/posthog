@@ -15,6 +15,8 @@ pipeline: schema.#Pipeline & {
 	}
 
 	ci: {
+		// The Node shards supervise their own services outside enact's outer run log.
+		diagnostic_paths: [".enact/state/nodejs/*.services.log"]
 		no_cache: {
 			labels: ["no-cache", "showcase"]
 			branch_prefixes: ["showcase/"]

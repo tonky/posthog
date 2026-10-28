@@ -641,6 +641,7 @@ jobs:
           .enact/state/telemetry.json
           .enact/state/summary.html
           .enact/state/runs/*/services/*.log
+          .enact/state/nodejs/*.services.log
         retention-days: "1"
     - name: Upload Recorded Footprints
       if: ${{ (always() && (github.event_name == 'push' && github.ref_name == github.event.repository.default_branch || github.event_name == 'workflow_dispatch' && inputs.warm_reach == 'true' && github.ref_name == github.event.repository.default_branch)) && steps.outputs-lookup.outputs.cache-hit != 'true' }}
@@ -1420,6 +1421,7 @@ jobs:
           .enact/state/telemetry.json
           .enact/state/summary.html
           .enact/state/runs/*/services/*.log
+          .enact/state/nodejs/*.services.log
         retention-days: "1"
     - name: Upload Recorded Footprints
       if: ${{ (always() && (github.event_name == 'push' && github.ref_name == github.event.repository.default_branch || github.event_name == 'workflow_dispatch' && inputs.warm_reach == 'true' && github.ref_name == github.event.repository.default_branch)) && steps.outputs-lookup.outputs.cache-hit != 'true' }}
@@ -3420,6 +3422,7 @@ jobs:
           .enact/state/telemetry.json
           .enact/state/summary.html
           .enact/state/runs/*/services/*.log
+          .enact/state/nodejs/*.services.log
         retention-days: "1"
     - name: Upload Recorded Footprints
       if: ${{ always() && (github.event_name == 'push' && github.ref_name == github.event.repository.default_branch || github.event_name == 'workflow_dispatch' && inputs.warm_reach == 'true' && github.ref_name == github.event.repository.default_branch) }}
@@ -4307,6 +4310,7 @@ jobs:
           .enact/state/telemetry.json
           .enact/state/summary.html
           .enact/state/runs/*/services/*.log
+          .enact/state/nodejs/*.services.log
         retention-days: "1"
     - name: Upload Recorded Footprints
       if: ${{ always() && (github.event_name == 'push' && github.ref_name == github.event.repository.default_branch || github.event_name == 'workflow_dispatch' && inputs.warm_reach == 'true' && github.ref_name == github.event.repository.default_branch) }}
@@ -4923,6 +4927,7 @@ jobs:
           .enact/state/telemetry.json
           .enact/state/summary.html
           .enact/state/runs/*/services/*.log
+          .enact/state/nodejs/*.services.log
         retention-days: "1"
     - name: Upload Recorded Footprints
       if: ${{ always() && (github.event_name == 'push' && github.ref_name == github.event.repository.default_branch || github.event_name == 'workflow_dispatch' && inputs.warm_reach == 'true' && github.ref_name == github.event.repository.default_branch) }}
@@ -5778,6 +5783,7 @@ jobs:
           .enact/state/telemetry.json
           .enact/state/summary.html
           .enact/state/runs/*/services/*.log
+          .enact/state/nodejs/*.services.log
         retention-days: "1"
     - name: Upload Recorded Footprints
       if: ${{ always() && (github.event_name == 'push' && github.ref_name == github.event.repository.default_branch || github.event_name == 'workflow_dispatch' && inputs.warm_reach == 'true' && github.ref_name == github.event.repository.default_branch) }}
@@ -6535,6 +6541,7 @@ jobs:
           .enact/state/telemetry.json
           .enact/state/summary.html
           .enact/state/runs/*/services/*.log
+          .enact/state/nodejs/*.services.log
         retention-days: "1"
     - name: Upload Recorded Footprints
       if: ${{ always() && (github.event_name == 'push' && github.ref_name == github.event.repository.default_branch || github.event_name == 'workflow_dispatch' && inputs.warm_reach == 'true' && github.ref_name == github.event.repository.default_branch) }}

@@ -419,6 +419,8 @@ profiles: dev: schema.#Profile & {
 		// As docker-compose.base.yml's objectstorage: volumes that grow on demand (the tests make a
 		// bucket each), and the identities and buckets its bootstrap loop registers.
 		seaweedfs: {
+			// Seaweed imports AWS keys as an admin identity; cache credentials must stay outside the fixture.
+			environment: {AWS_ACCESS_KEY_ID: "", AWS_SECRET_ACCESS_KEY: ""}
 			// Each listener a port slot (`weed server`'s defaults), so a named instance (E7) gets free ones.
 			port: 19000
 			ports: {master: 19001, volume: 19002, filer: 8888, s3_grpc: 29000, master_grpc: 29001, volume_grpc: 29002, filer_grpc: 18888}
@@ -434,6 +436,7 @@ profiles: dev: schema.#Profile & {
 		// key's put creates the missing bucket, a plain key can't create one (blob-store's
 		// integration test). Session replay's and the AI blob store's tests reach it.
 		"seaweedfs-open": schema.#SeaweedfsService & {
+			environment: {AWS_ACCESS_KEY_ID: "", AWS_SECRET_ACCESS_KEY: ""}
 			port: 8333
 			ports: {master: 9333, volume: 18080, filer: 18889, s3_grpc: 28333, master_grpc: 19333, volume_grpc: 28080, filer_grpc: 28889}
 			command: "weed server -ip=127.0.0.1 -master.raftHashicorp -s3 -s3.port=$PORT -s3.port.grpc=$PORT_S3_GRPC -s3.port.iceberg=0 -s3.port.lance=0 -master.port=$PORT_MASTER -master.port.grpc=$PORT_MASTER_GRPC -volume.port=$PORT_VOLUME -volume.port.grpc=$PORT_VOLUME_GRPC -filer.port=$PORT_FILER -filer.port.grpc=$PORT_FILER_GRPC -dir=\"$DATA_DIR\" -volume.max=1000 -master.volumePreallocate=false"

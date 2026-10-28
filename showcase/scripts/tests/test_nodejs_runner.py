@@ -64,6 +64,15 @@ with open(os.environ["CALL_LOG"], "a") as log:
     log.write(json.dumps({"tool": tool, "args": args}) + "\n")
 if tool == "exclusive.sh":
     sys.exit(subprocess.call(args[1:]))
+if tool == "enve" and os.getenv("ENACT_TEST_SERVICE_EXIT_STATUS"):
+    print("service startup begins")
+    for i in range(60):
+        print(f"[kafka] startup progress {i}")
+    print("[seaweedfs-open] FATAL: nested startup cause: permission denied")
+    for i in range(200):
+        print(f"[kafka] orderly teardown {i}")
+    print("final teardown marker")
+    sys.exit(int(os.environ["ENACT_TEST_SERVICE_EXIT_STATUS"]))
 '''
 
 
@@ -93,7 +102,8 @@ class NodejsPreparationTest(unittest.TestCase):
         (self.root / "bin/turbo").symlink_to(stub)
         (self.root / "nodejs").mkdir()
 
-    def run_outer(self, prepared: str | None, store: str | None = None, shard: int = 1) -> list[dict]:
+    def run_outer(self, prepared: str | None, store: str | None = None, shard: int = 1,
+                  service_status: int = 0) -> list[dict]:
         log = self.root / f"calls-{shard}.jsonl"
         env = {k: v for k, v in os.environ.items() if not k.startswith(("ENACT_", "ENVE_", "NODEJS_"))}
         env.update(PATH=f"{self.root / 'stubs'}:{env['PATH']}", CALL_LOG=str(log),
@@ -103,9 +113,12 @@ class NodejsPreparationTest(unittest.TestCase):
             env["ENACT_PREPARED"] = prepared
         if store is not None:
             env["ENACT_PNPM_STORE"] = store
+        if service_status:
+            env["ENACT_TEST_SERVICE_EXIT_STATUS"] = str(service_status)
         out = subprocess.run(["bash", str(self.root / "showcase/scripts/run_nodejs_tests.sh")],
                              cwd=self.root / "nodejs", env=env, capture_output=True, text=True)
-        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        self.last_out = out
+        self.assertEqual(out.returncode, service_status, out.stdout + out.stderr)
         calls = [json.loads(line) for line in log.read_text().splitlines()]
         self.assertEqual(sum(call["tool"] == "enve" for call in calls), 1, calls)
         self.assertEqual(sum(call["tool"] == "build_hogvm.sh" for call in calls), 1, calls)
@@ -142,6 +155,38 @@ class NodejsPreparationTest(unittest.TestCase):
             with self.subTest(prepared=prepared):
                 (self.root / "calls-1.jsonl").unlink(missing_ok=True)
                 self.assert_fallback(self.run_outer(prepared), str(self.root / ".enact/state/pnpm-store"))
+
+
+    def test_startup_failure_keeps_early_cause_exit_status_and_complete_artifact(self) -> None:
+        self.run_outer("node", service_status=7)
+        self.assertIn("nested startup cause: permission denied", self.last_out.stderr)
+        self.assertIn("service startup begins", self.last_out.stderr)
+        self.assertIn("final teardown marker", self.last_out.stderr)
+        self.assertLess(len(self.last_out.stderr.splitlines()), 150)
+        log = self.root / ".enact/state/nodejs/default-nodejs1.services.log"
+        complete = log.read_text()
+        self.assertEqual(len(complete.splitlines()), 263)
+        self.assertEqual(complete.count("orderly teardown"), 200)
+        # Inspect the committed generated steps, including their cancellation handling.
+        workflow = (ROOT / ".github/workflows/ci.yml").read_text()
+        steps = re.findall(r"(?ms)^    - name:.*?(?=^    - name:|^  [\w-]+:|\Z)", workflow)
+        uploads = [step for step in steps if re.search(r"(?m)^        name: telemetry-", step)]
+        self.assertGreaterEqual(len(uploads), 2)
+        self.assertTrue(any("telemetry-stage-" in step for step in uploads))
+        for step in uploads:
+            self.assertIn("always()", step)
+            self.assertIn("actions/upload-artifact@", step)
+            paths = re.findall(r"(?m)^          (\S.+)$", step)
+            # An explicit visible search root below .enact works with hidden-files=false.
+            nested = ".enact/state/nodejs/*.services.log"
+            self.assertIn(nested, paths)
+            self.assertIn(log, list(self.root.glob(nested)))
+            self.assertEqual(log.read_text(), complete)
+
+    def test_success_does_not_print_failure_excerpts(self) -> None:
+        self.run_outer("node")
+        self.assertNotIn("diagnostic lines", self.last_out.stderr)
+        self.assertNotIn("first 40 lines", self.last_out.stderr)
 
 
 class NodejsRecordingDispatchTest(unittest.TestCase):

@@ -349,7 +349,15 @@ NODEJS_SHARD_INSTANCE="$instance" NODEJS_LANES="$lanes" NODEJS_SUITE="$suite" \
     enve run --locked --instance "$instance" --wait=10m --no-deps --with-services=postgres,redis,clickhouse,kafka,seaweedfs,seaweedfs-open,valkey-cluster,dynamodb,maildev \
     -- bash showcase/scripts/run_nodejs_tests.sh "$@" 3>&1 4>&2 >"$log" 2>&1 || status=$?
 if [ "$status" -ne 0 ]; then
-    echo "[$shard] failed ($status); the end of instance $instance's log ($log):" >&2
-    tail -n 40 "$log" >&2
+    echo "[$shard] failed ($status); complete instance $instance service log: $log" >&2
+    echo "[$shard] first 40 lines:" >&2
+    head -n 40 "$log" >&2 || true
+    echo "[$shard] first diagnostic lines (up to 40):" >&2
+    awk 'tolower($0) ~ /(^|[^[:alpha:]])(error|fatal|panic|failed|denied|refused)([^[:alpha:]]|$)/ {
+        print NR ": " $0
+        if (++shown == 40) exit
+    }' "$log" >&2 || true
+    echo "[$shard] last 40 lines:" >&2
+    tail -n 40 "$log" >&2 || true
 fi
 exit "$status"

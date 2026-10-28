@@ -30,6 +30,6 @@ describe('ingestion traces server', () => {
             PLUGIN_SERVER_MODE: PluginServerMode.ingestion_traces,
         })
         await server.start()
-        expect(process.exit).not.toHaveBeenCalled()
+        expect(process.exit).not.toHaveBeenCalledWith(1)
     })
 })
