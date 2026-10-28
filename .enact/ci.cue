@@ -33,17 +33,23 @@ pipeline: schema.#Pipeline & {
 			".github/workflows/update-ai-costs.yml",
 			".github/workflows/update-sandbox-agent-version.yml",
 		]
-		// The fork's jobs run on the user's tonky-ci fleet, one fresh container per job (enact's
-		// .enact/workflows.cue worker `tonky-ci`): every job on the x86_64 slots, 6 cpus and
-		// 13 GB each, which the limiter sizes shards and workers to.
+		// Each job asks for the smallest runner size it fits on ibp8; concurrent runners
+		// share its host budget (agentic/KNOWLEDGE.md tonky-ci).
 		workers: {
 			"standard": {
 				labels: ["self-hosted", "Linux", "X64", "tonky-ci"]
 				tier:            "dedicated"
-				available:       2
+				available:       1
 				cost_per_min:    0.010
-				cpus:            6
-				memory_mb:       13312
+				pool: {
+					cpus:      14
+					memory_mb: 28672
+					sizes: {
+						"tonky-ci-s": {cpus: 2, memory_mb: 4096}
+						"tonky-ci-m": {cpus: 4, memory_mb: 8192}
+						"tonky-ci-l": {cpus: 6, memory_mb: 13312}
+					}
+				}
 				timeout_minutes: 90
 			}
 		}

@@ -1,0 +1,8 @@
+SOURCE CWD 7b02d6508
+RELEASE DEPFILE /home/tonky/build/main/release/enact: /Users/tonky/projects/enact/crates/enact-cli/../../.git/HEAD /Users/tonky/projects/enact/crates/enact-cli/../../.git/index /Users/tonky/projects/enact/crates/enact-cli/../../.git/packed-refs /Users/tonky/projects/enact/cra
+BINARY -rwxr-xr-x 2 tonky tonky 56116360 Oct 27 21:10 /home/tonky/build/main/release/enact
+ENVE HASH 6d0014c50220c3d0cb4f7dd1ab7808f42d3b8feb4433dfba7913b22fa477de32  /home/tonky/.local/bin/enve
+ENVE ELF   Class:                             ELF64
+  Machine:                           AArch64
+      [Requesting program interpreter: /lib/ld-linux-aarch64.so.1]
+GLIBC_2.39

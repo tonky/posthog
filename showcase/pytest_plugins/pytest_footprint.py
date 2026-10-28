@@ -33,11 +33,18 @@ outcome (`"outcomes": true`): a file with a failed test, or one whose tests didn
 is incomplete (failed), so a failing shard lands only its passing files' footprints. A file
 with a skipped test (or skipped whole) says the platform that skipped it (`skipped_on`): its
 footprint holds what the skip read, so planning on another platform runs it on every change.
+
+As each test file finishes, a checkpoint publishes its completed targets atomically.
+Earlier files are not serialized again. At exit the final whole map is published before
+those checkpoints are removed, so SIGKILL leaves completed files rather than losing the
+whole shard. A target whose child still runs waits for a later checkpoint or finalization:
+unfinished child evidence cannot establish a complete footprint.
 """
 
 import atexit
 import os
 import sys
+import time
 
 import enact_footprint as core
 import pytest
@@ -68,6 +75,9 @@ failed: set[str] = set()
 skipped: set[str] = set()
 # The platform as enact names it (`linux`, `darwin`).
 PLATFORM = "linux" if sys.platform.startswith("linux") else sys.platform
+# Each completed target is published once; the final map supersedes all checkpoints.
+checkpoint_paths: list[str] = []
+checkpointed: set[str] = set()
 
 
 def relative(path) -> str | None:
@@ -125,6 +135,8 @@ def pytest_runtest_protocol(item, nextitem):
         rel = recorded_file(item)
         if rel:
             finished[rel] = finished.get(rel, 0) + 1
+            if RECORDING and finished[rel] >= collected.get(rel, 0):
+                checkpoint()
 
 
 @pytest.hookimpl(wrapper=True)
@@ -177,8 +189,9 @@ def patch_pytest() -> None:
     fixtures.FixtureDef.finish = finish_fixture
 
 
-def write() -> None:
-    shared, entries = core.finish()
+def map_targets(entries) -> tuple[dict, dict]:
+    """The map's targets from `core`'s entries, with their outcomes, and the opaque ones'
+    reasons."""
     targets, opaque = {}, {}
     for target, (entry, why) in sorted(entries.items()):
         if target not in entry["files"]:
@@ -193,12 +206,46 @@ def write() -> None:
         if target in skipped:
             entry["skipped_on"] = [PLATFORM]
         targets[target] = entry
-    if not targets:
-        return
+    return targets, opaque
+
+
+def map_prefix() -> str:
     shard = os.environ.get("ENACT_SHARD_INDEX", "1")
     group = os.environ.get("ENACT_PYTEST_GROUP", "")
-    prefix = f"shard{shard}-{group}-" if group else f"shard{shard}-"
-    out = core.write_map(os.path.abspath(OUT_DIR), prefix, shared, targets)
+    return f"shard{shard}-{group}-" if group else f"shard{shard}-"
+
+
+def checkpoint() -> None:
+    """Publish finished targets not already durable; unresolved children are retried later.
+    A failed write leaves the earlier checkpoints intact."""
+    began = time.monotonic()
+    done = [key for key in core.footprints if key != core.SHARED and key not in checkpointed
+            and finished.get(key, 0) >= collected.get(key, 0)]
+    try:
+        snapshot = core.checkpoint(done)
+        if snapshot is not None:
+            shared, entries, order = snapshot
+            targets, _ = map_targets(entries)
+            if targets:
+                checkpoint_paths.append(core.write_map(os.path.abspath(OUT_DIR), map_prefix(), shared, targets, order=order))
+                checkpointed.update(targets)
+    except Exception as e:  # recording goes on; the end writes the whole map
+        core.count(f"checkpoint_error:{type(e).__name__}")
+    took = time.monotonic() - began
+    core.count("checkpoint_ms", int(took * 1000))
+
+
+def write() -> None:
+    shared, entries = core.finish()
+    targets, opaque = map_targets(entries)
+    if not targets:
+        return
+    out = core.write_map(os.path.abspath(OUT_DIR), map_prefix(), shared, targets)
+    for path in checkpoint_paths:
+        try:
+            os.unlink(path)
+        except OSError:
+            core.count("checkpoint_cleanup_error")
     core.write_stats(out, len(targets), opaque)
     print(
         f"pytest_footprint: {len(targets)} test files ({len(opaque)} opaque), "

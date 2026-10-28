@@ -174,6 +174,13 @@ class Footprint:
         self.spawned: set[str] = set()
         self.loaded: set[str] = set()  # modules its Python children loaded
 
+    def copy(self) -> "Footprint":
+        fp = Footprint()
+        fp.code = {file: set(functions) for file, functions in self.code.items()}
+        for name in self.SETS:
+            setattr(fp, name, set(getattr(self, name)))
+        return fp
+
     def update(self, other: "Footprint") -> None:
         for file, functions in other.code.items():
             self.code.setdefault(file, set()).update(functions)
@@ -1601,7 +1608,10 @@ def _probe_lookup(probes: list, directory: str, finder, tail: str, spec) -> None
 
 def _checked(path, call):
     """A `stat` the code under test made: a missing path is a probe, a file a presence
-    predicate found too (`_presence_only`), any other file is found."""
+    predicate found too (`_presence_only`), any other file is found. The recorder's own (this
+    thread busy) is none."""
+    if getattr(local, "busy", False):
+        return call()
     try:
         result = call()
     except (FileNotFoundError, NotADirectoryError):
@@ -1965,10 +1975,12 @@ def _patch_import_statements() -> None:
     builtins.__import__ = __import__
 
 
-def _own_holders(module: str, owners: dict[str, list[str]], importers: dict[str, set[str]]) -> set[str] | None:
-    """The targets an own `module` belongs to: its own targets, and those whose own modules
-    or code imported it, through own modules only. None: it is every target's."""
-    if module in shared.reads or shared.code.get(module) or (EXTERNAL, "*") in import_edges:
+def _own_holders(module: str, owners: dict[str, list[str]], importers: dict[str, set[str]],
+                 fps: dict[str, Footprint]) -> set[str] | None:
+    """The targets of `fps` an own `module` belongs to: its own targets, and those whose own
+    modules or code imported it, through own modules only. None: it is every target's."""
+    common = fps[SHARED]
+    if module in common.reads or common.code.get(module) or (EXTERNAL, "*") in import_edges:
         return None
     loader = first_loaded_by.get(module, SHARED)
     if loader in (None, SHARED):
@@ -1987,31 +1999,37 @@ def _own_holders(module: str, owners: dict[str, list[str]], importers: dict[str,
     holders = keys | {key for m in modules for key in owners.get(m, ())}
     if loader not in holders:
         return None  # loaded by what no import statement shows (a runner's, a registry's)
-    return holders | {key for key, fp in footprints.items() if key != SHARED and module in fp.code}
+    return holders | {key for key, fp in fps.items() if key != SHARED and module in fp.code}
 
 
-def narrow_own_modules() -> int:
+def narrow_own_modules(fps: dict[str, Footprint] | None = None, order: list[str] | None = None,
+                       marks: dict[str, int] | None = None) -> int:
     """Gives each own module whose holders are known (`_own_holders`) to them alone: out of
     the shared footprint and the load order, into each holder's code and `loaded`. Returns
-    how many it narrowed."""
+    how many it narrowed. `fps`, `order` and `marks` (a checkpoint's copies) default to the
+    recording's own footprints, `loaded_order` and `loaded_marks`."""
+    fps = footprints if fps is None else fps
+    order = loaded_order if order is None else order
+    marks = loaded_marks if marks is None else marks
+    common = fps[SHARED]
     owners: dict[str, list[str]] = {}
-    for key in footprints:
+    for key in fps:
         if key != SHARED:
             owners.setdefault(key.split("::", 1)[0], []).append(key)
     importers: dict[str, set[str]] = {}
     for importer, module in import_edges:
         importers.setdefault(module, set()).add(importer)
     narrowed = {}
-    for module in sorted((own_modules | set(owners)) & set(shared.code)):
-        holders = _own_holders(module, owners, importers)
+    for module in sorted((own_modules | set(owners)) & set(common.code)):
+        holders = _own_holders(module, owners, importers, fps)
         if holders is not None:
             narrowed[module] = holders
     for module, holders in narrowed.items():
-        del shared.code[module]
-        present = module in shared.present
-        shared.present.discard(module)
+        del common.code[module]
+        present = module in common.present
+        common.present.discard(module)
         for key in holders:
-            fp = footprints.get(key)
+            fp = fps.get(key)
             if fp is not None:
                 fp.code.setdefault(module, set())
                 fp.loaded.add(module)
@@ -2019,12 +2037,12 @@ def narrow_own_modules() -> int:
                     fp.present.add(module)
     if narrowed:
         kept, before = 0, [0]
-        for rel in loaded_order:
+        for rel in order:
             kept += rel not in narrowed
             before.append(kept)
-        for key, mark in loaded_marks.items():
-            loaded_marks[key] = before[mark]
-        loaded_order[:] = [rel for rel in loaded_order if rel not in narrowed]
+        for key, mark in marks.items():
+            marks[key] = before[mark]
+        order[:] = [rel for rel in order if rel not in narrowed]
     count("own_modules_narrowed", len(narrowed))
     return len(narrowed)
 
@@ -2228,30 +2246,124 @@ def finish() -> tuple[dict, dict[str, tuple[dict, list[str]]]]:
     return shared.entry(common, at), out
 
 
-def write_map(out_dir: str, prefix: str, shared_entry: dict, targets: dict) -> str:
+def checkpoint(keys) -> tuple[dict, dict[str, tuple[dict, list[str]]], list[str]] | None:
+    """What `finish` would give for the targets in `keys`, each ended (none of its code runs
+    again), while recording goes on: from copies, for the map a process killed before its
+    end leaves. The adapter publishes each completed target once. The children's
+    records written so far are merged into the copies, and a child spawned without a
+    record, or ended without one, makes its target opaque, as at the end. A target left out
+    is one a child still running may record for (it started before the target ended): what
+    it does there is unknown yet; one serving every target (a helper running since start-up)
+    leaves none. Also returns the load order its entries name. None: no target to write.
+    Shared teardown not run yet (session fixtures') is in no checkpoint: a killed process
+    never runs it either."""
+    if child:
+        return None
+    busy = getattr(local, "busy", False)
+    local.busy = True  # what it opens and stats is the recorder's own
+    try:
+        return _checkpoint(keys)
+    finally:
+        local.busy = busy
+
+
+def _checkpoint(keys):
+    import json
+    from bisect import bisect_right
+
+    _mark_loaded(current_key)
+    scan_modules()
+    fps = {SHARED: shared.copy()}
+    fps.update((key, footprints[key].copy()) for key in keys if key in footprints and key != SHARED)
+    records = os.path.join(children_dir, "records")
+    started = _started_children(records)
+    unknown: set[str] = set()
+    for stem, (token, spawn_id, start) in started.items():
+        traced = spawn_id.startswith("exec:")
+        what = f"a traced {spawn_id[len('exec:'):]}" if traced else "a Python child process"
+        try:
+            with open(os.path.join(records, _record_of(stem))) as f:
+                record = json.load(f)
+        except (OSError, ValueError):
+            if _running(int(stem.partition("-")[0])):
+                first = 0 if start is None else max(bisect_right(switched_at, start) - 1, 0)
+                unknown.update(key for key in switched_to[first:] if key)
+            else:
+                fp = fps.get(_served(token, start, None))
+                if fp is not None:
+                    fp.opaque.add(f"{what} ended without its record")
+            continue
+        fp = fps.get(_served(token, start, record.get("ended")))
+        if fp is not None:
+            child_fp = Footprint.load(record["footprint"])
+            if traced:
+                child_fp.opaque = {f"{what}: {why}" for why in child_fp.opaque}
+            fp.update(child_fp)
+    if SHARED in unknown:
+        count("checkpoints_held")
+        return None  # a child serving every target still runs
+    for key in unknown:
+        fps.pop(key, None)
+    if len(fps) == 1:
+        return None
+    spawned = {spawn_id for _, spawn_id, _ in started.values()}
+    for fp in fps.values():
+        if fp.spawned - spawned:
+            fp.opaque.add(f"{len(fp.spawned - spawned)} Python child process(es) left no record (no site, or never ran)")
+        fp.spawned.clear()
+    kinds: dict[str, str | None] = {}
+    for fp in fps.values():
+        fp.collapse_probes(kinds)
+    order, marks = list(loaded_order), {key: loaded_marks.get(key, len(loaded_order)) for key in fps}
+    marks.pop(SHARED, None)
+    narrow_own_modules(fps, order, marks)
+    common = min(marks.values())
+    ran = set(shared.code).union(*(fp.code for fp in footprints.values()), *(fp.code for fp in fps.values()))
+    fps[SHARED].reads.update(rel for rel in order if rel not in ran)
+    at = {rel: i for i, rel in enumerate(order)}
+    out = {}
+    for key, fp in fps.items():
+        if key != SHARED:
+            own = (f for f in fp.code if f.endswith(".py"))
+            out[key] = (fp.entry(marks[key], at, own, fps[SHARED]), sorted(fp.opaque | fps[SHARED].opaque))
+    count("checkpoints")
+    return fps[SHARED].entry(common, at), out, order
+
+
+def write_map(out_dir: str, prefix: str, shared_entry: dict, targets: dict, path: str | None = None,
+              order: list[str] | None = None) -> str:
     """Writes the map: `shared` once, which enact lays over every target (each holds it),
     the targets' own entries, and the order the process loaded its modules in
-    (`load_order`), whose prefixes they name (`loaded_through`). Returns its path, unique in `out_dir` (shards run side by
-    side, in sandboxes where pids repeat)."""
+    (`load_order`, a checkpoint's `order`), whose prefixes they name (`loaded_through`).
+    Returns its path, unique in `out_dir` (shards run side by side, in sandboxes where pids
+    repeat), or `path` (a checkpoint's), which it replaces whole: a reader, or a kill while
+    it writes, finds the last one complete."""
     import json
     import tempfile
 
     os.makedirs(out_dir, exist_ok=True)
-    fd, out = tempfile.mkstemp(suffix=".json", prefix=prefix, dir=out_dir)
-    with os.fdopen(fd, "w") as f:
-        json.dump(
-            {
-                "version": 1,
-                "recorder": RECORDER,
-                "outcomes": True,
-                "load_order": loaded_order,
-                "shared": shared_entry,
-                "targets": targets,
-            },
-            f,
-            separators=(",", ":"),
-        )
-    return out
+    fd, temp = tempfile.mkstemp(suffix=".partial", prefix=prefix, dir=out_dir)
+    if path is None:
+        path = temp.removesuffix(".partial") + ".json"
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(
+                {
+                    "version": 1,
+                    "recorder": RECORDER,
+                    "outcomes": True,
+                    "load_order": loaded_order if order is None else order,
+                    "shared": shared_entry,
+                    "targets": targets,
+                },
+                f,
+                separators=(",", ":"),
+            )
+        os.replace(temp, path)
+    finally:
+        if os.path.exists(temp):
+            os.unlink(temp)
+    return path
 
 
 def write_stats(map_path: str, targets: int, opaque: dict) -> None:

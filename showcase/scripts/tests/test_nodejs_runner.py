@@ -6,16 +6,153 @@ other 600. Runs the runner's own lane arguments with --listTests; needs nodejs/n
 (`enve run --locked -- python3 -m unittest showcase/scripts/tests/test_nodejs_runner.py`).
 """
 
+import json
+import os
 import re
 import shlex
 import shutil
 import subprocess
+import sys
+import tempfile
 import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 RUNNER = ROOT / "showcase/scripts/run_nodejs_tests.sh"
 TARGET = "src/common/utils/db/redis.test.ts"
+
+STUB = r'''import json, os, subprocess, sys
+from pathlib import Path
+tool, args = Path(sys.argv[0]).name, sys.argv[1:]
+if tool == "uname":
+    print("Linux")
+elif tool == "clickhouse-client":
+    print("0")
+elif tool == "realpath":
+    base = next(arg.partition("=")[2] for arg in args if arg.startswith("--relative-to="))
+    print(os.path.relpath(os.path.abspath(args[-1]), base))
+elif tool in ("pnpm", "enact"):
+    row = {"tool": tool, "args": args, "shard": [os.getenv("SHARD_INDEX"), os.getenv("SHARD_COUNT")]}
+    if tool == "pnpm":
+        serial = "test:serial" in args
+        files = [p for p in json.loads(os.environ["JEST_FILES"]) if p.endswith(".serial.test.ts") == serial]
+        selectors = args[args.index("--ci") + 1:]
+        selectors = [p for p in selectors if p != "--listTests"]
+        if selectors:
+            if "--findRelatedTests" in selectors:
+                files = [p for p in files if "/selected/" in p]
+            else:
+                files = [p for p in files if any(s in p for s in selectors)]
+        index, count = int(os.environ["SHARD_INDEX"]), int(os.environ["SHARD_COUNT"])
+        row["tests"] = files[index - 1::count]
+    with open(os.environ["CALL_LOG"], "a") as f:
+        f.write(json.dumps(row) + "\n")
+    if tool == "enact":
+        sys.exit(subprocess.call(args[args.index("--") + 1:]))
+    elif "--listTests" in args:
+        print("\n".join(row["tests"]))
+'''
+
+
+class NodejsRecordingDispatchTest(unittest.TestCase):
+    def test_requested_files_record_and_other_files_run_once_on_nonfirst_shard(self) -> None:
+        for from_file in (False, True):
+            with self.subTest(from_file=from_file):
+                self.dispatch(from_file)
+
+    def test_whole_suite_records_only_wanted_files_on_nonfirst_shard(self) -> None:
+        self.dispatch(False, "whole")
+
+    def test_directory_records_only_wanted_files_on_nonfirst_shard(self) -> None:
+        self.dispatch(False, "directory")
+
+    def test_pattern_records_only_wanted_files_on_nonfirst_shard(self) -> None:
+        self.dispatch(False, "pattern")
+
+    def test_related_selector_keeps_original_shard_before_recording(self) -> None:
+        self.dispatch(False, "related")
+
+    def test_broad_selections_keep_jest_sharding_when_not_recording(self) -> None:
+        for selection in ("whole", "directory", "pattern", "related"):
+            with self.subTest(selection=selection):
+                self.dispatch(False, selection, recording=False)
+
+    def dispatch(self, from_file: bool, selection: str = "files", recording: bool = True) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            runner = root / "showcase/scripts/run_nodejs_tests.sh"
+            runner.parent.mkdir(parents=True)
+            runner.write_text(RUNNER.read_text())
+            tools = root / "bin"
+            tools.mkdir()
+            stub = tools / "tool.py"
+            stub.write_text(f"#!{sys.executable}\n" + STUB)
+            stub.chmod(0o755)
+            for name in ("pnpm", "enact", "uname", "uv", "clickhouse-client", "realpath"):
+                (tools / name).symlink_to(stub)
+            migrate = root / "rust/bin/migrate-entry"
+            migrate.parent.mkdir(parents=True)
+            migrate.symlink_to(stub)
+            names = ["nodejs/src/selected/a.test.ts", "nodejs/src/selected/b.serial.test.ts", "nodejs/src/selected/c.test.ts"]
+            catalogue = names
+            if selection != "files":
+                # Two parallel files and one serial file belong to shard 2/3. The other
+                # shards' files catch discovery at 1/1 and accidental second sharding.
+                catalogue = ["nodejs/src/selected/other1.test.ts", names[0],
+                             "nodejs/src/selected/other3.test.ts", "nodejs/src/selected/other4.test.ts", names[2],
+                             "nodejs/src/selected/other6.test.ts", "nodejs/src/selected/other1.serial.test.ts", names[1],
+                             "nodejs/src/selected/other3.serial.test.ts"]
+            for name in [*catalogue, "nodejs/src/common/kafka/config.ts"]:
+                path = root / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("")
+            wanted, out = root / "wanted.txt", root / "footprints"
+            wanted.write_text(names[0] + "\n")
+            out.mkdir()
+            log = root / "calls.jsonl"
+            env = {k: v for k, v in os.environ.items() if not k.startswith(("ENACT_", "ENVE_"))}
+            env.update(PATH=f"{tools}:{env['PATH']}", CALL_LOG=str(log), NODEJS_SHARD_INSTANCE="fixture",
+                       JEST_FILES=json.dumps([str(root / name) for name in catalogue]),
+                       ENVE_INSTANCE="fixture", NODEJS_LANES="parallel serial", PGUSER="posthog", PGHOST="127.0.0.1",
+                       PGPORT="1", NODEJS_DJANGO_DATABASE_URL="postgres://fixture", KAFKA_HOSTS="127.0.0.1:1",
+                       CLICKHOUSE_TCP_PORT="1", ENACT_SHARD_INDEX="2", ENACT_SHARD_TOTAL="3",
+                       ENACT_FOOTPRINT_DIR=str(out), ENACT_FOOTPRINT_TARGETS=str(wanted), ENACT_EXE=str(tools / "enact"))
+            if not recording:
+                del env["ENACT_FOOTPRINT_DIR"]
+                del env["ENACT_FOOTPRINT_TARGETS"]
+            for variable in ("ENVE_SERVICE_VALKEY_CLUSTER_PORT", "ENVE_SERVICE_SEAWEEDFS_OPEN_PORT",
+                             "ENVE_SERVICE_DYNAMODB_PORT", "ENVE_SERVICE_MAILDEV_PORT", "ENVE_SERVICE_MAILDEV_PORT_SMTP"):
+                env[variable] = "1"
+            args = ["../" + name for name in names]
+            if selection == "whole":
+                args = []
+            elif selection == "directory":
+                args = ["src/selected"]
+            elif selection == "pattern":
+                args = ["selected/"]
+            elif selection == "related":
+                args = ["--findRelatedTests", "src/common/kafka/config.ts"]
+            if from_file:
+                selected = root / "selected.txt"
+                selected.write_text("\n".join(names) + "\n")
+                env["ENACT_TARGETS_FILE"] = str(selected)
+                args = []
+            result = subprocess.run(["bash", str(runner), *args],
+                                    cwd=root / "nodejs", env=env, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            calls = [json.loads(line) for line in log.read_text().splitlines()]
+            traces = [call for call in calls if call["tool"] == "enact"]
+            self.assertEqual(len(traces), int(recording), calls)
+            if recording:
+                self.assertIn("--node-functions", traces[0]["args"])
+                self.assertEqual(traces[0]["args"][traces[0]["args"].index("-t") + 1], names[0])
+            runs = [call for call in calls if call["tool"] == "pnpm" and "--listTests" not in call["args"]]
+            self.assertEqual(sorted(Path(test).relative_to(root).as_posix() for call in runs for test in call["tests"]), names)
+            probes = [call for call in calls if "--listTests" in call["args"]]
+            self.assertEqual(len(probes), 2 if recording and selection != "files" else 0, calls)
+            self.assertTrue(all(call["shard"] == ["2", "3"] for call in probes), calls)
+            execution_shard = ["1", "1"] if recording or selection == "files" else ["2", "3"]
+            self.assertTrue(all(call["shard"] == execution_shard for call in [*runs, *traces]), calls)
 
 
 def lane_arguments(lane: str) -> list[str]:

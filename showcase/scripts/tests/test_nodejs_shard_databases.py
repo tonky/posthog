@@ -1,7 +1,7 @@
 """A local run's nodejs shards share no service state.
 
 CI runs each shard of ci-nodejs.yml's tests on its own runner, with its own services. `enact run
-nodejs:test` starts the three shards of run_nodejs_tests.sh side by side; on one Postgres,
+nodejs_cdp:test` starts shards of run_nodejs_tests.sh side by side; on one Postgres,
 ClickHouse, Kafka and Redis each reset all of them (`fresh_django_clone test_posthog_nodejs`,
 `migrate-entry all --fresh`, `setup_test_environment --only-clickhouse`) while the others ran
 jest, and a lock between the shards then ran the serial lanes alone. Each shard now runs in an
@@ -28,7 +28,7 @@ ROOT = SCRIPTS.parents[1]
 
 # Every line: <shard> <event> [resources...]. Appends of a line are atomic, so the log's order
 # is the order things happened in.
-LOG = 'log() { echo "$ENACT_SHARD_INDEX $*" >> "$STUB_LOG"; }\n'
+LOG = 'log() { echo "${STUB_AREA:-$ENACT_SHARD_INDEX} $*" >> "$STUB_LOG"; }\n'
 
 # test_databases.sh: the template lock is test_databases_test's; the clone is a reset.
 TEST_DATABASES_STUB = LOG + """
@@ -192,7 +192,8 @@ class NodejsShardDatabasesTest(unittest.TestCase):
         path.write_text(text)
         path.chmod(0o755)
 
-    def shards(self, count: int, stagger: float, *args: str, **lists: str) -> list[tuple[int, str]]:
+    def shards(self, count: int, stagger: float, *args: str,
+               shard_indexes: tuple[int, ...] | None = None, **lists: str) -> list[tuple[int, str]]:
         env = {
             **helper_env(self.services),
             "PATH": f"{self.repo / 'stubs'}{os.pathsep}{os.environ['PATH']}",
@@ -206,7 +207,7 @@ class NodejsShardDatabasesTest(unittest.TestCase):
             "REDIS_PORT": "6379",
             "CLICKHOUSE_TCP_PORT": "9000",
             "KAFKA_HOSTS": "127.0.0.1:9092",
-            "ENACT_SHARD_TOTAL": str(count),
+            "ENACT_SHARD_TOTAL": str(max(shard_indexes) if shard_indexes else count),
             **{f"LIST_{lane}": files for lane, files in lists.items()},
         }
         running = []
@@ -216,7 +217,9 @@ class NodejsShardDatabasesTest(unittest.TestCase):
                     ["bash", "showcase/scripts/run_nodejs_tests.sh", *args],
                     cwd=self.repo,
                     # A shard's service slot is the run's lowest free one, not its index.
-                    env={**env, "ENACT_SHARD_INDEX": str(index), "ENACT_SERVICE_SLOT": str(index + 4)},
+                    env={**env, "STUB_AREA": str(index),
+                         "ENACT_SHARD_INDEX": str(shard_indexes[index - 1] if shard_indexes else index),
+                         "ENACT_SERVICE_SLOT": str(index + 4)},
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
                     text=True,
@@ -289,6 +292,24 @@ class NodejsShardDatabasesTest(unittest.TestCase):
             instances,
             self.log.read_text(),
         )
+
+    def test_concurrent_areas_first_shards_clone_different_django_databases(self) -> None:
+        # Both components have shard 1/1; only the run's service slots distinguish them.
+        for status, output in self.shards(2, stagger=0.4, shard_indexes=(1, 1)):
+            self.assertEqual(0, status, output)
+        events, lanes = self.events(), self.lanes()
+        clones = {resource for _, event, resources in events if event == "reset"
+                  for resource in resources if resource.startswith("pg:127.0.0.1:5432/")}
+        self.assertEqual({"pg:127.0.0.1:5432/test_posthog_nodejs_slot5",
+                          "pg:127.0.0.1:5432/test_posthog_nodejs_slot6"}, clones, self.log.read_text())
+        self.assertTrue(any(a[0] != b[0] and a[2] < b[3] and b[2] < a[3]
+                            for a in lanes for b in lanes), self.log.read_text())
+        for line, (area, event, resources) in enumerate(events):
+            if event != "reset":
+                continue
+            for other, lane, start, end, uses in lanes:
+                self.assertFalse(other != area and start < line < end and resources & uses,
+                                 f"area {area} reset {resources} used by {other}'s {lane}:\n{self.log.read_text()}")
 
     def lane_args(self) -> dict[str, list[set[str]]]:
         """Each lane's jest arguments, one set per run of it."""

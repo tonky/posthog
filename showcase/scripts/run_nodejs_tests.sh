@@ -13,7 +13,7 @@
 # and the open seaweedfs), Valkey cluster, DynamoDB and maildev, and sets them up as CI's
 # runner does. Only the
 # Django database is the run's: a fresh clone of the migrated template on the run's Postgres,
-# under the shard's name.
+# under its service slot's name.
 #
 # Two phases in one file: in the run's environment the Django clone, the install and build, and
 # the lanes the arguments select; then `enve run --instance <the shard's> --with-services` runs
@@ -48,6 +48,41 @@ if [ "${1:-}" = "--rust-ingestion-e2e" ]; then
     # artifacts with theirs (and links as theirs).
     # shellcheck source=rust_ci_env.sh
     source showcase/scripts/rust_ci_env.sh
+fi
+
+# Normalize selected paths before the service-instance re-exec. Only explicit test files
+# are already assigned by enact; directories, patterns and selectors still need jest's
+# original shard for discovery. Keep that index for this shard's services and database.
+if [ "$suite" = jest ] && [ "$#" -eq 0 ] && [ -n "${ENACT_TARGETS_FILE:-}" ]; then
+    targets=()
+    while IFS= read -r target || [ -n "$target" ]; do
+        if [[ "$target" =~ [^[:space:]] ]]; then targets+=("$target"); fi
+    done < "$ENACT_TARGETS_FILE"
+    caller="$PWD"
+    set -- ${targets[@]+"${targets[@]}"}
+fi
+given=()
+for target in "$@"; do
+    if [[ "$target" != -* ]] && dir="$(cd "$caller" && [ -e "$target" ] && cd "$(dirname "$target")" 2>/dev/null && pwd -P)"; then
+        given+=("$dir/$(basename "$target")")
+    else
+        given+=("$target")
+    fi
+done
+set -- ${given[@]+"${given[@]}"}
+shard_index="${ENACT_SHARD_INDEX:-${SHARD_INDEX:-1}}"
+[[ "$shard_index" =~ ^[0-9]{1,4}$ ]] || { echo "Invalid shard index: $shard_index" >&2; exit 64; }
+explicit_files=false
+if [ "$#" -gt 0 ]; then
+    explicit_files=true
+    for target in "$@"; do
+        if [[ "$target" != *.test.ts ]] || [ ! -f "$target" ]; then explicit_files=false; fi
+    done
+fi
+if [ "$explicit_files" = true ]; then
+    export SHARD_INDEX=1 SHARD_COUNT=1
+else
+    export SHARD_INDEX="$shard_index" SHARD_COUNT="${ENACT_SHARD_TOTAL:-${SHARD_COUNT:-1}}"
 fi
 
 # The broker list settings the plugin server reads from env: every *_METADATA_BROKER_LIST name
@@ -147,18 +182,34 @@ if [ -n "${NODEJS_SHARD_INSTANCE:-}" ]; then
         fi
         exit "$status"
     fi
-    # Test files given are the shard's share of what enact selected (it splits them between
-    # the shards): jest's own --shard (the scripts', from SHARD_INDEX) then takes them whole.
-    [ "$#" -eq 0 ] || export SHARD_INDEX=1 SHARD_COUNT=1
-    # Recording (`enact trace record`/`sample`: ENACT_FOOTPRINT_DIR set and no
-    # ENACT_FOOTPRINT_TARGETS list): jest has no recorder, so each test file runs in a jest of
-    # its own under `enact trace run` (Linux seccomp) into a map of its own, on this instance's
-    # services, set up once above. A failed test lands incomplete and fails the run after the
-    # others. A run recording its stale tests (`enact run`, with a list) runs as below: a jest
-    # per untraced test would make every run that slow.
+    # Resolve broad selections on their original jest shard before recording individual
+    # files. Reset sharding only after discovery: otherwise a directory runs on every shard,
+    # or the discovered files are sharded twice. Explicit file lists avoid this extra probe.
+    if [ "$suite" = jest ] && [ "$explicit_files" = false ] &&
+        [ -n "${ENACT_FOOTPRINT_DIR:-}" ] && [ "$(uname -s)" = Linux ]; then
+        selected=()
+        for lane in parallel serial; do
+            listed=$(pnpm --silent run "test:$lane" --ci --listTests "$@") || {
+                echo "✗ run_nodejs_tests.sh: jest couldn't list the $lane lane's tests for: $*" >&2
+                exit 1
+            }
+            while IFS= read -r target; do
+                [[ "$target" != *.test.ts ]] || selected+=("$target")
+            done <<< "$listed"
+        done
+        if [ "${#selected[@]}" -eq 0 ]; then
+            echo "✗ run_nodejs_tests.sh: no test of either lane matches this shard: $*" >&2
+            exit 1
+        fi
+        set -- "${selected[@]}"
+        export SHARD_INDEX=1 SHARD_COUNT=1
+    fi
+    # Record only the files enact requests (all selected files when no list is supplied).
+    # Each traced file gets its own jest and map; the remaining files run together below.
+    # Service setup is shared by the whole shard rather than repeated per recorded file.
     if [ "$suite" = jest ] && [ "$#" -gt 0 ] && [ -n "${ENACT_FOOTPRINT_DIR:-}" ] &&
-        [ -z "${ENACT_FOOTPRINT_TARGETS:-}" ] && [ "$(uname -s)" = Linux ]; then
-        status=0 n=0
+        [ "$(uname -s)" = Linux ]; then
+        status=0 n=0 rest=()
         # jest's reporter saying, in enact's attribution record ($ENACT_SKIPS_FILE: `enact handbook
         # scoping`, "Recorder contract"), whether the run skipped tests of its file (a
         # `test.skip`/`test.todo`/`describe.skip`; the trace sees only what decided the skip):
@@ -184,27 +235,38 @@ module.exports = class EnactAttribution {
 };
 JEST_REPORTER
         for target in "$@"; do
+            test=$(realpath -ms --relative-to=.. "$target")
+            if [ -n "${ENACT_FOOTPRINT_TARGETS:-}" ] && ! rg -qxF -- "$test" "$ENACT_FOOTPRINT_TARGETS"; then
+                rest+=("$target")
+                continue
+            fi
             n=$((n + 1))
             lane=parallel
             [[ "$target" != *.serial.test.ts ]] || lane=serial
-            # The footprint is named by the repository path enact selected; the path given
-            # climbs out of nodejs/ (`../nodejs/src/…`), as enact hands it to a component's command.
-            test=$(realpath -ms --relative-to=.. "$target")
+            # The footprint uses the repository path; jest receives its normalized absolute path.
             echo "🎙️  tracing $test (the $lane lane) for enact's reach map"
             # The lane's script ends in an array option (--testPathIgnorePatterns): --reporters
             # is one too, and --ci ends it.
-            "${ENACT_EXE:-enact}" trace run --outcomes --shared-tmpdir --no-fingerprint \
+            "${ENACT_EXE:-enact}" trace run --node-functions --outcomes --shared-tmpdir --no-fingerprint \
                 --reach-file "$ENACT_FOOTPRINT_DIR/nodejs-traced-$n.json" -t "$test" -- \
                 pnpm run "test:$lane" --reporters=default "--reporters=$reporter" --ci "$target" || status=1
         done
-        exit "$status"
+        [ "${#rest[@]}" -gt 0 ] || exit "$status"
+        set -- "${rest[@]}"
+        NODEJS_LANES=""
+        for target in "$@"; do
+            lane=parallel
+            [[ "$target" != *.serial.test.ts ]] || lane=serial
+            [[ " $NODEJS_LANES " == *" $lane "* ]] || NODEJS_LANES="$NODEJS_LANES $lane"
+        done
+    else
+        status=0
     fi
-    status=0
     # The scripts end in --testPathIgnorePatterns, an array option: paths given right after it
     # are more patterns to ignore, and the lane runs every other file. A flag first ends the
     # array (--ci, as on CI's runners: missing snapshots fail rather than being written).
     if [[ " $NODEJS_LANES " == *" parallel "* ]]; then
-        pnpm run test:parallel --ci "$@" || status=$?
+        pnpm run test:parallel --ci "$@" || { rc=$?; [ "$status" -ne 0 ] || status=$rc; }
     fi
     # Both lanes run; the first failure is the status. No --passWithNoTests: a lane that runs
     # has files (every shard of the suite draws some, and a targeted run lists them).
@@ -217,16 +279,16 @@ fi
 # shellcheck source=test_databases.sh
 source showcase/scripts/test_databases.sh
 
-export SHARD_INDEX="${ENACT_SHARD_INDEX:-${SHARD_INDEX:-1}}" SHARD_COUNT="${ENACT_SHARD_TOTAL:-${SHARD_COUNT:-1}}"
-[[ "$SHARD_INDEX" =~ ^[0-9]{1,4}$ ]] || { echo "Invalid shard index: $SHARD_INDEX" >&2; exit 64; }
-shard="shard${SHARD_INDEX}"
+shard="shard${shard_index}"
 [ "$suite" = jest ] || shard="rust_e2e"
 
 # The Django schema: ci-nodejs.yml restores a schema dump into test_posthog. This clones the
-# backend's migrated template instead, under the shard's name: the tests write and truncate it,
+# backend's migrated template instead, under the service slot's name: the tests write and truncate it,
 # and test_posthog is the template itself.
-with_templates fresh_django_clone "test_posthog_nodejs_${shard}"
-export NODEJS_DJANGO_DATABASE_URL="postgres://${PGUSER}:${PGPASSWORD:-posthog}@${PGHOST}:${PGPORT}/test_posthog_nodejs_${shard}"
+django_db="test_posthog_nodejs_slot${ENACT_SERVICE_SLOT:-$shard_index}"
+[ "$suite" = jest ] || django_db="test_posthog_nodejs_rust_e2e"
+with_templates fresh_django_clone "$django_db"
+export NODEJS_DJANGO_DATABASE_URL="postgres://${PGUSER}:${PGPASSWORD:-posthog}@${PGHOST}:${PGPORT}/$django_db"
 export NODE_OPTIONS="${NODE_OPTIONS:---max_old_space_size=4096}"
 unset PYTEST_XDIST_WORKER TOX_PARALLEL_ENV
 
@@ -245,11 +307,7 @@ showcase/scripts/exclusive.sh nodejs-build env -u SHARD_INDEX -u SHARD_COUNT bin
 # either lane fail the run: a run given tests that ran none is no pass.
 # The job passes its selected test files (paths from the checkout's root) as arguments; a run
 # by hand gives arguments, or test files through enact (`enact run --shard
-# nodejs:test:1/1=<file>,...`), listed one per line in $ENACT_TARGETS_FILE when no argument does.
-if [ "$suite" = jest ] && [ "$#" -eq 0 ] && [ -n "${ENACT_TARGETS_FILE:-}" ]; then
-    mapfile -t targets < <(rg '\S' "$ENACT_TARGETS_FILE" || true)
-    set -- "${targets[@]}"
-fi
+# nodejs_servers:test:1/1=<file>,...`), listed one per line in $ENACT_TARGETS_FILE when no argument does.
 lanes="parallel serial"
 if [ "$suite" = rust-ingestion-e2e ]; then
     # ci-nodejs.yml's pre-build (ingestion-worker-proto's build script runs protoc): the test's
@@ -276,7 +334,7 @@ fi
 # Fresh, as a CI runner's services (enve starts from empty data unless --keep-data): a
 # previous run's topics, groups and tables once hid missing ones (the Kafka engine's
 # unsuffixed topics).
-instance="${ENVE_INSTANCE:-default}-nodejs${ENACT_SERVICE_SLOT:-$SHARD_INDEX}"
+instance="${ENVE_INSTANCE:-default}-nodejs${ENACT_SERVICE_SLOT:-$shard_index}"
 [ "$suite" = jest ] || instance="${ENVE_INSTANCE:-default}-rust-e2e${ENACT_SERVICE_SLOT:-1}"
 log="$PWD/.enact/state/nodejs/$instance.services.log"
 mkdir -p "$(dirname "$log")"

@@ -1,0 +1,13 @@
+Adds a locally recorded map to the remote tier at a commit of a branch's history, laid over the head's newest map at an ancestor of it, so CI plans from it and its pushes extend it. Adds raw evidence with a conditional head update, extending a map at the same commit; refuses conflicting footprints, dropped revisions or a newer map
+
+Usage: enact trace store seed [OPTIONS] --revision <REVISION> --branch <BRANCH> <MAP>
+
+Arguments:
+  <MAP>  The recorded map (.bin or .json)
+
+Options:
+      --revision <REVISION>      The commit to add it at: on the branch's history (`<git-remote>/<branch>` has it)
+      --branch <BRANCH>          The default branch whose remote head lists it (the one CI's pushes write)
+      --git-remote <GIT_REMOTE>  The git remote whose `<branch>` must contain the commit [default: origin]
+      --dry-run                  Say what it would add, writing nothing
+  -h, --help                     Print help

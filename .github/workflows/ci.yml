@@ -50,6 +50,7 @@ env:
   COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
   ENVE_SERVICE_GID: "1000"
   ENVE_SERVICE_UID: "1000"
+  ENVE_TRUSTED_PUBLIC_KEYS: enve-r2-1:ckHPTeWVef6mba+1AwWHjKYCsUWKPfP9IXPm5YXNoHg=
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
   GOCACHE: /tmp/go-build
   GOPATH: /tmp/go
@@ -516,13 +517,24 @@ jobs:
           ln -sfn "$store" /nix/store 2>/dev/null || true
         fi
         if [ -f "enve.lock" ]; then
+          if [ -n "$ENACT_R2_BUCKET" ] && ! enve run --locked -- true 2>/dev/null; then
+            enve cache pull enve.lock --cache "$ENACT_R2_BUCKET" -j 16
+          fi
           enve run --locked -- true
         fi
         if [ -n "$ENACT_COMPONENT_DIR" ] && [ "$ENACT_COMPONENT_DIR" != "." ] && [ -f "$ENACT_COMPONENT_DIR/enve.lock" ]; then
+          if [ -n "$ENACT_R2_BUCKET" ] && ! (cd "$ENACT_COMPONENT_DIR" && enve run --locked -- true 2>/dev/null); then
+            enve cache pull "$ENACT_COMPONENT_DIR/enve.lock" --cache "$ENACT_R2_BUCKET" -j 16
+          fi
           (cd "$ENACT_COMPONENT_DIR" && enve run --locked -- true)
         fi
       env:
+        AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID || env.R2_ACCESS_KEY_ID }}
+        AWS_REGION: auto
+        AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY || env.R2_SECRET_ACCESS_KEY }}
         ENACT_COMPONENT_DIR: ${{ matrix.component_dir }}
+        ENACT_R2_BUCKET: ${{ secrets.R2_BUCKET || env.R2_BUCKET }}
+        ENVE_CACHE_CONCURRENCY: "16"
     - name: Check enve Stores into the Host Cache
       if: ${{ (steps.runner_caches.outputs.host != '') && steps.outputs-lookup.outputs.cache-hit != 'true' }}
       run: |
@@ -582,13 +594,42 @@ jobs:
       if: ${{ steps.outputs-lookup.outputs.cache-hit != 'true' }}
       run: eval "$ENACT_MATRIX_COMMAND"
       env:
+        AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID || env.R2_ACCESS_KEY_ID }}
+        AWS_REGION: auto
+        AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY || env.R2_SECRET_ACCESS_KEY }}
         CI_COMPONENT: ${{ matrix.component }}
         ENACT_MATRIX_COMMAND: ${{ matrix.command }}
         ENACT_MAX_PARALLEL: ${{ matrix.max_parallel }}
         ENACT_PREEMPTION_NOTICE_SEC: ${{ matrix.preemption_notice_sec }}
+        ENACT_R2_BUCKET: ${{ secrets.R2_BUCKET || env.R2_BUCKET }}
         ENACT_RECORD: ${{ (github.event_name == 'workflow_dispatch' && inputs.warm_reach == 'true' && github.ref_name == github.event.repository.default_branch) && 'every' || (github.event_name == 'push' && github.ref_name == github.event.repository.default_branch) && 'auto' || 'off' }}
         ENACT_RUNNER_TIER: ${{ matrix.runner_tier }}
         ENACT_TOPOLOGY: ${{ matrix.topology }}
+    - name: Push Updated Dependencies to the Remote Cache
+      if: ${{ (success() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')) && steps.outputs-lookup.outputs.cache-hit != 'true' }}
+      continue-on-error: true
+      run: |-
+        if [ -z "${ENVE_CACHE_SECRET_KEY:-}" ] && [ -z "${NIX_SECRET_KEY:-}" ]; then
+          echo "Skipping closure upload: signed remote cache requires ENVE_CACHE_SECRET_KEY or NIX_SECRET_KEY."
+          exit 0
+        fi
+        if [ -n "$ENACT_R2_BUCKET" ]; then
+          if [ -f "enve.lock" ]; then
+            echo "🛰️ Pushing missing/updated closures to the remote cache from repository root..."
+            enve cache push enve.lock --cache "$ENACT_R2_BUCKET" -j 16 || true
+          fi
+          if [ -n "$ENACT_COMPONENT_DIR" ] && [ "$ENACT_COMPONENT_DIR" != "." ] && [ -f "$ENACT_COMPONENT_DIR/enve.lock" ]; then
+            echo "🛰️ Pushing missing/updated closures to the remote cache from $ENACT_COMPONENT_DIR..."
+            (cd "$ENACT_COMPONENT_DIR" && enve cache push enve.lock --cache "$ENACT_R2_BUCKET" -j 16) || true
+          fi
+        fi
+      env:
+        AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID || env.R2_ACCESS_KEY_ID }}
+        AWS_REGION: auto
+        AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY || env.R2_SECRET_ACCESS_KEY }}
+        ENACT_COMPONENT_DIR: ${{ matrix.component_dir }}
+        ENACT_R2_BUCKET: ${{ secrets.R2_BUCKET || env.R2_BUCKET }}
+        ENVE_CACHE_CONCURRENCY: "16"
     - name: Upload Execution Telemetry & Workflow Dashboard
       if: ${{ (always()) && steps.outputs-lookup.outputs.cache-hit != 'true' }}
       continue-on-error: true
@@ -1255,13 +1296,24 @@ jobs:
           ln -sfn "$store" /nix/store 2>/dev/null || true
         fi
         if [ -f "enve.lock" ]; then
+          if [ -n "$ENACT_R2_BUCKET" ] && ! enve run --locked -- true 2>/dev/null; then
+            enve cache pull enve.lock --cache "$ENACT_R2_BUCKET" -j 16
+          fi
           enve run --locked -- true
         fi
         if [ -n "$ENACT_COMPONENT_DIR" ] && [ "$ENACT_COMPONENT_DIR" != "." ] && [ -f "$ENACT_COMPONENT_DIR/enve.lock" ]; then
+          if [ -n "$ENACT_R2_BUCKET" ] && ! (cd "$ENACT_COMPONENT_DIR" && enve run --locked -- true 2>/dev/null); then
+            enve cache pull "$ENACT_COMPONENT_DIR/enve.lock" --cache "$ENACT_R2_BUCKET" -j 16
+          fi
           (cd "$ENACT_COMPONENT_DIR" && enve run --locked -- true)
         fi
       env:
+        AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID || env.R2_ACCESS_KEY_ID }}
+        AWS_REGION: auto
+        AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY || env.R2_SECRET_ACCESS_KEY }}
         ENACT_COMPONENT_DIR: ${{ matrix.component_dir }}
+        ENACT_R2_BUCKET: ${{ secrets.R2_BUCKET || env.R2_BUCKET }}
+        ENVE_CACHE_CONCURRENCY: "16"
     - name: Check enve Stores into the Host Cache
       if: ${{ (steps.runner_caches.outputs.host != '') && steps.outputs-lookup.outputs.cache-hit != 'true' }}
       run: |
@@ -1321,13 +1373,42 @@ jobs:
       if: ${{ steps.outputs-lookup.outputs.cache-hit != 'true' }}
       run: eval "$ENACT_MATRIX_COMMAND"
       env:
+        AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID || env.R2_ACCESS_KEY_ID }}
+        AWS_REGION: auto
+        AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY || env.R2_SECRET_ACCESS_KEY }}
         CI_COMPONENT: ${{ matrix.component }}
         ENACT_MATRIX_COMMAND: ${{ matrix.command }}
         ENACT_MAX_PARALLEL: ${{ matrix.max_parallel }}
         ENACT_PREEMPTION_NOTICE_SEC: ${{ matrix.preemption_notice_sec }}
+        ENACT_R2_BUCKET: ${{ secrets.R2_BUCKET || env.R2_BUCKET }}
         ENACT_RECORD: ${{ (github.event_name == 'workflow_dispatch' && inputs.warm_reach == 'true' && github.ref_name == github.event.repository.default_branch) && 'every' || (github.event_name == 'push' && github.ref_name == github.event.repository.default_branch) && 'auto' || 'off' }}
         ENACT_RUNNER_TIER: ${{ matrix.runner_tier }}
         ENACT_TOPOLOGY: ${{ matrix.topology }}
+    - name: Push Updated Dependencies to the Remote Cache
+      if: ${{ (success() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')) && steps.outputs-lookup.outputs.cache-hit != 'true' }}
+      continue-on-error: true
+      run: |-
+        if [ -z "${ENVE_CACHE_SECRET_KEY:-}" ] && [ -z "${NIX_SECRET_KEY:-}" ]; then
+          echo "Skipping closure upload: signed remote cache requires ENVE_CACHE_SECRET_KEY or NIX_SECRET_KEY."
+          exit 0
+        fi
+        if [ -n "$ENACT_R2_BUCKET" ]; then
+          if [ -f "enve.lock" ]; then
+            echo "🛰️ Pushing missing/updated closures to the remote cache from repository root..."
+            enve cache push enve.lock --cache "$ENACT_R2_BUCKET" -j 16 || true
+          fi
+          if [ -n "$ENACT_COMPONENT_DIR" ] && [ "$ENACT_COMPONENT_DIR" != "." ] && [ -f "$ENACT_COMPONENT_DIR/enve.lock" ]; then
+            echo "🛰️ Pushing missing/updated closures to the remote cache from $ENACT_COMPONENT_DIR..."
+            (cd "$ENACT_COMPONENT_DIR" && enve cache push enve.lock --cache "$ENACT_R2_BUCKET" -j 16) || true
+          fi
+        fi
+      env:
+        AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID || env.R2_ACCESS_KEY_ID }}
+        AWS_REGION: auto
+        AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY || env.R2_SECRET_ACCESS_KEY }}
+        ENACT_COMPONENT_DIR: ${{ matrix.component_dir }}
+        ENACT_R2_BUCKET: ${{ secrets.R2_BUCKET || env.R2_BUCKET }}
+        ENVE_CACHE_CONCURRENCY: "16"
     - name: Upload Execution Telemetry & Workflow Dashboard
       if: ${{ (always()) && steps.outputs-lookup.outputs.cache-hit != 'true' }}
       continue-on-error: true
@@ -1501,6 +1582,7 @@ jobs:
     - Linux
     - X64
     - tonky-ci
+    - tonky-ci-s
     timeout-minutes: 5
     outputs:
       builds: ${{ steps.diff.outputs.builds }}
@@ -2012,14 +2094,25 @@ jobs:
         if [ "${ENACT_FORCE_NO_CACHE:-}" = "true" ]; then
           set -- "$@" --no-cache
         fi
-        MATRIX=$(enact affected --pipeline .enact --workflow ci --github-output "$GITHUB_OUTPUT" "$@" --format json)
+        ADMISSION_ARGS=()
+        for arg in "$@"; do
+          if [ "$arg" != "--no-cache" ]; then
+            ADMISSION_ARGS+=("$arg")
+          fi
+        done
+        ADMISSION_REPORT="$RUNNER_TEMP/enact-admission.json"
+        enact dry-run --pipeline .enact --workflow ci "${ADMISSION_ARGS[@]}" --budget --json > "$ADMISSION_REPORT" || {
+          status=$?
+          echo "::error::CI budget admission failed; report: $ADMISSION_REPORT" >&2
+          exit "$status"
+        }
+        MATRIX=$(enact affected --pipeline .enact --workflow ci --github-output "$GITHUB_OUTPUT" --reach-hand-off "$RUNNER_TEMP/enact-reach" "$@" --format json)
         echo "$MATRIX"
         echo "matrix=$MATRIX" >> "$GITHUB_OUTPUT"
-        REACH_MAP=$(enact trace store where --path 2>/dev/null || true)
-        if [ -n "$REACH_MAP" ] && [ -f "$REACH_MAP" ]; then
-          mkdir -p "$RUNNER_TEMP/enact-reach" && cp "$REACH_MAP" "$RUNNER_TEMP/enact-reach/map.bin"
-        fi
       env:
+        AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID || env.R2_ACCESS_KEY_ID }}
+        AWS_REGION: auto
+        AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY || env.R2_SECRET_ACCESS_KEY }}
         ENACT_BASE_REF: ${{ inputs.base_ref || github.base_ref || github.event.pull_request.base.ref }}
         ENACT_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         ENACT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch || 'master' }}
@@ -2030,6 +2123,7 @@ jobs:
         ENACT_INPUT_UPDATED: ${{ inputs.updated }}
         ENACT_INPUT_WARM_REACH: ${{ inputs.warm_reach }}
         ENACT_INTEGRATION_BRANCH: ${{ vars.ENACT_INTEGRATION_BRANCH }}
+        ENACT_R2_BUCKET: ${{ secrets.R2_BUCKET || env.R2_BUCKET }}
     - name: Hand the Reach Map to the Jobs
       if: always()
       continue-on-error: true
@@ -2037,7 +2131,7 @@ jobs:
       with:
         if-no-files-found: ignore
         name: enact-reach-map
-        path: ${{ runner.temp }}/enact-reach/map.bin
+        path: ${{ runner.temp }}/enact-reach
         retention-days: "1"
   preflight:
     name: "Stage: Preflight"
@@ -2048,6 +2142,7 @@ jobs:
     - Linux
     - X64
     - tonky-ci
+    - tonky-ci-m
     timeout-minutes: 90
     steps:
     - name: Probe Runner Caches
@@ -2331,7 +2426,7 @@ jobs:
           showcase/scripts/build_mcp_ui_apps.sh
           nodejs
           proto
-          frontend/src/types.ts
+          frontend/public/services
           .dagster_home
           tools/phrocs
           products/isolation_baseline.txt
@@ -2631,7 +2726,7 @@ jobs:
           showcase/scripts/build_mcp_ui_apps.sh
           nodejs
           proto
-          frontend/src/types.ts
+          frontend/public/services
           .dagster_home
           tools/phrocs
           products/isolation_baseline.txt
@@ -2973,8 +3068,17 @@ jobs:
           ln -sfn "$store" /nix/store 2>/dev/null || true
         fi
         if [ -f "enve.lock" ]; then
+          if [ -n "$ENACT_R2_BUCKET" ] && ! enve run --locked -- true 2>/dev/null; then
+            enve cache pull enve.lock --cache "$ENACT_R2_BUCKET" -j 16
+          fi
           enve run --locked -- true
         fi
+      env:
+        AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID || env.R2_ACCESS_KEY_ID }}
+        AWS_REGION: auto
+        AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY || env.R2_SECRET_ACCESS_KEY }}
+        ENACT_R2_BUCKET: ${{ secrets.R2_BUCKET || env.R2_BUCKET }}
+        ENVE_CACHE_CONCURRENCY: "16"
     - name: Check enve Stores into the Host Cache
       if: ${{ steps.runner_caches.outputs.host != '' }}
       run: |
@@ -3195,6 +3299,9 @@ jobs:
         fi
         enact run --pipeline .enact --workflow ci "$@" preflight
       env:
+        AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID || env.R2_ACCESS_KEY_ID }}
+        AWS_REGION: auto
+        AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY || env.R2_SECRET_ACCESS_KEY }}
         ENACT_BASE_REF: ${{ inputs.base_ref || github.base_ref || github.event.pull_request.base.ref }}
         ENACT_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         ENACT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch || 'master' }}
@@ -3205,6 +3312,7 @@ jobs:
         ENACT_INPUT_UPDATED: ${{ inputs.updated }}
         ENACT_INPUT_WARM_REACH: ${{ inputs.warm_reach }}
         ENACT_INTEGRATION_BRANCH: ${{ vars.ENACT_INTEGRATION_BRANCH }}
+        ENACT_R2_BUCKET: ${{ secrets.R2_BUCKET || env.R2_BUCKET }}
     - name: Check Package Caches for New Entries
       id: cache_delta
       if: ${{ !cancelled() && steps.runner_caches.outputs.host == '' && (github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch') }}
@@ -3337,10 +3445,8 @@ jobs:
     - Linux
     - X64
     - tonky-ci
+    - tonky-ci-s
     timeout-minutes: 10
-    concurrency:
-      group: enact-reach-${{ github.ref_name }}
-      cancel-in-progress: false
     steps:
     - name: Probe Runner Caches
       id: runner_caches
@@ -3599,7 +3705,11 @@ jobs:
         enact trace store pull || true
         enact trace store push --deltas "$RUNNER_TEMP/enact-footprints"
       env:
+        AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID || env.R2_ACCESS_KEY_ID }}
+        AWS_REGION: auto
+        AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY || env.R2_SECRET_ACCESS_KEY }}
         ENACT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        ENACT_R2_BUCKET: ${{ secrets.R2_BUCKET || env.R2_BUCKET }}
     - name: Save Reach Store
       if: ${{ always() && (github.event_name == 'push' && github.ref_name == github.event.repository.default_branch || github.event_name == 'workflow_dispatch' && inputs.warm_reach == 'true' && github.ref_name == github.event.repository.default_branch) }}
       continue-on-error: true
@@ -3615,6 +3725,7 @@ jobs:
     - Linux
     - X64
     - tonky-ci
+    - tonky-ci-l
     timeout-minutes: 90
     steps:
     - name: Probe Runner Caches
@@ -4057,8 +4168,17 @@ jobs:
           ln -sfn "$store" /nix/store 2>/dev/null || true
         fi
         if [ -f "enve.lock" ]; then
+          if [ -n "$ENACT_R2_BUCKET" ] && ! enve run --locked -- true 2>/dev/null; then
+            enve cache pull enve.lock --cache "$ENACT_R2_BUCKET" -j 16
+          fi
           enve run --locked -- true
         fi
+      env:
+        AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID || env.R2_ACCESS_KEY_ID }}
+        AWS_REGION: auto
+        AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY || env.R2_SECRET_ACCESS_KEY }}
+        ENACT_R2_BUCKET: ${{ secrets.R2_BUCKET || env.R2_BUCKET }}
+        ENVE_CACHE_CONCURRENCY: "16"
     - name: Check enve Stores into the Host Cache
       if: ${{ steps.runner_caches.outputs.host != '' }}
       run: |
@@ -4099,6 +4219,11 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     - name: Seed [frontend:typecheck]
       run: enact run --pipeline .enact --workflow ci --all --no-cache -c frontend:typecheck
+      env:
+        AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID || env.R2_ACCESS_KEY_ID }}
+        AWS_REGION: auto
+        AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY || env.R2_SECRET_ACCESS_KEY }}
+        ENACT_R2_BUCKET: ${{ secrets.R2_BUCKET || env.R2_BUCKET }}
     - name: Check Package Caches for New Entries
       id: cache_delta
       if: ${{ !cancelled() && steps.runner_caches.outputs.host == '' && github.event_name == 'workflow_dispatch' && inputs.seed_caches == 'true' }}
@@ -4200,6 +4325,7 @@ jobs:
     - Linux
     - X64
     - tonky-ci
+    - tonky-ci-l
     timeout-minutes: 90
     steps:
     - name: Probe Runner Caches
@@ -4664,8 +4790,17 @@ jobs:
           ln -sfn "$store" /nix/store 2>/dev/null || true
         fi
         if [ -f "enve.lock" ]; then
+          if [ -n "$ENACT_R2_BUCKET" ] && ! enve run --locked -- true 2>/dev/null; then
+            enve cache pull enve.lock --cache "$ENACT_R2_BUCKET" -j 16
+          fi
           enve run --locked -- true
         fi
+      env:
+        AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID || env.R2_ACCESS_KEY_ID }}
+        AWS_REGION: auto
+        AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY || env.R2_SECRET_ACCESS_KEY }}
+        ENACT_R2_BUCKET: ${{ secrets.R2_BUCKET || env.R2_BUCKET }}
+        ENVE_CACHE_CONCURRENCY: "16"
     - name: Check enve Stores into the Host Cache
       if: ${{ steps.runner_caches.outputs.host != '' }}
       run: |
@@ -4699,6 +4834,11 @@ jobs:
         ENACT_PYTHON_INSTALL: bash showcase/scripts/setup.sh backend
     - name: Seed [products:typecheck]
       run: enact run --pipeline .enact --workflow ci --all --no-cache -c products:typecheck
+      env:
+        AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID || env.R2_ACCESS_KEY_ID }}
+        AWS_REGION: auto
+        AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY || env.R2_SECRET_ACCESS_KEY }}
+        ENACT_R2_BUCKET: ${{ secrets.R2_BUCKET || env.R2_BUCKET }}
     - name: Check Package Caches for New Entries
       id: cache_delta
       if: ${{ !cancelled() && steps.runner_caches.outputs.host == '' && github.event_name == 'workflow_dispatch' && inputs.seed_caches == 'true' }}
@@ -4808,6 +4948,7 @@ jobs:
     - Linux
     - X64
     - tonky-ci
+    - tonky-ci-s
     timeout-minutes: 5
     steps:
     - name: Probe Runner Caches
@@ -5054,6 +5195,12 @@ jobs:
     - name: Generate Consolidated Telemetry Summary
       continue-on-error: true
       run: enact report --dir .enact/state/telemetry
+      env:
+        AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID || env.R2_ACCESS_KEY_ID }}
+        AWS_REGION: auto
+        AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY || env.R2_SECRET_ACCESS_KEY }}
+        ENACT_R2_BUCKET: ${{ secrets.R2_BUCKET || env.R2_BUCKET }}
+        ENACT_UPLOAD_REPORT: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
     - name: Upload Master Workflow Dashboard
       if: always()
       continue-on-error: true
@@ -5508,13 +5655,24 @@ jobs:
           ln -sfn "$store" /nix/store 2>/dev/null || true
         fi
         if [ -f "enve.lock" ]; then
+          if [ -n "$ENACT_R2_BUCKET" ] && ! enve run --locked -- true 2>/dev/null; then
+            enve cache pull enve.lock --cache "$ENACT_R2_BUCKET" -j 16
+          fi
           enve run --locked -- true
         fi
         if [ -n "$ENACT_COMPONENT_DIR" ] && [ "$ENACT_COMPONENT_DIR" != "." ] && [ -f "$ENACT_COMPONENT_DIR/enve.lock" ]; then
+          if [ -n "$ENACT_R2_BUCKET" ] && ! (cd "$ENACT_COMPONENT_DIR" && enve run --locked -- true 2>/dev/null); then
+            enve cache pull "$ENACT_COMPONENT_DIR/enve.lock" --cache "$ENACT_R2_BUCKET" -j 16
+          fi
           (cd "$ENACT_COMPONENT_DIR" && enve run --locked -- true)
         fi
       env:
+        AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID || env.R2_ACCESS_KEY_ID }}
+        AWS_REGION: auto
+        AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY || env.R2_SECRET_ACCESS_KEY }}
         ENACT_COMPONENT_DIR: ${{ matrix.component_dir }}
+        ENACT_R2_BUCKET: ${{ secrets.R2_BUCKET || env.R2_BUCKET }}
+        ENVE_CACHE_CONCURRENCY: "16"
     - name: Check enve Stores into the Host Cache
       if: ${{ steps.runner_caches.outputs.host != '' }}
       run: |
@@ -5573,13 +5731,42 @@ jobs:
     - name: Execute Component Task
       run: eval "$ENACT_MATRIX_COMMAND"
       env:
+        AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID || env.R2_ACCESS_KEY_ID }}
+        AWS_REGION: auto
+        AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY || env.R2_SECRET_ACCESS_KEY }}
         CI_COMPONENT: ${{ matrix.component }}
         ENACT_MATRIX_COMMAND: ${{ matrix.command }}
         ENACT_MAX_PARALLEL: ${{ matrix.max_parallel }}
         ENACT_PREEMPTION_NOTICE_SEC: ${{ matrix.preemption_notice_sec }}
+        ENACT_R2_BUCKET: ${{ secrets.R2_BUCKET || env.R2_BUCKET }}
         ENACT_RECORD: ${{ (github.event_name == 'workflow_dispatch' && inputs.warm_reach == 'true' && github.ref_name == github.event.repository.default_branch) && 'every' || (github.event_name == 'push' && github.ref_name == github.event.repository.default_branch) && 'auto' || 'off' }}
         ENACT_RUNNER_TIER: ${{ matrix.runner_tier }}
         ENACT_TOPOLOGY: ${{ matrix.topology }}
+    - name: Push Updated Dependencies to the Remote Cache
+      if: success() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+      continue-on-error: true
+      run: |-
+        if [ -z "${ENVE_CACHE_SECRET_KEY:-}" ] && [ -z "${NIX_SECRET_KEY:-}" ]; then
+          echo "Skipping closure upload: signed remote cache requires ENVE_CACHE_SECRET_KEY or NIX_SECRET_KEY."
+          exit 0
+        fi
+        if [ -n "$ENACT_R2_BUCKET" ]; then
+          if [ -f "enve.lock" ]; then
+            echo "🛰️ Pushing missing/updated closures to the remote cache from repository root..."
+            enve cache push enve.lock --cache "$ENACT_R2_BUCKET" -j 16 || true
+          fi
+          if [ -n "$ENACT_COMPONENT_DIR" ] && [ "$ENACT_COMPONENT_DIR" != "." ] && [ -f "$ENACT_COMPONENT_DIR/enve.lock" ]; then
+            echo "🛰️ Pushing missing/updated closures to the remote cache from $ENACT_COMPONENT_DIR..."
+            (cd "$ENACT_COMPONENT_DIR" && enve cache push enve.lock --cache "$ENACT_R2_BUCKET" -j 16) || true
+          fi
+        fi
+      env:
+        AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID || env.R2_ACCESS_KEY_ID }}
+        AWS_REGION: auto
+        AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY || env.R2_SECRET_ACCESS_KEY }}
+        ENACT_COMPONENT_DIR: ${{ matrix.component_dir }}
+        ENACT_R2_BUCKET: ${{ secrets.R2_BUCKET || env.R2_BUCKET }}
+        ENVE_CACHE_CONCURRENCY: "16"
     - name: Upload Execution Telemetry & Workflow Dashboard
       if: always()
       continue-on-error: true
@@ -6225,13 +6412,24 @@ jobs:
           ln -sfn "$store" /nix/store 2>/dev/null || true
         fi
         if [ -f "enve.lock" ]; then
+          if [ -n "$ENACT_R2_BUCKET" ] && ! enve run --locked -- true 2>/dev/null; then
+            enve cache pull enve.lock --cache "$ENACT_R2_BUCKET" -j 16
+          fi
           enve run --locked -- true
         fi
         if [ -n "$ENACT_COMPONENT_DIR" ] && [ "$ENACT_COMPONENT_DIR" != "." ] && [ -f "$ENACT_COMPONENT_DIR/enve.lock" ]; then
+          if [ -n "$ENACT_R2_BUCKET" ] && ! (cd "$ENACT_COMPONENT_DIR" && enve run --locked -- true 2>/dev/null); then
+            enve cache pull "$ENACT_COMPONENT_DIR/enve.lock" --cache "$ENACT_R2_BUCKET" -j 16
+          fi
           (cd "$ENACT_COMPONENT_DIR" && enve run --locked -- true)
         fi
       env:
+        AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID || env.R2_ACCESS_KEY_ID }}
+        AWS_REGION: auto
+        AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY || env.R2_SECRET_ACCESS_KEY }}
         ENACT_COMPONENT_DIR: ${{ matrix.component_dir }}
+        ENACT_R2_BUCKET: ${{ secrets.R2_BUCKET || env.R2_BUCKET }}
+        ENVE_CACHE_CONCURRENCY: "16"
     - name: Check enve Stores into the Host Cache
       if: ${{ steps.runner_caches.outputs.host != '' }}
       run: |
@@ -6290,13 +6488,42 @@ jobs:
     - name: Execute Component Task
       run: eval "$ENACT_MATRIX_COMMAND"
       env:
+        AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID || env.R2_ACCESS_KEY_ID }}
+        AWS_REGION: auto
+        AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY || env.R2_SECRET_ACCESS_KEY }}
         CI_COMPONENT: ${{ matrix.component }}
         ENACT_MATRIX_COMMAND: ${{ matrix.command }}
         ENACT_MAX_PARALLEL: ${{ matrix.max_parallel }}
         ENACT_PREEMPTION_NOTICE_SEC: ${{ matrix.preemption_notice_sec }}
+        ENACT_R2_BUCKET: ${{ secrets.R2_BUCKET || env.R2_BUCKET }}
         ENACT_RECORD: ${{ (github.event_name == 'workflow_dispatch' && inputs.warm_reach == 'true' && github.ref_name == github.event.repository.default_branch) && 'every' || (github.event_name == 'push' && github.ref_name == github.event.repository.default_branch) && 'auto' || 'off' }}
         ENACT_RUNNER_TIER: ${{ matrix.runner_tier }}
         ENACT_TOPOLOGY: ${{ matrix.topology }}
+    - name: Push Updated Dependencies to the Remote Cache
+      if: success() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+      continue-on-error: true
+      run: |-
+        if [ -z "${ENVE_CACHE_SECRET_KEY:-}" ] && [ -z "${NIX_SECRET_KEY:-}" ]; then
+          echo "Skipping closure upload: signed remote cache requires ENVE_CACHE_SECRET_KEY or NIX_SECRET_KEY."
+          exit 0
+        fi
+        if [ -n "$ENACT_R2_BUCKET" ]; then
+          if [ -f "enve.lock" ]; then
+            echo "🛰️ Pushing missing/updated closures to the remote cache from repository root..."
+            enve cache push enve.lock --cache "$ENACT_R2_BUCKET" -j 16 || true
+          fi
+          if [ -n "$ENACT_COMPONENT_DIR" ] && [ "$ENACT_COMPONENT_DIR" != "." ] && [ -f "$ENACT_COMPONENT_DIR/enve.lock" ]; then
+            echo "🛰️ Pushing missing/updated closures to the remote cache from $ENACT_COMPONENT_DIR..."
+            (cd "$ENACT_COMPONENT_DIR" && enve cache push enve.lock --cache "$ENACT_R2_BUCKET" -j 16) || true
+          fi
+        fi
+      env:
+        AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID || env.R2_ACCESS_KEY_ID }}
+        AWS_REGION: auto
+        AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY || env.R2_SECRET_ACCESS_KEY }}
+        ENACT_COMPONENT_DIR: ${{ matrix.component_dir }}
+        ENACT_R2_BUCKET: ${{ secrets.R2_BUCKET || env.R2_BUCKET }}
+        ENVE_CACHE_CONCURRENCY: "16"
     - name: Upload Execution Telemetry & Workflow Dashboard
       if: always()
       continue-on-error: true
