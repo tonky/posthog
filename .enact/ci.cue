@@ -1,8 +1,53 @@
 package replay
 
-import "enact.dev/schema"
+import (
+	"strings"
+	"enact.dev/schema"
+)
+
+// This crate owns a separate Cargo workspace: rust/target never contains its native
+// binding. Immutable source keys avoid uploading another archive for a JS-only edit.
+// Keep restore exact: another architecture, job or native source state is not a fallback.
+_hogvmNativeInputs: [
+	"enve.lock",
+	"enve.cue",
+	"rust/Cargo.toml",
+	".cargo/config*",
+	"rust/.cargo/config*",
+	"rust/common/.cargo/config*",
+	"rust/common/hogvm/.cargo/config*",
+	"rust/common/hogvm/node/.cargo/config*",
+	"rust-toolchain*",
+	"rust/rust-toolchain*",
+	"rust/common/hogvm/Cargo.toml",
+	"rust/common/hogvm/build.rs",
+	"rust/common/hogvm/src/**",
+	"rust/common/hogvm/node/Cargo.toml",
+	"rust/common/hogvm/node/Cargo.lock",
+	"rust/common/hogvm/node/build.rs",
+	"rust/common/hogvm/node/src/**",
+	"rust/common/hogvm/node/package.json",
+	"rust/common/hogvm/node/turbo.json",
+	"turbo.json",
+	".enact/*.cue",
+	"showcase/scripts/run_nodejs_tests.sh",
+	"showcase/scripts/build_hogvm.sh",
+	"showcase/scripts/rust_ci_env.sh",
+]
+_hogvmNativeKey: "hogvm-native-v1-${{ runner.os }}-${{ runner.arch }}-${{ matrix.task_id }}-${{ hashFiles(" + strings.Join([for file in _hogvmNativeInputs {"'\(file)'"}], ", ") + ") }}"
 
 pipeline: schema.#Pipeline & {
+	caches: "hogvm-native": {
+		name: "Standalone HogVM native target"
+		paths: ["rust/common/hogvm/node/target"]
+		scope: "task"
+		key: [_hogvmNativeKey]
+		restore_keys: [_hogvmNativeKey]
+		used_by: {
+			components: ["nodejs", "nodejs_base", "nodejs_ingestion_core", "nodejs_ingestion", "nodejs_cdp", "nodejs_replay", "nodejs_logs", "nodejs_servers", "e2e"]
+			jobs: [pipeline.#jobs.build, pipeline.#jobs.test, pipeline.#jobs.rust_ingestion_e2e]
+		}
+	}
 	toolchain: {
 		node: package_manager: "pnpm"
 		python: {

@@ -426,6 +426,15 @@ jobs:
           key: frontend-tsgo-${{ runner.os }}-${{ github.sha }}
           path: .enact/state/tsgo
           restore-keys: frontend-tsgo-${{ runner.os }}-
+      - name: Restore Cache [Standalone HogVM native target]
+        id: cache_hogvm_native
+        if: ${{ (contains(format(',{0},', matrix.caches), ',hogvm-native,')) && steps.outputs-lookup.outputs.cache-hit != 'true' }}
+        continue-on-error: true
+        uses: actions/cache/restore@v6
+        with:
+          key: hogvm-native-v1-${{ runner.os }}-${{ runner.arch }}-${{ matrix.task_id }}-${{ hashFiles('enve.lock', 'enve.cue', 'rust/Cargo.toml', '.cargo/config*', 'rust/.cargo/config*', 'rust/common/.cargo/config*', 'rust/common/hogvm/.cargo/config*', 'rust/common/hogvm/node/.cargo/config*', 'rust-toolchain*', 'rust/rust-toolchain*', 'rust/common/hogvm/Cargo.toml', 'rust/common/hogvm/build.rs', 'rust/common/hogvm/src/**', 'rust/common/hogvm/node/Cargo.toml', 'rust/common/hogvm/node/Cargo.lock', 'rust/common/hogvm/node/build.rs', 'rust/common/hogvm/node/src/**', 'rust/common/hogvm/node/package.json', 'rust/common/hogvm/node/turbo.json', 'turbo.json', '.enact/*.cue', 'showcase/scripts/run_nodejs_tests.sh', 'showcase/scripts/build_hogvm.sh', 'showcase/scripts/rust_ci_env.sh') }}
+          path: rust/common/hogvm/node/target
+          restore-keys: hogvm-native-v1-${{ runner.os }}-${{ runner.arch }}-${{ matrix.task_id }}-${{ hashFiles('enve.lock', 'enve.cue', 'rust/Cargo.toml', '.cargo/config*', 'rust/.cargo/config*', 'rust/common/.cargo/config*', 'rust/common/hogvm/.cargo/config*', 'rust/common/hogvm/node/.cargo/config*', 'rust-toolchain*', 'rust/rust-toolchain*', 'rust/common/hogvm/Cargo.toml', 'rust/common/hogvm/build.rs', 'rust/common/hogvm/src/**', 'rust/common/hogvm/node/Cargo.toml', 'rust/common/hogvm/node/Cargo.lock', 'rust/common/hogvm/node/build.rs', 'rust/common/hogvm/node/src/**', 'rust/common/hogvm/node/package.json', 'rust/common/hogvm/node/turbo.json', 'turbo.json', '.enact/*.cue', 'showcase/scripts/run_nodejs_tests.sh', 'showcase/scripts/build_hogvm.sh', 'showcase/scripts/rust_ci_env.sh') }}
       - name: Restore Cache [mypy fine-grained cache]
         id: cache_mypy
         if: ${{ (contains(format(',{0},', matrix.caches), ',mypy,')) && steps.outputs-lookup.outputs.cache-hit != 'true' }}
@@ -783,6 +792,13 @@ jobs:
         with:
           key: ${{ steps.cache_frontend_tsgo.outputs.cache-primary-key }}
           path: .enact/state/tsgo
+      - name: Save Cache [Standalone HogVM native target]
+        if: ${{ (((github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch') && contains(format(',{0},', matrix.caches), ',hogvm-native,')) && steps.cache_hogvm_native.outputs.cache-hit != 'true') && steps.outputs-lookup.outputs.cache-hit != 'true' }}
+        continue-on-error: true
+        uses: actions/cache/save@v6
+        with:
+          key: ${{ steps.cache_hogvm_native.outputs.cache-primary-key }}
+          path: rust/common/hogvm/node/target
       - name: Save Cache [mypy fine-grained cache]
         if: ${{ (((github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch') && contains(format(',{0},', matrix.caches), ',mypy,') && (github.event_name == 'schedule' || github.event_name != 'pull_request' && github.ref_name == github.event.repository.default_branch || !startsWith(steps.cache_mypy.outputs.cache-matched-key, format('mypy-{0}-', runner.os)))) && steps.cache_mypy.outputs.cache-hit != 'true') && steps.outputs-lookup.outputs.cache-hit != 'true' }}
         continue-on-error: true
@@ -1206,6 +1222,15 @@ jobs:
           key: frontend-tsgo-${{ runner.os }}-${{ github.sha }}
           path: .enact/state/tsgo
           restore-keys: frontend-tsgo-${{ runner.os }}-
+      - name: Restore Cache [Standalone HogVM native target]
+        id: cache_hogvm_native
+        if: ${{ (contains(format(',{0},', matrix.caches), ',hogvm-native,')) && steps.outputs-lookup.outputs.cache-hit != 'true' }}
+        continue-on-error: true
+        uses: actions/cache/restore@v6
+        with:
+          key: hogvm-native-v1-${{ runner.os }}-${{ runner.arch }}-${{ matrix.task_id }}-${{ hashFiles('enve.lock', 'enve.cue', 'rust/Cargo.toml', '.cargo/config*', 'rust/.cargo/config*', 'rust/common/.cargo/config*', 'rust/common/hogvm/.cargo/config*', 'rust/common/hogvm/node/.cargo/config*', 'rust-toolchain*', 'rust/rust-toolchain*', 'rust/common/hogvm/Cargo.toml', 'rust/common/hogvm/build.rs', 'rust/common/hogvm/src/**', 'rust/common/hogvm/node/Cargo.toml', 'rust/common/hogvm/node/Cargo.lock', 'rust/common/hogvm/node/build.rs', 'rust/common/hogvm/node/src/**', 'rust/common/hogvm/node/package.json', 'rust/common/hogvm/node/turbo.json', 'turbo.json', '.enact/*.cue', 'showcase/scripts/run_nodejs_tests.sh', 'showcase/scripts/build_hogvm.sh', 'showcase/scripts/rust_ci_env.sh') }}
+          path: rust/common/hogvm/node/target
+          restore-keys: hogvm-native-v1-${{ runner.os }}-${{ runner.arch }}-${{ matrix.task_id }}-${{ hashFiles('enve.lock', 'enve.cue', 'rust/Cargo.toml', '.cargo/config*', 'rust/.cargo/config*', 'rust/common/.cargo/config*', 'rust/common/hogvm/.cargo/config*', 'rust/common/hogvm/node/.cargo/config*', 'rust-toolchain*', 'rust/rust-toolchain*', 'rust/common/hogvm/Cargo.toml', 'rust/common/hogvm/build.rs', 'rust/common/hogvm/src/**', 'rust/common/hogvm/node/Cargo.toml', 'rust/common/hogvm/node/Cargo.lock', 'rust/common/hogvm/node/build.rs', 'rust/common/hogvm/node/src/**', 'rust/common/hogvm/node/package.json', 'rust/common/hogvm/node/turbo.json', 'turbo.json', '.enact/*.cue', 'showcase/scripts/run_nodejs_tests.sh', 'showcase/scripts/build_hogvm.sh', 'showcase/scripts/rust_ci_env.sh') }}
       - name: Restore Cache [mypy fine-grained cache]
         id: cache_mypy
         if: ${{ (contains(format(',{0},', matrix.caches), ',mypy,')) && steps.outputs-lookup.outputs.cache-hit != 'true' }}
@@ -1563,6 +1588,13 @@ jobs:
         with:
           key: ${{ steps.cache_frontend_tsgo.outputs.cache-primary-key }}
           path: .enact/state/tsgo
+      - name: Save Cache [Standalone HogVM native target]
+        if: ${{ (((github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch') && contains(format(',{0},', matrix.caches), ',hogvm-native,')) && steps.cache_hogvm_native.outputs.cache-hit != 'true') && steps.outputs-lookup.outputs.cache-hit != 'true' }}
+        continue-on-error: true
+        uses: actions/cache/save@v6
+        with:
+          key: ${{ steps.cache_hogvm_native.outputs.cache-primary-key }}
+          path: rust/common/hogvm/node/target
       - name: Save Cache [mypy fine-grained cache]
         if: ${{ (((github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch') && contains(format(',{0},', matrix.caches), ',mypy,') && (github.event_name == 'schedule' || github.event_name != 'pull_request' && github.ref_name == github.event.repository.default_branch || !startsWith(steps.cache_mypy.outputs.cache-matched-key, format('mypy-{0}-', runner.os)))) && steps.cache_mypy.outputs.cache-hit != 'true') && steps.outputs-lookup.outputs.cache-hit != 'true' }}
         continue-on-error: true
@@ -5572,6 +5604,15 @@ jobs:
           key: frontend-tsgo-${{ runner.os }}-${{ github.sha }}
           path: .enact/state/tsgo
           restore-keys: frontend-tsgo-${{ runner.os }}-
+      - name: Restore Cache [Standalone HogVM native target]
+        id: cache_hogvm_native
+        if: contains(format(',{0},', matrix.caches), ',hogvm-native,')
+        continue-on-error: true
+        uses: actions/cache/restore@v6
+        with:
+          key: hogvm-native-v1-${{ runner.os }}-${{ runner.arch }}-${{ matrix.task_id }}-${{ hashFiles('enve.lock', 'enve.cue', 'rust/Cargo.toml', '.cargo/config*', 'rust/.cargo/config*', 'rust/common/.cargo/config*', 'rust/common/hogvm/.cargo/config*', 'rust/common/hogvm/node/.cargo/config*', 'rust-toolchain*', 'rust/rust-toolchain*', 'rust/common/hogvm/Cargo.toml', 'rust/common/hogvm/build.rs', 'rust/common/hogvm/src/**', 'rust/common/hogvm/node/Cargo.toml', 'rust/common/hogvm/node/Cargo.lock', 'rust/common/hogvm/node/build.rs', 'rust/common/hogvm/node/src/**', 'rust/common/hogvm/node/package.json', 'rust/common/hogvm/node/turbo.json', 'turbo.json', '.enact/*.cue', 'showcase/scripts/run_nodejs_tests.sh', 'showcase/scripts/build_hogvm.sh', 'showcase/scripts/rust_ci_env.sh') }}
+          path: rust/common/hogvm/node/target
+          restore-keys: hogvm-native-v1-${{ runner.os }}-${{ runner.arch }}-${{ matrix.task_id }}-${{ hashFiles('enve.lock', 'enve.cue', 'rust/Cargo.toml', '.cargo/config*', 'rust/.cargo/config*', 'rust/common/.cargo/config*', 'rust/common/hogvm/.cargo/config*', 'rust/common/hogvm/node/.cargo/config*', 'rust-toolchain*', 'rust/rust-toolchain*', 'rust/common/hogvm/Cargo.toml', 'rust/common/hogvm/build.rs', 'rust/common/hogvm/src/**', 'rust/common/hogvm/node/Cargo.toml', 'rust/common/hogvm/node/Cargo.lock', 'rust/common/hogvm/node/build.rs', 'rust/common/hogvm/node/src/**', 'rust/common/hogvm/node/package.json', 'rust/common/hogvm/node/turbo.json', 'turbo.json', '.enact/*.cue', 'showcase/scripts/run_nodejs_tests.sh', 'showcase/scripts/build_hogvm.sh', 'showcase/scripts/rust_ci_env.sh') }}
       - name: Restore Cache [mypy fine-grained cache]
         id: cache_mypy
         if: contains(format(',{0},', matrix.caches), ',mypy,')
@@ -5925,6 +5966,13 @@ jobs:
         with:
           key: ${{ steps.cache_frontend_tsgo.outputs.cache-primary-key }}
           path: .enact/state/tsgo
+      - name: Save Cache [Standalone HogVM native target]
+        if: ((github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch') && contains(format(',{0},', matrix.caches), ',hogvm-native,')) && steps.cache_hogvm_native.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v6
+        with:
+          key: ${{ steps.cache_hogvm_native.outputs.cache-primary-key }}
+          path: rust/common/hogvm/node/target
       - name: Save Cache [mypy fine-grained cache]
         if: ((github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch') && contains(format(',{0},', matrix.caches), ',mypy,') && (github.event_name == 'schedule' || github.event_name != 'pull_request' && github.ref_name == github.event.repository.default_branch || !startsWith(steps.cache_mypy.outputs.cache-matched-key, format('mypy-{0}-', runner.os)))) && steps.cache_mypy.outputs.cache-hit != 'true'
         continue-on-error: true
@@ -6330,6 +6378,15 @@ jobs:
           key: frontend-tsgo-${{ runner.os }}-${{ github.sha }}
           path: .enact/state/tsgo
           restore-keys: frontend-tsgo-${{ runner.os }}-
+      - name: Restore Cache [Standalone HogVM native target]
+        id: cache_hogvm_native
+        if: contains(format(',{0},', matrix.caches), ',hogvm-native,')
+        continue-on-error: true
+        uses: actions/cache/restore@v6
+        with:
+          key: hogvm-native-v1-${{ runner.os }}-${{ runner.arch }}-${{ matrix.task_id }}-${{ hashFiles('enve.lock', 'enve.cue', 'rust/Cargo.toml', '.cargo/config*', 'rust/.cargo/config*', 'rust/common/.cargo/config*', 'rust/common/hogvm/.cargo/config*', 'rust/common/hogvm/node/.cargo/config*', 'rust-toolchain*', 'rust/rust-toolchain*', 'rust/common/hogvm/Cargo.toml', 'rust/common/hogvm/build.rs', 'rust/common/hogvm/src/**', 'rust/common/hogvm/node/Cargo.toml', 'rust/common/hogvm/node/Cargo.lock', 'rust/common/hogvm/node/build.rs', 'rust/common/hogvm/node/src/**', 'rust/common/hogvm/node/package.json', 'rust/common/hogvm/node/turbo.json', 'turbo.json', '.enact/*.cue', 'showcase/scripts/run_nodejs_tests.sh', 'showcase/scripts/build_hogvm.sh', 'showcase/scripts/rust_ci_env.sh') }}
+          path: rust/common/hogvm/node/target
+          restore-keys: hogvm-native-v1-${{ runner.os }}-${{ runner.arch }}-${{ matrix.task_id }}-${{ hashFiles('enve.lock', 'enve.cue', 'rust/Cargo.toml', '.cargo/config*', 'rust/.cargo/config*', 'rust/common/.cargo/config*', 'rust/common/hogvm/.cargo/config*', 'rust/common/hogvm/node/.cargo/config*', 'rust-toolchain*', 'rust/rust-toolchain*', 'rust/common/hogvm/Cargo.toml', 'rust/common/hogvm/build.rs', 'rust/common/hogvm/src/**', 'rust/common/hogvm/node/Cargo.toml', 'rust/common/hogvm/node/Cargo.lock', 'rust/common/hogvm/node/build.rs', 'rust/common/hogvm/node/src/**', 'rust/common/hogvm/node/package.json', 'rust/common/hogvm/node/turbo.json', 'turbo.json', '.enact/*.cue', 'showcase/scripts/run_nodejs_tests.sh', 'showcase/scripts/build_hogvm.sh', 'showcase/scripts/rust_ci_env.sh') }}
       - name: Restore Cache [mypy fine-grained cache]
         id: cache_mypy
         if: contains(format(',{0},', matrix.caches), ',mypy,')
@@ -6683,6 +6740,13 @@ jobs:
         with:
           key: ${{ steps.cache_frontend_tsgo.outputs.cache-primary-key }}
           path: .enact/state/tsgo
+      - name: Save Cache [Standalone HogVM native target]
+        if: ((github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch') && contains(format(',{0},', matrix.caches), ',hogvm-native,')) && steps.cache_hogvm_native.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v6
+        with:
+          key: ${{ steps.cache_hogvm_native.outputs.cache-primary-key }}
+          path: rust/common/hogvm/node/target
       - name: Save Cache [mypy fine-grained cache]
         if: ((github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch') && contains(format(',{0},', matrix.caches), ',mypy,') && (github.event_name == 'schedule' || github.event_name != 'pull_request' && github.ref_name == github.event.repository.default_branch || !startsWith(steps.cache_mypy.outputs.cache-matched-key, format('mypy-{0}-', runner.os)))) && steps.cache_mypy.outputs.cache-hit != 'true'
         continue-on-error: true
