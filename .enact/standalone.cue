@@ -38,10 +38,11 @@ pipeline: components: {
 			"proto",
 			"rust",
 			"nodejs",
-			// Trunk's native-binding guard compares every root-workspace manifest with
+			// Trunk's native-binding guard compares every manifest inside a root-workspace package with
 			// the complete Git index. Keep those files even when their package isn't
 			// a dependency of this suite; retaining only imported packages guts the guard.
 			"docs/onboarding/package.json",
+			"frontend/@posthog/lemon-ui/package.json",
 			"packages/llm-normalizer/package.json",
 			"packages/quill/package.json",
 			"packages/quill/apps/storybook/package.json",

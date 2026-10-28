@@ -1,24 +1,24 @@
 
-Dynamic section at offset 0x23ca7b8 contains 29 entries:
+Dynamic section at offset 0x23d2f78 contains 29 entries:
   Tag        Type                         Name/Value
  0x0000000000000001 (NEEDED)             Shared library: [libgcc_s.so.1]
  0x0000000000000001 (NEEDED)             Shared library: [libm.so.6]
  0x0000000000000001 (NEEDED)             Shared library: [libc.so.6]
  0x0000000000000001 (NEEDED)             Shared library: [ld-linux-aarch64.so.1]
  0x0000000000000007 (RELA)               0x2cc8
- 0x0000000000000008 (RELASZ)             907032 (bytes)
+ 0x0000000000000008 (RELASZ)             907272 (bytes)
  0x0000000000000009 (RELAENT)            24 (bytes)
- 0x0000000000000017 (JMPREL)             0xe03e0
+ 0x0000000000000017 (JMPREL)             0xe04d0
  0x0000000000000002 (PLTRELSZ)           4920 (bytes)
  0x0000000000000014 (PLTREL)             RELA
- 0x0000000000000003 (PLTGOT)             0x23ea9f0
+ 0x0000000000000003 (PLTGOT)             0x23f31b0
  0x0000000000000006 (SYMTAB)             0x360
  0x000000000000000b (SYMENT)             24 (bytes)
  0x0000000000000005 (STRTAB)             0x1cb0
  0x000000000000000a (STRSZ)              3240 (bytes)
- 0x0000000000000019 (INIT_ARRAY)         0x23eb070
+ 0x0000000000000019 (INIT_ARRAY)         0x23f3830
  0x000000000000001b (INIT_ARRAYSZ)       40 (bytes)
- 0x000000000000001a (FINI_ARRAY)         0x23ea9d8
+ 0x000000000000001a (FINI_ARRAY)         0x23f3198
  0x000000000000001c (FINI_ARRAYSZ)       24 (bytes)
  0x000000006ffffff0 (VERSYM)             0x2958
  0x000000006ffffffe (VERNEED)            0x2b78
