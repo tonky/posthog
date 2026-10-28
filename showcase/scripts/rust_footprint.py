@@ -351,7 +351,7 @@ def main() -> int:
             footprint["files"] = sorted(trie_paths(footprint.get("files")) | built)
         (args.out / map_path.name).write_text(json.dumps(reach))
     unread = {
-        root: {"files": sorted(inputs[root]), "recorders": [args.recorder]}
+        root: {"files": sorted(inputs[root]), "recorders": [args.recorder], "outcome": "partial"}
         for root in args.passed
         if root not in mapped and root in inputs and not args.built_from
     }

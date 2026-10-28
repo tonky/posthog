@@ -176,7 +176,7 @@ live_rust_footprint() { # <dir>
     fi
     for root in "${live_rust_roots[@]}"; do args+=(--built-from "$root"); done
     python3 showcase/scripts/rust_footprint.py --repo "$PWD" --artifacts "$live_recording/rust/artifacts.jsonl" \
-        --metadata "$live_recording/rust/metadata.json" --recorder "rust_footprint.py/2" --out "$ENACT_FOOTPRINT_DIR" \
+        --metadata "$live_recording/rust/metadata.json" --recorder "rust_footprint.py/3" --out "$ENACT_FOOTPRINT_DIR" \
         "${args[@]}" "${maps[@]}" || return 1
     echo "live_footprint: the build inputs of ${#live_rust_roots[@]} Rust binaries -> $ENACT_FOOTPRINT_DIR" >&2
 }

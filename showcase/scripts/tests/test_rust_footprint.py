@@ -169,13 +169,13 @@ class RustFootprintTest(unittest.TestCase):
         out = self.repo / "out"
         run = subprocess.run(
             [sys.executable, str(SCRIPTS / "rust_footprint.py"), "--repo", str(self.repo), "--artifacts", str(work / "artifacts.jsonl"),
-             "--metadata", str(work / "metadata.json"), "--recorder", "rust_footprint.py/1", "--out", str(out), *options, *maps],
+             "--metadata", str(work / "metadata.json"), "--recorder", "rust_footprint.py/3", "--out", str(out), *options, *maps],
             capture_output=True, text=True,
         )
         result = {}
         for path in sorted(out.glob("*.json")):
             reach = json.loads(path.read_text())
-            self.assertEqual(reach["recorder"], "rust_footprint.py/1")
+            self.assertEqual(reach["recorder"], "rust_footprint.py/3")
             result.update(reach["targets"])
         return run, result
 
@@ -185,7 +185,7 @@ class RustFootprintTest(unittest.TestCase):
         self.assertEqual(run.returncode, 0, run.stderr)
         files = set(targets["rust/app/tests/flow.rs"]["files"])
         # Both recorders made it: a new rust_footprint.py version re-records it.
-        self.assertEqual(targets["rust/app/tests/flow.rs"]["recorders"], ["enact-trace/1", "rust_footprint.py/1"])
+        self.assertEqual(targets["rust/app/tests/flow.rs"]["recorders"], ["enact-trace/1", "rust_footprint.py/3"])
         expected = {
             # what the run read, kept
             "rust/app/tests/fixtures/event.json",
@@ -227,9 +227,9 @@ class RustFootprintTest(unittest.TestCase):
             {"rust/app/src/lib.rs": ["rust/app/src/lib.rs"]}, "--passed", "rust/app/tests/flow.rs", "--passed", "rust/app/src/lib.rs"
         )
         self.assertEqual(run.returncode, 0, run.stderr)
-        self.assertEqual(targets["rust/app/tests/flow.rs"]["recorders"], ["rust_footprint.py/1"])
+        self.assertEqual(targets["rust/app/tests/flow.rs"]["recorders"], ["rust_footprint.py/3"])
         self.assertIn("rust/common/core/src/lib.rs", targets["rust/app/tests/flow.rs"]["files"])
-        self.assertNotIn("outcome", targets["rust/app/tests/flow.rs"])
+        self.assertEqual(targets["rust/app/tests/flow.rs"]["outcome"], "partial")
 
     def test_a_target_named_by_its_tests_file_holds_what_its_binary_was_built_from(self):
         # rust_services:test_ignored's: the file declaring the ignored tests, run in the
@@ -244,13 +244,13 @@ class RustFootprintTest(unittest.TestCase):
         for target in ("rust/app/src/api.rs", "rust/app/src/main.rs"):
             files = set(targets[target]["files"])
             self.assertTrue({"rust/app/src/lib.rs", "rust/common/core/src/lib.rs", "rust/testkit/src/lib.rs"} <= files, target)
-            self.assertNotIn("outcome", targets[target])
+            self.assertEqual(targets[target].get("outcome"), "partial" if target.endswith("main.rs") else None)
 
     def test_a_test_driving_a_server_holds_what_the_server_was_built_from(self):
         test = "posthog/api/test/rust_integration/test_flags.py"
         run, targets = self.record({test: ["posthog/api/feature_flag.py"]}, "--built-from", "rust/app/src/main.rs")
         self.assertEqual(run.returncode, 0, run.stderr)
-        self.assertEqual(targets[test]["recorders"], ["enact-trace/1", "rust_footprint.py/1"])
+        self.assertEqual(targets[test]["recorders"], ["enact-trace/1", "rust_footprint.py/3"])
         files = set(targets[test]["files"])
         self.assertLessEqual(
             {
@@ -279,7 +279,7 @@ class RustFootprintTest(unittest.TestCase):
         self.assertEqual(run.returncode, 0, run.stderr)
         for spec, read in specs.items():
             # The map's recorder stays each spec's: a new live_footprint.py version re-records it.
-            self.assertEqual(targets[spec]["recorders"], ["live_footprint.py/2", "rust_footprint.py/1"])
+            self.assertEqual(targets[spec]["recorders"], ["live_footprint.py/2", "rust_footprint.py/3"])
             self.assertEqual(targets[spec]["loaded_through"], 0)
             files = set(targets[spec]["files"])
             self.assertLessEqual({*read, "rust/app/src/main.rs", "rust/common/core/src/lib.rs", "rust/Cargo.lock"}, files)

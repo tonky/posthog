@@ -1458,8 +1458,10 @@ pipeline: schema.#Pipeline & {
 				record_resources: _recordJs
 				recorded_by: ["enact-node"]
 				tasks: [
-					{name: "Warm jest", command: "pnpm --dir typescript test --listTests >/dev/null"},
-					{name: "Run Tests", command: "pnpm --dir typescript test {relative_targets}"},
+					// Turbo's task logs are outside this suite's source discovery. Keep the same
+					// matcher while warming and running, with target arguments before the array option.
+					{name: "Warm jest", command: "pnpm --dir typescript test --listTests --modulePathIgnorePatterns='<rootDir>/[.]turbo(/|$)' >/dev/null"},
+					{name: "Run Tests", command: "pnpm --dir typescript test {relative_targets} --modulePathIgnorePatterns='<rootDir>/[.]turbo(/|$)'"},
 				]
 				target_scope: tests: ["common/hogvm/typescript/src/**/*.test.ts"]
 			}

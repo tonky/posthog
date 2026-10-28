@@ -181,7 +181,7 @@ if [ "$n" -gt 0 ]; then
     if (cd rust && "${build[@]}" --message-format json >"$traces/artifacts.jsonl" &&
         cargo metadata --format-version 1 >"$traces/metadata.json"); then
         python3 showcase/scripts/rust_footprint.py --repo "$root" --artifacts "$traces/artifacts.jsonl" \
-            --metadata "$traces/metadata.json" --recorder "rust_footprint.py/2" --out "$ENACT_FOOTPRINT_DIR" \
+            --metadata "$traces/metadata.json" --recorder "rust_footprint.py/3" --out "$ENACT_FOOTPRINT_DIR" \
             --built-from rust/feature-flags/src/main.rs --built-from rust/personhog-replica/src/main.rs \
             --built-from rust/personhog-router/src/main.rs "$traces"/flags_*.json || status=1
     else

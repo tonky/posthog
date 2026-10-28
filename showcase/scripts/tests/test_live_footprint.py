@@ -6,6 +6,7 @@ file in it that the job never read selects its whole suite. A spec's own footpri
 node_reads.mjs's records of its Node.js processes and their worker threads (NodeReadsTest).
 """
 
+import importlib.util
 import json
 import os
 import subprocess
@@ -18,6 +19,35 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from hermetic import helper_env  # noqa: E402
 
 SCRIPTS = Path(__file__).resolve().parents[1]
+
+CORE = SCRIPTS.parent / "pytest_plugins/enact_footprint.py"
+spec = importlib.util.spec_from_file_location("provenance_core", CORE)
+core = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = core
+spec.loader.exec_module(core)
+
+class ChildRecorderProvenanceTest(unittest.TestCase):
+    def test_actual_and_unknown_recorder_ids_survive_every_merge_boundary(self):
+        old = core.Footprint.load({"reads": ["child.txt"], "recorders": ["enact-trace/1", "custom/7"]}, native=True)
+        current = core.Footprint.load({"recorders": ["enact-trace/2"]}, native=True)
+        merged = core.Footprint.load(old.copy().dump())
+        merged.update(current)
+        entry = merged.entry(0, {})
+        self.assertEqual(set(entry["recorders"]), {core.RECORDER, "enact-trace/1", "enact-trace/2", "custom/7"})
+        self.assertIn("child.txt", entry["files"])
+        self.assertFalse(merged.opaque)
+
+    def test_a_legacy_native_record_without_provenance_is_incomplete(self):
+        child = core.Footprint.load({"reads": ["child.txt"]}, native=True)
+        self.assertTrue(any("kernel recorder provenance" in why for why in child.opaque))
+        self.assertIn("child.txt", child.entry(0, {})["files"])
+        self.assertNotIn("enact-trace/2", child.entry(0, {})["recorders"])
+
+    def test_python_children_do_not_invent_native_coverage(self):
+        child = core.Footprint.load({"reads": ["python.txt"]})
+        self.assertFalse(child.opaque)
+        self.assertEqual(child.entry(0, {})["recorders"], [core.RECORDER])
+
 
 FILES = [
     "showcase/scripts/live_posthog.sh",
@@ -51,6 +81,9 @@ class LiveFootprintTest(unittest.TestCase):
             records = self.recording / "records"
             (records / "1.started").write_text("<shared>\n")
             (records / "1.json").write_text(json.dumps({"footprint": {"reads": ["frontend/dist/index.html"]}}))
+        return set(self.written_map(job)["shared"]["files"])
+
+    def written_map(self, job: str) -> dict:
         out = self.repo / "maps"
         env = helper_env() | {"ENACT_FOOTPRINT_DIR": str(out), "LIVE_JOB": job}
         subprocess.run(
@@ -61,7 +94,36 @@ class LiveFootprintTest(unittest.TestCase):
             capture_output=True,
         )
         (written,) = [p for p in out.iterdir() if p.suffix == ".json"]
-        return set(json.loads(written.read_text())["shared"]["files"])
+        return json.loads(written.read_text())
+
+    def native_shared_map(self, recorders=None) -> dict:
+        records = self.recording / "records"
+        (records / "1.started").write_text("spec.ts\n")
+        (records / "1.json").write_text(json.dumps({"footprint": {"reads": ["app.py"]}}))
+        (records / "2-xnative.started").write_text("<shared>\nexec:sh\n")
+        child = {"reads": ["native.txt"]}
+        if recorders is not None:
+            child["recorders"] = recorders
+        (records / "xnative.json").write_text(json.dumps({"footprint": child}))
+        node = self.recording / "node/1"
+        (node / "1.started").write_text("node\n")
+        (node / "1.json").write_text(json.dumps({"reads": ["spec.ts"]}))
+        return self.written_map("run_mcp_integration.sh")
+
+    def test_native_shared_provenance_survives_alongside_both_adapter_stamps(self):
+        raw = self.native_shared_map(["enact-trace/2", "external/9"])
+        expected = {"enact_footprint.py/6", "live_footprint.py/3", "enact-trace/2", "external/9"}
+        self.assertEqual(set(raw["shared"]["recorders"]), expected)
+        # Shared metadata is laid over the spec by the normal map reader.
+        self.assertEqual(set(raw["targets"]["spec.ts"]["recorders"]), {"enact_footprint.py/6", "live_footprint.py/3"})
+        self.assertNotEqual(raw["targets"]["spec.ts"].get("outcome"), "partial")
+
+    def test_a_shared_legacy_native_record_cannot_leave_a_complete_spec(self):
+        raw = self.native_shared_map()
+        self.assertEqual(raw["targets"]["spec.ts"]["outcome"], "partial")
+        stats = next((self.repo / "maps").glob("*.stats"))
+        reasons = json.loads(stats.read_text())["opaque"]["spec.ts"]
+        self.assertTrue(any("kernel recorder provenance" in reason for reason in reasons), reasons)
 
     def test_the_mcp_job_holds_its_own_script_and_no_build(self):
         shared = self.shared("run_mcp_integration.sh", served=False)

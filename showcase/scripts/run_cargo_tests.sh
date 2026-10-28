@@ -105,7 +105,7 @@ if [ "${#traced[@]}" -gt 0 ]; then
         maps=()
         for map in "$traces"/rust_*.json; do [ -e "$map" ] && maps+=("$map"); done
         python3 "$root/showcase/scripts/rust_footprint.py" --repo "$root" --artifacts "$traces/artifacts.jsonl" \
-            --metadata "$traces/metadata.json" --recorder "rust_footprint.py/2" --out "$ENACT_FOOTPRINT_DIR" \
+            --metadata "$traces/metadata.json" --recorder "rust_footprint.py/3" --out "$ENACT_FOOTPRINT_DIR" \
             ${passed[@]+"${passed[@]}"} ${maps[@]+"${maps[@]}"} || status=1
     else
         status=1

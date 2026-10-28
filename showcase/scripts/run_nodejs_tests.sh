@@ -175,7 +175,7 @@ if [ -n "${NODEJS_SHARD_INSTANCE:-}" ]; then
         if (cd ../rust && cargo build -p ingestion-consumer --message-format json >"$traces/artifacts.jsonl" &&
             cargo metadata --format-version 1 >"$traces/metadata.json"); then
             python3 ../showcase/scripts/rust_footprint.py --repo "$(cd .. && pwd -P)" --artifacts "$traces/artifacts.jsonl" \
-                --metadata "$traces/metadata.json" --recorder "rust_footprint.py/2" --out "$ENACT_FOOTPRINT_DIR" \
+                --metadata "$traces/metadata.json" --recorder "rust_footprint.py/3" --out "$ENACT_FOOTPRINT_DIR" \
                 --built-from rust/ingestion-consumer/src/main.rs "$traces/rust_e2e.json" || status=1
         else
             status=1

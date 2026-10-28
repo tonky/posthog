@@ -297,7 +297,7 @@ if [ "$record" -eq 1 ] && { compgen -G "$traces/rust_*.json" >/dev/null || [ "${
         maps=()
         for map in "$traces"/rust_*.json; do [ -e "$map" ] && maps+=("$map"); done
         python3 ../showcase/scripts/rust_footprint.py --repo "$repo" --artifacts "$traces/artifacts.jsonl" \
-            --metadata "$traces/build/metadata.json" --recorder "rust_footprint.py/2" \
+            --metadata "$traces/build/metadata.json" --recorder "rust_footprint.py/3" \
             --out "$ENACT_FOOTPRINT_DIR" ${binaries[@]+"${binaries[@]}"} ${passed[@]+"${passed[@]}"} \
             ${maps[@]+"${maps[@]}"} || status=1
     else

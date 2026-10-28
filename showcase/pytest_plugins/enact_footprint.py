@@ -89,7 +89,7 @@ CO_NEWLOCALS = 0x0002  # inspect.CO_NEWLOCALS, without importing inspect into ev
 SHARED = "<shared>"
 # This recorder and the version of what it writes, in each map (`recorder`): a change to
 # what it records bumps it, re-recording only its footprints (`analysis.recorders`).
-RECORDER = "enact_footprint.py/5"
+RECORDER = "enact_footprint.py/6"
 TARGETS_NAME = "enact-footprint"
 SHARED_NAME = "enact-footprint-shared"
 
@@ -161,8 +161,8 @@ class Footprint:
     children it started (until their records are merged), and why it is opaque (empty: it
     isn't)."""
 
-    __slots__ = ("code", "reads", "present", "probes", "dirs", "opaque", "spawned", "loaded")
-    SETS = ("reads", "present", "probes", "dirs", "opaque", "spawned", "loaded")
+    __slots__ = ("code", "reads", "present", "probes", "dirs", "opaque", "spawned", "loaded", "recorders")
+    SETS = ("reads", "present", "probes", "dirs", "opaque", "spawned", "loaded", "recorders")
 
     def __init__(self):
         self.code: dict[str, set[str]] = {}
@@ -173,6 +173,7 @@ class Footprint:
         self.opaque: set[str] = set()
         self.spawned: set[str] = set()
         self.loaded: set[str] = set()  # modules its Python children loaded
+        self.recorders: set[str] = set()  # actual native-child provenance, never inferred
 
     def copy(self) -> "Footprint":
         fp = Footprint()
@@ -193,12 +194,15 @@ class Footprint:
         return record
 
     @classmethod
-    def load(cls, record: dict) -> "Footprint":
+    def load(cls, record: dict, *, native: bool = False) -> "Footprint":
         fp = cls()
         for file, functions in record.get("code", {}).items():
             fp.code[file] = set(functions)
         for name in cls.SETS:
             getattr(fp, name).update(record.get(name, ()))
+        if native and not any(name == "enact-trace" and version for name, _, version in
+                              (recorder.rpartition("/") for recorder in fp.recorders)):
+            fp.opaque.add("native child record lacks kernel recorder provenance")
         return fp
 
     def entry(self, through: int, at: dict[str, int], own=(), shared: "Footprint | None" = None) -> dict:
@@ -213,6 +217,7 @@ class Footprint:
         coded = set(self.code) | (self.present & set(shared.code) if shared else set())
         entry = {
             "files": sorted(found),
+            "recorders": sorted(self.recorders | {RECORDER}),
             "functions": {
                 file: sorted(self.code.get(file, ()))
                 for file in sorted(coded)
@@ -1473,7 +1478,7 @@ def merge_children() -> None:
                 count("children_unrecorded")
             continue
         key = _served(token, start, record.get("ended"))
-        child = Footprint.load(record["footprint"])
+        child = Footprint.load(record["footprint"], native=traced)
         if traced:
             child.opaque = {f"{what}: {why}" for why in child.opaque}
         footprint(key).update(child)
@@ -2295,7 +2300,7 @@ def _checkpoint(keys):
             continue
         fp = fps.get(_served(token, start, record.get("ended")))
         if fp is not None:
-            child_fp = Footprint.load(record["footprint"])
+            child_fp = Footprint.load(record["footprint"], native=traced)
             if traced:
                 child_fp.opaque = {f"{what}: {why}" for why in child_fp.opaque}
             fp.update(child_fp)

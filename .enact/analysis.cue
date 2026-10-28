@@ -142,16 +142,16 @@ pipeline: analysis: derived: [{
 // The footprint recorder's version (enact_footprint.py writes `"recorder"`): bumping it
 // re-records only the footprints it wrote. 5: Hypothesis's constant mining unrecorded (it
 // left every footprint of its process function-blind), lost monitoring makes targets opaque.
-pipeline: analysis: recorders: "enact_footprint.py": "5"
+pipeline: analysis: recorders: "enact_footprint.py": "6"
 
 // run_rust_tests.sh's recorder (rust_footprint.py writes `"recorder"`): what a test binary
 // read running plus what it was built from. 2: no build script's generated sources (the
 // target dir's paths are a host's build, not the test's input).
-pipeline: analysis: recorders: "rust_footprint.py": "2"
+pipeline: analysis: recorders: "rust_footprint.py": "3"
 
 // storybook_footprint.mjs: the stories' (the build's outputs their browser fetched);
 // live_footprint.py: the e2e and MCP integration specs' (the test runner's reads, the live
 // app's, restarted per spec, and the frontend build's outputs it served). 2: each spec holds
 // what the stack's Rust services were built from (live_posthog.sh, rust_footprint.py).
 pipeline: analysis: recorders: "storybook_footprint.mjs": "1"
-pipeline: analysis: recorders: "live_footprint.py":       "2"
+pipeline: analysis: recorders: "live_footprint.py":       "3"

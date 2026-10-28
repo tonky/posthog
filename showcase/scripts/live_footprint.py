@@ -40,7 +40,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "pytest_plugins"))
 import enact_footprint as core  # noqa: E402
 
-RECORDER = "live_footprint.py/2"
+RECORDER = "live_footprint.py/3"
 ROOT = os.getcwd()
 # What the jobs run that no process here records reading: their own scripts, what their shell
 # reads, and what uv reads before Python starts.
@@ -104,10 +104,11 @@ def python_records(directory: str) -> dict[str, core.Footprint]:
         stem = name[: -len(".started")]
         with open(os.path.join(records, name)) as f:
             token = f.read().partition("\n")[0]
+        native = stem.partition("-")[2].startswith("x")
         fp = out.setdefault(token, core.Footprint())
         try:
-            with open(os.path.join(records, stem + ".json")) as f:
-                fp.update(core.Footprint.load(json.load(f)["footprint"]))
+            with open(os.path.join(records, core._record_of(stem))) as f:
+                fp.update(core.Footprint.load(json.load(f)["footprint"], native=native))
         except (OSError, ValueError, KeyError):
             fp.opaque.add("a Python process of the app ended without its record")
     return out
@@ -341,7 +342,9 @@ def map_built(fp: core.Footprint, frontend: Frontend) -> None:
 
 def entry(fp: core.Footprint, shared: core.Footprint | None = None) -> dict:
     fp.collapse_probes({})
-    return fp.entry(0, {}, (), shared)
+    result = fp.entry(0, {}, (), shared)
+    result["recorders"] = sorted(set(result["recorders"]) | {RECORDER})
+    return result
 
 
 def write(directory: str, results: list[str]) -> None:
