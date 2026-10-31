@@ -1820,7 +1820,7 @@ jobs:
           ee
           products
           common
-          tools
+          tools/hogli-commands
           proto
           docker
           infra
@@ -1878,7 +1878,7 @@ jobs:
           ee
           products
           common
-          tools
+          tools/hogli-commands
           proto
           docker
           infra
@@ -2399,21 +2399,29 @@ jobs:
           rust/feature-flags/tests/fixtures
           services/hogql-language-service/internal/completion
           services/mcp/src/templates
-          tools
-          frontend/src/products.json
-          frontend/src/lib/agentScopes.generated.ts
-          frontend/src/lib/components/AgentObjectTags/objectKinds.generated.ts
-          rust
-          services
-          livestream
-          packages/agent
-          .depot
-          .semgrep
+          tools/hogli-commands
+          .dagster_home
+          .github/scripts
+          .github/workflows/ci-python.yml
+          .semgrep/rules/security
           AGENTS.md
           docker
-          docker-compose.dev.yml
           docker-compose.base.yml
+          docker-compose.dev.yml
           docker-compose.profiles.yml
+          frontend/src/lib/agentScopes.generated.ts
+          frontend/src/lib/components/AgentObjectTags/objectKinds.generated.ts
+          frontend/src/products.json
+          infra
+          packages/agent/packages/agent-contracts/src/model-catalog.generated.ts
+          packages/agent/packages/agent-contracts/src/objectTagKinds.generated.ts
+          rust/common/ingestion_warnings/warning_types.generated.json
+          services/mcp/scripts/build-cli-agent-scopes.ts
+          services/mcp/scripts/generate-ui-apps.ts
+          services/mcp/src/lib/oauth-scopes.generated.ts
+          services/mcp/src/lib/trace-property-allowlist.generated.ts
+          services/mcp/src/resources/ui-apps.generated.ts
+          services/stripe-mock/tests/conftest.py
           common/__init__.py
           common/hogql_parser
           common/migration_utils
@@ -2424,6 +2432,7 @@ jobs:
           common/hogvm/python
           packages/owners-yaml/owners_yaml
           tools/hogli-commands/hogli_commands
+          .semgrep
           showcase/scripts/build_plugin_transpiler.sh
           showcase/scripts/fetch_test_durations.sh
           showcase/scripts/repo_invariants.sh
@@ -2435,7 +2444,6 @@ jobs:
           products/signals/skills
           services/mcp/schema/tool-definitions-all.json
           common/plugin_transpiler/src
-          infra
           cli
           clippy.toml
           showcase/scripts/run_cargo_tests.sh
@@ -2464,6 +2472,7 @@ jobs:
           bin/hobby-installer
           showcase/scripts/run_go_tests.sh
           services/integration-service
+          livestream
           products/web_analytics
           .config
           common/mosaic
@@ -2479,9 +2488,9 @@ jobs:
           showcase/scripts/check_mcp_ui_apps.sh
           showcase/scripts/build_mcp_ui_apps.sh
           nodejs
+          rust
           proto
           frontend/public/services
-          .dagster_home
           tools/phrocs
           products/isolation_baseline.txt
           products/model_crossing_uses_baseline.txt
@@ -2627,6 +2636,7 @@ jobs:
           rust/personhog-router/CLAUDE.md
           services/mcp/CLAUDE.md
           tools/hogli/CLAUDE.md
+          .depot
           tools/workflow-plan
           .github/scripts/flatten-parallel-steps-for-actionlint.awk
           showcase/scripts/actionlint.sh
@@ -2699,21 +2709,29 @@ jobs:
           rust/feature-flags/tests/fixtures
           services/hogql-language-service/internal/completion
           services/mcp/src/templates
-          tools
-          frontend/src/products.json
-          frontend/src/lib/agentScopes.generated.ts
-          frontend/src/lib/components/AgentObjectTags/objectKinds.generated.ts
-          rust
-          services
-          livestream
-          packages/agent
-          .depot
-          .semgrep
+          tools/hogli-commands
+          .dagster_home
+          .github/scripts
+          .github/workflows/ci-python.yml
+          .semgrep/rules/security
           AGENTS.md
           docker
-          docker-compose.dev.yml
           docker-compose.base.yml
+          docker-compose.dev.yml
           docker-compose.profiles.yml
+          frontend/src/lib/agentScopes.generated.ts
+          frontend/src/lib/components/AgentObjectTags/objectKinds.generated.ts
+          frontend/src/products.json
+          infra
+          packages/agent/packages/agent-contracts/src/model-catalog.generated.ts
+          packages/agent/packages/agent-contracts/src/objectTagKinds.generated.ts
+          rust/common/ingestion_warnings/warning_types.generated.json
+          services/mcp/scripts/build-cli-agent-scopes.ts
+          services/mcp/scripts/generate-ui-apps.ts
+          services/mcp/src/lib/oauth-scopes.generated.ts
+          services/mcp/src/lib/trace-property-allowlist.generated.ts
+          services/mcp/src/resources/ui-apps.generated.ts
+          services/stripe-mock/tests/conftest.py
           common/__init__.py
           common/hogql_parser
           common/migration_utils
@@ -2724,6 +2742,7 @@ jobs:
           common/hogvm/python
           packages/owners-yaml/owners_yaml
           tools/hogli-commands/hogli_commands
+          .semgrep
           showcase/scripts/build_plugin_transpiler.sh
           showcase/scripts/fetch_test_durations.sh
           showcase/scripts/repo_invariants.sh
@@ -2735,7 +2754,6 @@ jobs:
           products/signals/skills
           services/mcp/schema/tool-definitions-all.json
           common/plugin_transpiler/src
-          infra
           cli
           clippy.toml
           showcase/scripts/run_cargo_tests.sh
@@ -2764,6 +2782,7 @@ jobs:
           bin/hobby-installer
           showcase/scripts/run_go_tests.sh
           services/integration-service
+          livestream
           products/web_analytics
           .config
           common/mosaic
@@ -2779,9 +2798,9 @@ jobs:
           showcase/scripts/check_mcp_ui_apps.sh
           showcase/scripts/build_mcp_ui_apps.sh
           nodejs
+          rust
           proto
           frontend/public/services
-          .dagster_home
           tools/phrocs
           products/isolation_baseline.txt
           products/model_crossing_uses_baseline.txt
@@ -2927,6 +2946,7 @@ jobs:
           rust/personhog-router/CLAUDE.md
           services/mcp/CLAUDE.md
           tools/hogli/CLAUDE.md
+          .depot
           tools/workflow-plan
           .github/scripts/flatten-parallel-steps-for-actionlint.awk
           showcase/scripts/actionlint.sh
@@ -4785,41 +4805,46 @@ jobs:
           depot.json
           dist-workspace.toml
           dagster_cloud.yaml
-          frontend/src/products.json
-          rust
-          services
-          packages/agent
-          .stamphog
-          .dagster_home
-          AGENTS.md
-          docker
-          products/ruff.toml
-          products
-          products/stamphog/packages
-          packages/agent/agent-shadow
           posthog
           ee
-          .depot
-          .depot/workflows
-          .semgrep
-          .semgrep/rules/devex
+          products
           common
+          tools/hogli-commands
+          .dagster_home
+          .depot/workflows
+          .github/scripts
+          .github/workflows/ci-python.yml
+          .semgrep/rules/devex
+          .semgrep/rules/security
+          .stamphog
+          AGENTS.md
+          docker
           docker-compose.base.yml
           docker-compose.dev.yml
           docker-compose.profiles.yml
-          docker/clickhouse
           frontend/src/lib/agentScopes.generated.ts
           frontend/src/lib/components/AgentObjectTags/objectKinds.generated.ts
+          frontend/src/products.json
           frontend/src/taxonomy/core-filter-definitions-by-group.json
           infra
-          livestream
           livestream/bot
+          packages/agent/packages/agent-contracts/src/model-catalog.generated.ts
+          packages/agent/packages/agent-contracts/src/objectTagKinds.generated.ts
+          rust/common/ingestion_warnings/warning_types.generated.json
           rust/feature-flags/src/properties
           rust/feature-flags/tests/fixtures
           services/hogql-language-service/internal/completion
           services/mcp/schema
+          services/mcp/scripts/build-cli-agent-scopes.ts
+          services/mcp/scripts/generate-ui-apps.ts
+          services/mcp/src/lib/oauth-scopes.generated.ts
+          services/mcp/src/lib/trace-property-allowlist.generated.ts
+          services/mcp/src/resources/ui-apps.generated.ts
           services/mcp/src/templates
-          tools
+          services/stripe-mock/tests/conftest.py
+          products/ruff.toml
+          products/stamphog/packages
+          packages/agent/agent-shadow
     - name: Checkout Repository (sparse)
       if: ${{ steps.runner_caches.outputs.host == '' || steps.host_checkout.outcome == 'failure' }}
       uses: actions/checkout@v7
@@ -4869,41 +4894,46 @@ jobs:
           depot.json
           dist-workspace.toml
           dagster_cloud.yaml
-          frontend/src/products.json
-          rust
-          services
-          packages/agent
-          .stamphog
-          .dagster_home
-          AGENTS.md
-          docker
-          products/ruff.toml
-          products
-          products/stamphog/packages
-          packages/agent/agent-shadow
           posthog
           ee
-          .depot
-          .depot/workflows
-          .semgrep
-          .semgrep/rules/devex
+          products
           common
+          tools/hogli-commands
+          .dagster_home
+          .depot/workflows
+          .github/scripts
+          .github/workflows/ci-python.yml
+          .semgrep/rules/devex
+          .semgrep/rules/security
+          .stamphog
+          AGENTS.md
+          docker
           docker-compose.base.yml
           docker-compose.dev.yml
           docker-compose.profiles.yml
-          docker/clickhouse
           frontend/src/lib/agentScopes.generated.ts
           frontend/src/lib/components/AgentObjectTags/objectKinds.generated.ts
+          frontend/src/products.json
           frontend/src/taxonomy/core-filter-definitions-by-group.json
           infra
-          livestream
           livestream/bot
+          packages/agent/packages/agent-contracts/src/model-catalog.generated.ts
+          packages/agent/packages/agent-contracts/src/objectTagKinds.generated.ts
+          rust/common/ingestion_warnings/warning_types.generated.json
           rust/feature-flags/src/properties
           rust/feature-flags/tests/fixtures
           services/hogql-language-service/internal/completion
           services/mcp/schema
+          services/mcp/scripts/build-cli-agent-scopes.ts
+          services/mcp/scripts/generate-ui-apps.ts
+          services/mcp/src/lib/oauth-scopes.generated.ts
+          services/mcp/src/lib/trace-property-allowlist.generated.ts
+          services/mcp/src/resources/ui-apps.generated.ts
           services/mcp/src/templates
-          tools
+          services/stripe-mock/tests/conftest.py
+          products/ruff.toml
+          products/stamphog/packages
+          packages/agent/agent-shadow
         sparse-checkout-cone-mode: "true"
         submodules: "false"
     - name: Install committed enact & enve builds

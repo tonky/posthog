@@ -69,10 +69,27 @@ _python_core_paths: [
 	"tools/hogli/src/**/*.py",
 ]
 
-_python_monolith_include: [
-	"frontend/src/products.json", "rust", "services", "packages/agent",
-	".stamphog", ".dagster_home", "AGENTS.md", "docker",
-]
+_python_monolith_include: list.Concat([_djangoTree, [
+	".dagster_home", ".depot/workflows", ".github/scripts", ".github/workflows/ci-python.yml",
+	".semgrep/rules/devex", ".semgrep/rules/security", ".stamphog", "AGENTS.md", "docker",
+	"docker-compose.base.yml", "docker-compose.dev.yml", "docker-compose.profiles.yml",
+	"frontend/src/lib/agentScopes.generated.ts",
+	"frontend/src/lib/components/AgentObjectTags/objectKinds.generated.ts",
+	"frontend/src/products.json",
+	"frontend/src/taxonomy/core-filter-definitions-by-group.json",
+	"infra", "livestream/bot",
+	"packages/agent/packages/agent-contracts/src/model-catalog.generated.ts",
+	"packages/agent/packages/agent-contracts/src/objectTagKinds.generated.ts",
+	"rust/common/ingestion_warnings/warning_types.generated.json",
+	"rust/feature-flags/src/properties", "rust/feature-flags/tests/fixtures",
+	"services/hogql-language-service/internal/completion",
+	"services/mcp/schema", "services/mcp/scripts/build-cli-agent-scopes.ts",
+	"services/mcp/scripts/generate-ui-apps.ts",
+	"services/mcp/src/lib/oauth-scopes.generated.ts",
+	"services/mcp/src/lib/trace-property-allowlist.generated.ts",
+	"services/mcp/src/resources/ui-apps.generated.ts", "services/mcp/src/templates",
+	"services/stripe-mock/tests/conftest.py",
+]])
 
 _storybookConfig: [
 	"common/storybook/*",
@@ -105,7 +122,7 @@ _rustCrateRules: [
 ]
 
 _productsFrontendBin: ["products/*/frontend/bin/**"]
-_djangoTree: ["posthog", "ee", "products", "common", "bin", "tools", "packages/owners-yaml", "packages/personhog-proto"]
+_djangoTree: ["posthog", "ee", "products", "common", "bin", "tools/hogli-commands", "tools/hogli", "packages/owners-yaml", "packages/personhog-proto"]
 _mcpPrebuild: "../../showcase/scripts/build_mcp_ui_apps.sh && pnpm exec tsx scripts/copy-instructions.ts"
 _frontendBuild: "showcase/scripts/build_once.sh frontend-build frontend/dist/.enact-build-key frontend products common packages ee/frontend services/mcp/src/ui-apps package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json tsconfig.json patches -- bash -c 'showcase/scripts/build_quill.sh && showcase/scripts/build_hogvm.sh && bin/turbo --filter=@posthog/frontend prepare && showcase/scripts/build_products.sh && pnpm --filter=@posthog/frontend build'"
 
@@ -134,7 +151,7 @@ pipeline: schema.#Pipeline & {
 	env: {}
 	workspace_scope: {
 		include: [
-			"enve.cue", "enve.lock", ".enact", "cue.mod", ".github", "showcase", "patches",
+			"enve.cue", "enve.lock", ".enact", "cue.mod", "showcase", "patches",
 			"tools/hogli", "packages/owners-yaml", "packages/personhog-proto",
 			"package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml", "turbo.json",
 			"tsconfig.json", "tsconfig.dev.json", "tsconfig.kea-typegen.json",
@@ -234,6 +251,7 @@ pipeline: schema.#Pipeline & {
 				"showcase/scripts/rust_footprint.py", "showcase/scripts/run_rust_release_build.sh",
 				"showcase/scripts/live_footprint.py", "showcase/scripts/node_reads.mjs",
 				"showcase/scripts/no_drift.sh", "posthog/user_scripts/**",
+				"packages/personhog-proto/pyproject.toml", "packages/owners-yaml/pyproject.toml", "tools/hogli/pyproject.toml",
 			]
 			test:             "uv run --no-sync python -m unittest {targets}"
 			recorder:         "trace"
@@ -251,15 +269,7 @@ pipeline: schema.#Pipeline & {
 			root:        "."
 			depends_on:  ["py-root", "pytest_plugins", "pytest_runner", "test_env", "build_once"]
 			tags:        ["backend", "django", "api"]
-			workspace_scope: include: [
-				"frontend/src/products.json",
-				"frontend/src/taxonomy/core-filter-definitions-by-group.json",
-				"frontend/src/lib/agentScopes.generated.ts",
-				"frontend/src/lib/components/AgentObjectTags/objectKinds.generated.ts",
-				"rust", "services", "livestream", "packages/agent", ".depot", ".semgrep",
-				".stamphog", "AGENTS.md", "docker", "docker-compose.dev.yml",
-				"docker-compose.base.yml", "docker-compose.profiles.yml",
-			]
+			workspace_scope: {include_dependencies: false, include: _python_monolith_include}
 			watch_paths: list.Concat([[
 				"posthog/**", "ee/**", "manage.py", "common/__init__.py",
 				"common/hogql_parser/**", "common/migration_utils/**",
@@ -342,7 +352,7 @@ pipeline: schema.#Pipeline & {
 			technology:      "python"
 			root:            "."
 			depends_on:      ["base", "py-root", "test_env"]
-			workspace_scope: include: _python_monolith_include
+			workspace_scope: {include_dependencies: false, include: _python_monolith_include}
 			tags:            ["backend", "django", "products"]
 			watch_paths: [
 				"products/*.py", "products/ruff.toml", "products/*/*.py", "products/*/backend/**",
@@ -413,7 +423,7 @@ pipeline: schema.#Pipeline & {
 			technology:      "python"
 			root:            "."
 			depends_on:      ["base", "products", "py-root", "test_env"]
-			workspace_scope: include: _python_monolith_include
+			workspace_scope: {include_dependencies: false, include: _python_monolith_include}
 			watch_paths:     ["posthog/dags/**", "products/*/dags/**", "dagster_cloud.yaml", ".dagster_home/**"]
 			shards:          3
 			resources:       {cpus: 0.75, memory_mb: 2800}
@@ -456,11 +466,12 @@ pipeline: schema.#Pipeline & {
 			lint: "uvx tach check --dependencies --exclude 'tests,test,**/test_*.py,**/*_test.py' && uvx tach check --interfaces"
 		}
 		"openapi_types": {
-			name:       "openapi_types"
-			title:      "Generated OpenAPI types"
-			technology: "python"
-			root:       "."
-			depends_on: ["base", "products"]
+			name:            "openapi_types"
+			title:           "Generated OpenAPI types"
+			technology:      "python"
+			root:            "."
+			depends_on:      ["base", "products"]
+			workspace_scope: {include_dependencies: false, include: _djangoTree}
 			watch_paths: [
 				"frontend/src/generated/**", "frontend/src/lib/agentScopes.generated.ts",
 				"products/*/frontend/generated/**", "services/mcp/src/generated/**",
@@ -794,9 +805,9 @@ pipeline: schema.#Pipeline & {
 			technology:      "protobuf"
 			root:            "proto"
 			depends_on:      ["root"]
-			workspace_scope: include: ["bin"]
+			workspace_scope: include: ["bin", "nodejs"]
 			watch_paths:     ["proto/**", "packages/personhog-proto/**", "bin/generate_personhog_proto.sh"]
-			lint:            "buf lint proto/ && buf breaking proto/ --against '../.git#ref=HEAD,subdir=proto' && UV_PROJECT_ENVIRONMENT=.enact/state/proto-venv uv sync --frozen --no-install-project --only-group proto-codegen && PATH=\"$(realpath ../.enact/state/proto-venv)/bin:$PATH\" bash ../bin/generate_personhog_proto.sh && git add -N ../packages/personhog-proto/ && git diff --exit-code -- ../packages/personhog-proto/"
+			lint:            "buf lint proto/ && buf breaking proto/ --against '../.git#ref=HEAD,subdir=proto' && UV_PROJECT_ENVIRONMENT=.enact/state/proto-venv uv sync --frozen --no-install-project --only-group proto-codegen && PATH=\"$(realpath ../.enact/state/proto-venv)/bin:$PATH\" bash ../bin/generate_personhog_proto.sh && git add -N ../packages/personhog-proto/ && git diff --exit-code -- ../packages/personhog-proto/ && pnpm --dir ../nodejs run generate:personhog-proto && pnpm --dir ../nodejs run generate:ingestion-worker-proto && git add -N ../nodejs/src/common/generated/personhog/ ../nodejs/src/common/generated/ingestion-worker/ && git diff --exit-code -- ../nodejs/src/common/generated/personhog/ ../nodejs/src/common/generated/ingestion-worker/"
 		}
 		"workflows": {
 			name:       "workflows"

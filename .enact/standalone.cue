@@ -32,7 +32,7 @@ pipeline: components: {
 		root:       "."
 		depends_on: ["py-root", "pytest_plugins"]
 		workspace_scope: include: [
-			"proto", "rust", "nodejs",
+			".github/workflows", "proto", "rust", "nodejs",
 			"docs/onboarding/package.json", "frontend/@posthog/lemon-ui/package.json",
 			"packages/llm-normalizer/package.json", "packages/quill/package.json",
 			"packages/quill/apps/storybook/package.json", "packages/quill/packages/blocks/package.json",
@@ -41,10 +41,12 @@ pipeline: components: {
 			"packages/quill/packages/tokens/package.json", "playwright/package.json",
 			"services/agent-proxy/package.json", "services/integration-service/package.json",
 			"services/oauth-proxy/package.json", "services/stripe-app/package.json",
-			"tools/dagster_test_selection.py", "tools/snob_backend_test_selection_shadow.py",
+			"tools/dagster_test_selection.py", "tools/openapi-codegen/package.json",
+			"tools/query-performance-ai/query_performance_ai/sandboxed_autoresearch_agent/pi_plugin/package.json",
+			"tools/snob_backend_test_selection_shadow.py",
 			"tools/test_selection_verdict.py", "tools/test_dagster_test_selection.py",
 			"tools/test_snob_backend_test_selection_shadow.py", "tools/test_test_selection_verdict.py",
-			"tools/testmon_high_fanout_files.txt", "frontend/bin/ci-report",
+			"tools/testmon_high_fanout_files.txt", "tools/workflow-plan/package.json", "frontend/bin/ci-report",
 			"frontend/src/queries/schema.json", ".semgrep/rules/security/idor-team-scoped-models.yaml",
 			"rust/feature-flags/src/properties",
 		]
@@ -144,7 +146,7 @@ pipeline: components: {
 	"deltalite": {
 		name: "deltalite", title: "Deltalite Python parity tests", technology: "python"
 		root: "rust/deltalite/python", depends_on: ["py-root", "build_once"]
-		workspace_scope: include: ["rust"]
+		workspace_scope: {include_dependencies: false, include: ["rust"]}
 		watch_paths:     ["rust/deltalite/**"]
 		jobs: test: {
 			name: "Test", recorder: "trace", record_resources: _recordPy
