@@ -60,7 +60,7 @@ for file in "$@"; do
     run+=("${selectors[$i]}")
 done
 
-# Recording: the binaries to trace, on Linux only (enact's tracer is seccomp's).
+# Recording: the binaries to trace, on Linux only (enact's tracer is eBPF).
 traced=() plain=()
 if [ -n "${ENACT_FOOTPRINT_DIR:-}" ] && [ "$(uname -s)" = Linux ]; then
     wanted_list="$(cat "${ENACT_FOOTPRINT_TARGETS:-/dev/null}")"

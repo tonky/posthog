@@ -48,18 +48,9 @@ use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use tonic::transport::{Channel, Server};
 
-pub static ETCD_ENDPOINT: std::sync::LazyLock<&str> = std::sync::LazyLock::new(|| {
-    std::env::var("ETCD_ENDPOINT").map_or("http://localhost:2379", |v| &*v.leak())
-});
-pub static KAFKA_BOOTSTRAP: std::sync::LazyLock<&str> = std::sync::LazyLock::new(|| {
-    std::env::var("KAFKA_HOSTS").map_or("localhost:9092", |v| &*v.leak())
-});
-pub static PERSONS_DB_URL: std::sync::LazyLock<&str> = std::sync::LazyLock::new(|| {
-    std::env::var("TEST_PERSONS_DATABASE_URL").map_or(
-        "postgres://posthog:posthog@localhost:5432/posthog_persons",
-        |v| &*v.leak(),
-    )
-});
+pub static ETCD_ENDPOINT: std::sync::LazyLock<&str> = std::sync::LazyLock::new(|| std::env::var("ETCD_ENDPOINT").map_or("http://localhost:2379", |v| &*v.leak()));
+pub static KAFKA_BOOTSTRAP: std::sync::LazyLock<&str> = std::sync::LazyLock::new(|| std::env::var("KAFKA_HOSTS").map_or("localhost:9092", |v| &*v.leak()));
+pub static PERSONS_DB_URL: std::sync::LazyLock<&str> = std::sync::LazyLock::new(|| std::env::var("TEST_PERSONS_DATABASE_URL").map_or("postgres://posthog:posthog@localhost:5432/posthog_persons", |v| &*v.leak()));
 pub const WAIT_TIMEOUT: Duration = Duration::from_secs(10);
 pub const POLL_INTERVAL: Duration = Duration::from_millis(100);
 pub const NUM_PARTITIONS: u32 = 4;

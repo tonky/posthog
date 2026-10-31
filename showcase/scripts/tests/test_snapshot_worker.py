@@ -204,5 +204,141 @@ class StableIdsTest(unittest.TestCase):
         self.assertEqual(upstream, self.collect("shard1"), "shard10's suffix isn't shard1's")
 
 
+class RuntimeHooksTest(unittest.TestCase):
+    """Unit tests for the runtime hooks in pytest_snapshot_worker that replace patches
+    0011, 0012, 0015, 0016, and 0018."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        if str(PLUGINS) not in sys.path:
+            sys.path.insert(0, str(PLUGINS))
+        import pytest_snapshot_worker
+
+        cls.plugin = pytest_snapshot_worker
+
+    def test_warehouse_table_url_rewrites_host_docker_internal(self) -> None:
+        from types import ModuleType, SimpleNamespace
+        from unittest.mock import patch
+
+        django_mod = ModuleType("django")
+        conf_mod = ModuleType("django.conf")
+        conf_mod.settings = SimpleNamespace(DATAWAREHOUSE_BUCKET_DOMAIN="127.0.0.1:29000")
+        django_mod.conf = conf_mod
+
+        class DataWarehouseTable:
+            pass
+
+        class OtherModel:
+            pass
+
+        instance = SimpleNamespace(url_pattern="http://host.docker.internal:19000/test/*.parquet")
+        other = SimpleNamespace(url_pattern="http://host.docker.internal:19000/test/*.parquet")
+        with patch.dict(sys.modules, {"django": django_mod, "django.conf": conf_mod}):
+            self.plugin._rewrite_warehouse_table_url(DataWarehouseTable, instance)
+            self.plugin._rewrite_warehouse_table_url(OtherModel, other)
+        self.assertEqual("http://127.0.0.1:29000/test/*.parquet", instance.url_pattern)
+        self.assertEqual("http://host.docker.internal:19000/test/*.parquet", other.url_pattern)
+
+    def test_postgres_config_fixture_suffixes_exports_test_database(self) -> None:
+        from types import ModuleType, SimpleNamespace
+        from unittest.mock import patch
+
+        django_mod = ModuleType("django")
+        conf_mod = ModuleType("django.conf")
+        conf_mod.settings = SimpleNamespace(XDIST_SUFFIX="_shard3")
+        django_mod.conf = conf_mod
+
+        res = {"database": "exports_test_database", "host": "127.0.0.1"}
+        fixturedef = SimpleNamespace(argname="postgres_config")
+        outcome = SimpleNamespace(get_result=lambda: res)
+        with patch.dict(sys.modules, {"django": django_mod, "django.conf": conf_mod}):
+            gen = self.plugin.pytest_fixture_setup(fixturedef, None)
+            next(gen)
+            with self.assertRaises(StopIteration):
+                gen.send(outcome)
+        self.assertEqual("exports_test_database_shard3", res["database"])
+
+    def test_collection_modifyitems_skips_platform_bound_tests(self) -> None:
+        from types import SimpleNamespace
+        from unittest.mock import patch
+
+        class FakeItem:
+            def __init__(self, name: str, nodeid: str) -> None:
+                self.name = name
+                self.nodeid = nodeid
+                self.markers: list[str] = []
+
+            def add_marker(self, marker: str) -> None:
+                self.markers.append(marker)
+
+        fake_pytest = SimpleNamespace(mark=SimpleNamespace(skip=lambda reason: f"skip:{reason}"))
+        items = [
+            FakeItem("test_exception_summary", "posthog/clickhouse/test/test_cluster.py::test_exception_summary"),
+            FakeItem(
+                "test_executable_overrides_binary",
+                "posthog/security/test/test_command_exec_audit.py::test_executable_overrides_binary",
+            ),
+            FakeItem("test_other", "posthog/clickhouse/test/test_cluster.py::test_other"),
+        ]
+        with (
+            patch.object(self.plugin, "pytest", fake_pytest),
+            patch.object(sys, "platform", "darwin"),
+            patch("shutil.which", return_value="/nix/store/xxx/bin/true"),
+            patch("os.path.realpath", return_value="/nix/store/xxx/bin/coreutils"),
+        ):
+            self.plugin.pytest_collection_modifyitems(None, items)
+        self.assertEqual(["skip:ClickHouse stack frames are Linux build's"], items[0].markers)
+        self.assertEqual(["skip:true is a multicall coreutils binary"], items[1].markers)
+        self.assertEqual([], items[2].markers)
+
+    def test_runtest_teardown_cleans_up_materialized_columns(self) -> None:
+        from types import ModuleType, SimpleNamespace
+        from unittest.mock import patch
+
+        calls: list[str] = []
+        base_mod = ModuleType("posthog.test.base")
+        base_mod.cleanup_materialized_columns = lambda: calls.append("cleaned")
+        posthog_mod = ModuleType("posthog")
+        test_mod = ModuleType("posthog.test")
+        with patch.dict(
+            sys.modules,
+            {"posthog": posthog_mod, "posthog.test": test_mod, "posthog.test.base": base_mod},
+        ):
+            self.plugin.pytest_runtest_teardown(SimpleNamespace(name="test_other"))
+            self.assertEqual([], calls)
+            self.plugin.pytest_runtest_teardown(
+                SimpleNamespace(name="test_compile_hogql_predicate_emits_unqualified_materialized_column")
+            )
+            self.assertEqual(["cleaned"], calls)
+
+    def test_temporal_list_workflows_strips_order_by_and_sorts_by_start_time(self) -> None:
+        import asyncio
+        from types import SimpleNamespace
+
+        recorded_queries: list[str | None] = []
+
+        class FakeClient:
+            def list_workflows(self, query: str | None = None):
+                recorded_queries.append(query)
+
+                async def _iter():
+                    yield SimpleNamespace(id="w2", start_time=20)
+                    yield SimpleNamespace(id="w1", start_time=10)
+                    yield SimpleNamespace(id="w3", start_time=30)
+
+                return _iter()
+
+        FakeClient.list_workflows = self.plugin._wrap_list_workflows(FakeClient.list_workflows)
+        client = FakeClient()
+
+        async def _run():
+            q = 'TemporalScheduledById="sched-1" order by StartTime asc'
+            return [w.id async for w in client.list_workflows(query=q)]
+
+        ids = asyncio.run(_run())
+        self.assertEqual(["w1", "w2", "w3"], ids)
+        self.assertEqual(['TemporalScheduledById="sched-1"'], recorded_queries)
+
+
 if __name__ == "__main__":
     unittest.main()

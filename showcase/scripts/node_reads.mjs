@@ -1,27 +1,34 @@
-// node_reads.mjs: what a Node.js process reads of the repository, for enact's footprints of the
-// jobs that drive a live PostHog (live_footprint.py). Preloaded with
-// NODE_OPTIONS="--import <this file>" while $ENACT_NODE_READS names a directory: every Node
-// process the test runner starts (its workers, pnpm, the runner itself) writes
-// `<dir>/<pid>-0.json` at exit, `{reads, present, probes, dirs}`, paths from
-// $ENACT_FOOTPRINT_ROOT:
+// node-reads.mjs: what a Node.js process reads of the repository, for enact's footprints of the
+// Playwright e2e specs (e2e-footprint.mjs; posthog's live jobs record the same way, its
+// showcase/scripts/node_reads.mjs). Preloaded with NODE_OPTIONS="--import <this file>" while
+// $ENACT_NODE_READS names a directory: every Node process a spec's run starts
+// (run-local-isolated.mjs, pnpm, the n8n server and its task runner, Playwright's runner and
+// workers) writes `<dir>/<pid>-0.json` at exit, `{reads, present, probes, dirs, served}`, paths
+// from $ENACT_FOOTPRINT_ROOT:
 //   reads    files opened, copied, or loaded as modules (the loader's own reads included)
 //   present  files a stat found (their size or times may count)
 //   probes   paths found missing, or asked about by `exists`/`access` (adding or deleting one
 //            may change what the process does, editing it doesn't)
 //   dirs     directories listed
+//   served   files read from the n8n server's static cache ($N8N_USER_FOLDER/.cache/n8n/public,
+//            relative to it): the server copies the editor's build there as it starts (a
+//            write) and reads it as the browser requests it, so these are the browser's fetches
 // Paths in node_modules and dot directories are no source of the repository's. A process ended
-// by a signal writes nothing: live_footprint.py turns a process that started (its `.started`
+// by a signal writes nothing: e2e-footprint.mjs turns a process that started (its `.started`
 // marker) and left no record into an incomplete footprint.
 //
-// Worker threads load this preload too (NODE_OPTIONS reaches them), but one ends with its
-// process without an exit event (esbuild's sync-transform thread, which tsx starts on a cold
-// cache, never returns): a worker appends each entry to `<dir>/<pid>-<threadId>.jsonl`
+// A child started with an environment of its own (n8n's task runner gets an allowlist, without
+// NODE_OPTIONS) gets this preload's variables back, so it records too.
+//
+// Worker threads load this preload too (NODE_OPTIONS reaches them), but one may end with its
+// process without an exit event: a worker appends each entry to `<dir>/<pid>-<threadId>.jsonl`
 // (`[set, path]` lines) before the call that made it, so the log holds all it read whenever it
 // ends. Its parent writes the worker's `.started` marker as it starts it (so does the worker),
 // so a worker that never ran the preload leaves a marker without a log: incomplete.
 //
 // What it can't see: reads by native code (addons, a child that isn't Node.js) and by a
 // process started without NODE_OPTIONS (no marker either).
+import childProcess from 'node:child_process'
 import fs from 'node:fs'
 import { registerHooks, syncBuiltinESMExports } from 'node:module'
 import path from 'node:path'
@@ -30,29 +37,48 @@ import workerThreads, { isMainThread, threadId } from 'node:worker_threads'
 
 const dir = process.env.ENACT_NODE_READS
 const repo = process.env.ENACT_FOOTPRINT_ROOT
+const self = fileURLToPath(import.meta.url)
 
 if (dir && repo) {
     const root = path.resolve(repo) + path.sep
     const real = { ...fs, promises: { ...fs.promises } }
-    const sets = { reads: new Set(), present: new Set(), probes: new Set(), dirs: new Set() }
+    const sets = { reads: new Set(), present: new Set(), probes: new Set(), dirs: new Set(), served: new Set() }
     let busy = false
+    // The n8n server's static cache (InstanceSettings.staticCacheDir), as given and resolved.
+    const servedRoots = []
+    const userFolder = process.env.N8N_USER_FOLDER
+    if (userFolder) {
+        servedRoots.push(path.join(path.resolve(userFolder), '.cache/n8n/public') + path.sep)
+        try {
+            servedRoots.push(path.join(fs.realpathSync(userFolder), '.cache/n8n/public') + path.sep)
+        } catch {
+            // not made yet: the path as given
+        }
+    }
 
-    const relative = (target) => {
-        let file
+    const absoluteOf = (target) => {
         try {
             if (target instanceof URL) {
-                file = fileURLToPath(target)
+                return path.resolve(fileURLToPath(target))
             } else if (typeof target === 'string') {
-                file = target.startsWith('file:') ? fileURLToPath(target) : target
+                return path.resolve(target.startsWith('file:') ? fileURLToPath(target) : target)
             } else if (Buffer.isBuffer(target)) {
-                file = target.toString()
-            } else {
-                return null // a descriptor: its open was recorded
+                return path.resolve(target.toString())
             }
         } catch {
+            // not a path
+        }
+        return null // a descriptor: its open was recorded
+    }
+    const relative = (target) => {
+        const absolute = absoluteOf(target)
+        if (absolute === null) {
             return null
         }
-        const absolute = path.resolve(file)
+        const served = servedRoots.find((prefix) => absolute.startsWith(prefix))
+        if (served) {
+            return { served: absolute.slice(served.length).split(path.sep).join('/') }
+        }
         if (!absolute.startsWith(root)) {
             return null
         }
@@ -76,14 +102,18 @@ if (dir && repo) {
     }
     const note = (set, target) => {
         const rel = relative(target)
-        if (rel) {
+        if (rel && typeof rel === 'object') {
+            if (set === 'reads') {
+                add('served', rel.served)
+            }
+        } else if (rel) {
             add(set, rel)
         }
     }
     // A stat-like call: a file found is present, a missing path a probe; directories say nothing.
     const found = (target, isFile) => {
         const rel = relative(target)
-        if (rel) {
+        if (rel && typeof rel === 'string') {
             if (isFile === undefined) {
                 add('probes', rel)
             } else if (isFile) {
@@ -127,7 +157,7 @@ if (dir && repo) {
     }
     const reading = (target, rest) => {
         // An open for writing reads nothing.
-        const flags = typeof rest[0] === 'object' && rest[0] ? rest[0].flag : rest[0]
+        const flags = typeof rest[0] === 'object' && rest[0] ? rest[0].flag ?? rest[0].flags : rest[0]
         if (typeof flags === 'string' && /[wa]/.test(flags) && !flags.includes('+')) {
             return
         }
@@ -142,7 +172,12 @@ if (dir && repo) {
     const listing = (target) => note('dirs', target)
 
     // A presence predicate: adding or deleting the path matters, editing it doesn't.
-    const probing = (target) => note('probes', target)
+    const probing = (target) => {
+        const rel = relative(target)
+        if (rel && typeof rel === 'string') {
+            add('probes', rel)
+        }
+    }
     const copying = (source) => {
         const isFile = kind(source)
         if (isFile === undefined) {
@@ -194,6 +229,41 @@ if (dir && repo) {
     for (const name of ['readdir', 'opendir']) {
         wrap(fs.promises, name, listing)
     }
+
+    // Children given an environment of their own: this preload's variables back in it.
+    const recording = {
+        ENACT_NODE_READS: dir,
+        ENACT_FOOTPRINT_ROOT: repo,
+    }
+    const withPreload = (options) => {
+        if (!options || typeof options !== 'object' || !options.env || options.env.ENACT_NODE_READS) {
+            return options
+        }
+        const env = { ...options.env, ...recording }
+        const preload = `--import ${self}`
+        if (!String(env.NODE_OPTIONS ?? '').includes(preload)) {
+            env.NODE_OPTIONS = env.NODE_OPTIONS ? `${preload} ${env.NODE_OPTIONS}` : preload
+        }
+        return { ...options, env }
+    }
+    // (file, args?, options?) callers: the options are the last object argument.
+    const respawn = (name) => {
+        const original = childProcess[name]
+        if (typeof original !== 'function') {
+            return
+        }
+        childProcess[name] = function (...args) {
+            const at = args.findLastIndex((arg) => arg && typeof arg === 'object' && !Array.isArray(arg))
+            if (at > 0) {
+                args[at] = withPreload(args[at])
+            }
+            return original.apply(this, args)
+        }
+    }
+    for (const name of ['spawn', 'spawnSync', 'execFile', 'execFileSync', 'fork', 'exec', 'execSync']) {
+        respawn(name)
+    }
+
     // A process' or worker's `.started` marker: a record (or log) is expected beside it.
     const marker = (id, argv) => {
         try {
@@ -267,5 +337,42 @@ if (dir && repo) {
         } catch {
             // its parent's marker stays without a log: incomplete
         }
+    }
+}
+
+// Playwright reporter (`--reporter=list,<this file>`): writes one JSON line per spec file to
+// $ENACT_SKIPS_FILE, saying whether the run skipped any test of it (`skipped_on`).
+export default class EnactAttribution {
+    printsToStdio() {
+        return false
+    }
+
+    onBegin(_config, suite) {
+        this.suite = suite
+    }
+
+    onEnd() {
+        const out = process.env.ENACT_SKIPS_FILE
+        if (!out || !this.suite) {
+            return
+        }
+        const files = new Map()
+        for (const test of this.suite.allTests()) {
+            const file = files.get(test.location.file) ?? { tests: 0, skipped: 0, failed: 0 }
+            const outcome = test.outcome()
+            file.tests += 1
+            if (outcome === 'skipped') {
+                file.skipped += 1
+            }
+            if (outcome === 'unexpected') {
+                file.failed += 1
+            }
+            files.set(test.location.file, file)
+        }
+        const lines = [...files].map(([target, { tests, skipped, failed }]) => {
+            const outcome = failed ? 'failed' : skipped === tests ? 'skipped' : 'passed'
+            return `${JSON.stringify({ target, outcome, skipped: skipped > 0, reads: [] })}\n`
+        })
+        fs.appendFileSync(out, lines.join(''))
     }
 }

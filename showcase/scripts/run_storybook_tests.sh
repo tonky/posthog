@@ -16,7 +16,7 @@
 # (`--build`) builds it once and records the state's key in dist, which CI restores in each
 # shard; a shard finding the key current builds nothing, else it builds under a lock.
 # Each shard writes its screenshots and report to a directory of its own under
-# .enact/state/storybook (patches/0005), never the committed baselines.
+# .enact/state/storybook (.enact/vitest/node_env_preload.cjs), never the committed baselines.
 set -euo pipefail
 # enact gives the story files relative to the task's directory; jest matches them as
 # patterns against absolute paths, so they go as upstream's selective mode passes them,
@@ -73,7 +73,8 @@ fi
 args=(--shard "$shard/$total")
 [ "${#stories[@]}" -eq 0 ] || args=(-- "${stories[@]}")
 status=0
-OPT_OUT_CAPTURE=1 NODE_OPTIONS=--max-old-space-size=16384 STORYBOOK_SKIP_TAGS=test-skip,test-skip-chromium \
+OPT_OUT_CAPTURE=1 NODE_OPTIONS="${NODE_OPTIONS:+$NODE_OPTIONS }--max-old-space-size=16384 --require $root/.enact/vitest/node_env_preload.cjs" \
+    STORYBOOK_SKIP_TAGS=test-skip,test-skip-chromium \
     STORYBOOK_SNAPSHOTS_DIR="$out/snapshots" JEST_JUNIT_OUTPUT_DIR="$out" ENACT_STORYBOOK_LOADS="$loads" \
     pnpm --filter=@posthog/storybook test:visual:ci:update --browsers chromium \
     --url "http://127.0.0.1:$port" "${args[@]}" || status=$?

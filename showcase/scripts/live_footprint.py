@@ -41,6 +41,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(HERE), "pytest_plugins"))
 import enact_footprint as core  # noqa: E402
 
 RECORDER = "live_footprint.py/3"
+PLATFORM = "linux" if sys.platform.startswith("linux") else sys.platform
 ROOT = os.getcwd()
 # What the jobs run that no process here records reading: their own scripts, what their shell
 # reads, and what uv reads before Python starts.
@@ -88,10 +89,27 @@ SKIPPED = {"node_modules", "dist", ".turbo", ".cache", "__snapshots__", "__pycac
 
 
 def prepare(directory: str) -> None:
-    for sub in ("boot", "records", "node"):
+    for sub in ("boot", "records", "node", "skips"):
         os.makedirs(os.path.join(directory, sub), exist_ok=True)
     with open(os.path.join(directory, "boot", "sitecustomize.py"), "w") as f:
         f.write(core.BOOT)
+
+
+def skipped_tests(directory: str, n: int) -> bool | None:
+    """Whether the n-th spec's run skipped tests (its reporter's lines in skips/<n>.jsonl);
+    None: it left no record."""
+    try:
+        with open(os.path.join(directory, "skips", f"{n}.jsonl")) as f:
+            text = f.read()
+    except FileNotFoundError:
+        return None
+    for raw in text.splitlines():
+        if not raw.strip():
+            continue
+        line = json.loads(raw)
+        if line.get("skipped") is True or line.get("outcome") == "skipped":
+            return True
+    return False
 
 
 def python_records(directory: str) -> dict[str, core.Footprint]:
@@ -389,9 +407,14 @@ def write(directory: str, results: list[str]) -> None:
         if not fp.code and not fp.reads:
             fp.opaque.add("no app process recorded for it")
         fp.update(node_records(os.path.join(directory, "node", str(index))))
+        skipped = skipped_tests(directory, index)
+        if skipped is None and job == "run_e2e_tests.sh" and os.path.isdir(os.path.join(directory, "skips")):
+            fp.opaque.add("its run left no record of the tests it skipped")
         map_built(fp, frontend)
         fp.reads.add(spec)
         target = entry(fp, shared)
+        if skipped:
+            target["skipped_on"] = [PLATFORM]
         why = sorted(fp.opaque | shared.opaque)
         if why:
             opaque[spec] = why

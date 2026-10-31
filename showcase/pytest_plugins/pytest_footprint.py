@@ -54,7 +54,14 @@ OUT_DIR = os.environ.get("ENACT_FOOTPRINT_DIR")
 RECORDING = bool(OUT_DIR) and not os.environ.get(core.ENV_CHILDREN) and not core.child
 
 # The repository: run_sharded_pytest.sh runs a product from its own directory.
-root = os.path.realpath(os.environ.get("POSTHOG_REPO_ROOT") or os.getcwd()) + os.sep
+root = (
+    os.path.realpath(
+        os.environ.get("ENACT_REPO_ROOT")
+        or os.environ.get("POSTHOG_REPO_ROOT")
+        or os.getcwd()
+    )
+    + os.sep
+)
 
 
 def wanted_files() -> set[str] | None:

@@ -28,9 +28,7 @@ use serde_json::Value;
 use tempfile::TempDir;
 use uuid::Uuid;
 
-static SEAWEEDFS_ENDPOINT: std::sync::LazyLock<&str> = std::sync::LazyLock::new(|| {
-    std::env::var("OBJECT_STORAGE_ENDPOINT").map_or("http://localhost:8333", |v| &*v.leak())
-});
+static SEAWEEDFS_ENDPOINT: std::sync::LazyLock<&str> = std::sync::LazyLock::new(|| std::env::var("OBJECT_STORAGE_ENDPOINT").map_or("http://localhost:8333", |v| &*v.leak()));
 const TEST_BUCKET: &str = "posthog";
 const TEAM_ID: i32 = 1;
 // Small enough to split the ~100-byte test lines across chunk boundaries.
@@ -79,10 +77,7 @@ async fn seaweedfs_reachable(store: &Arc<dyn ObjectStore>) -> bool {
         Ok(Ok(_)) | Ok(Err(object_store::Error::NotFound { .. }))
     );
     if !reachable && std::env::var("CI").is_ok() {
-        panic!(
-            "SeaweedFS unreachable at {} in CI — the dev stack must be up",
-            *SEAWEEDFS_ENDPOINT
-        );
+        panic!("SeaweedFS unreachable at {} in CI — the dev stack must be up", *SEAWEEDFS_ENDPOINT);
     }
     reachable
 }
@@ -104,10 +99,7 @@ impl TrialRun {
     async fn create(record_limit: u64) -> Option<Self> {
         let store = seaweedfs_store();
         if !seaweedfs_reachable(&store).await {
-            eprintln!(
-                "SeaweedFS unreachable at {}, skipping test",
-                *SEAWEEDFS_ENDPOINT
-            );
+            eprintln!("SeaweedFS unreachable at {}, skipping test", *SEAWEEDFS_ENDPOINT);
             return None;
         }
 

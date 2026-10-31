@@ -20,9 +20,7 @@ use tempfile::TempDir;
 use tokio::sync::Mutex as TokioMutex;
 use uuid::Uuid;
 
-static KAFKA_BROKERS: std::sync::LazyLock<&str> = std::sync::LazyLock::new(|| {
-    std::env::var("KAFKA_HOSTS").map_or("localhost:9092", |v| &*v.leak())
-});
+static KAFKA_BROKERS: std::sync::LazyLock<&str> = std::sync::LazyLock::new(|| std::env::var("KAFKA_HOSTS").map_or("localhost:9092", |v| &*v.leak()));
 
 // Global mutex to serialize Kafka integration tests (using async-aware Tokio Mutex)
 static KAFKA_TEST_MUTEX: OnceLock<TokioMutex<()>> = OnceLock::new();

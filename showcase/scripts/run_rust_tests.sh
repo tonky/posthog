@@ -166,7 +166,7 @@ own_build() {
     if [ "$1" = cohort-seeder ]; then own+=(--features "pg-test-support,ch-test-support"); fi
 }
 
-# Recording: the binaries to trace, on Linux only (enact's tracer is seccomp's): those
+# Recording: the binaries to trace, on Linux only (enact's tracer is eBPF): those
 # $ENACT_FOOTPRINT_TARGETS lists, else every one that runs.
 record=0 wanted_list=""
 if [ -n "${ENACT_FOOTPRINT_DIR:-}" ] && [ "$(uname -s)" = Linux ]; then

@@ -45,9 +45,7 @@ use ingestion_worker_proto::ingestion::worker::v1::{
     StreamReady, SubBatchAck, SubBatchStatus,
 };
 
-static KAFKA_BROKERS: std::sync::LazyLock<&str> = std::sync::LazyLock::new(|| {
-    std::env::var("KAFKA_HOSTS").map_or("localhost:9092", |v| &*v.leak())
-});
+static KAFKA_BROKERS: std::sync::LazyLock<&str> = std::sync::LazyLock::new(|| std::env::var("KAFKA_HOSTS").map_or("localhost:9092", |v| &*v.leak()));
 
 // ── Kafka helpers ──────────────────────────────────────────────────────────
 

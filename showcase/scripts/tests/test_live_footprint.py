@@ -112,10 +112,10 @@ class LiveFootprintTest(unittest.TestCase):
 
     def test_native_shared_provenance_survives_alongside_both_adapter_stamps(self):
         raw = self.native_shared_map(["enact-trace/2", "external/9"])
-        expected = {"enact_footprint.py/6", "live_footprint.py/3", "enact-trace/2", "external/9"}
+        expected = {core.RECORDER, "live_footprint.py/3", "enact-trace/2", "external/9"}
         self.assertEqual(set(raw["shared"]["recorders"]), expected)
         # Shared metadata is laid over the spec by the normal map reader.
-        self.assertEqual(set(raw["targets"]["spec.ts"]["recorders"]), {"enact_footprint.py/6", "live_footprint.py/3"})
+        self.assertEqual(set(raw["targets"]["spec.ts"]["recorders"]), {core.RECORDER, "live_footprint.py/3"})
         self.assertNotEqual(raw["targets"]["spec.ts"].get("outcome"), "partial")
 
     def test_a_shared_legacy_native_record_cannot_leave_a_complete_spec(self):
@@ -150,6 +150,50 @@ class LiveFootprintTest(unittest.TestCase):
         shared = self.shared("", served=False)
         for file in ["showcase/scripts/run_e2e_tests.sh", "showcase/scripts/run_mcp_integration.sh"]:
             self.assertIn(file, shared)
+
+    def test_playwright_skip_records_mark_skipped_on_and_missing_records_are_partial(self):
+        records = self.recording / "records"
+        for idx, spec in enumerate(["pass.spec.ts", "skip.spec.ts", "unreported.spec.ts"], 1):
+            (records / f"{idx}.started").write_text(f"{spec}\n")
+            (records / f"{idx}.json").write_text(json.dumps({"footprint": {"reads": ["app.py"]}}))
+            node = self.recording / f"node/{idx}"
+            node.mkdir(parents=True, exist_ok=True)
+            (node / "1.started").write_text("node\n")
+            (node / "1.json").write_text(json.dumps({"reads": [spec]}))
+        skips = self.recording / "skips"
+        skips.mkdir(parents=True, exist_ok=True)
+        (skips / "1.jsonl").write_text(
+            json.dumps({"target": "pass.spec.ts", "outcome": "passed", "skipped": False, "reads": []}) + "\n"
+        )
+        (skips / "2.jsonl").write_text(
+            json.dumps({"target": "skip.spec.ts", "outcome": "passed", "skipped": True, "reads": []}) + "\n"
+        )
+        out = self.repo / "maps"
+        env = helper_env() | {"ENACT_FOOTPRINT_DIR": str(out), "LIVE_JOB": "run_e2e_tests.sh"}
+        subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPTS / "live_footprint.py"),
+                "write",
+                str(self.recording),
+                "pass.spec.ts=0",
+                "skip.spec.ts=0",
+                "unreported.spec.ts=0",
+            ],
+            cwd=self.repo,
+            env=env,
+            check=True,
+            capture_output=True,
+        )
+        (written,) = [p for p in out.iterdir() if p.suffix == ".json"]
+        targets = json.loads(written.read_text())["targets"]
+        platform = "linux" if sys.platform.startswith("linux") else sys.platform
+        self.assertNotIn("skipped_on", targets["pass.spec.ts"])
+        self.assertNotIn("outcome", targets["pass.spec.ts"])
+        self.assertEqual(targets["skip.spec.ts"].get("skipped_on"), [platform])
+        self.assertNotIn("outcome", targets["skip.spec.ts"])
+        self.assertNotIn("skipped_on", targets["unreported.spec.ts"])
+        self.assertEqual(targets["unreported.spec.ts"].get("outcome"), "partial")
 
 
 # The spec's runner: reads a.txt, starts a worker that reads b.txt and then never returns (as

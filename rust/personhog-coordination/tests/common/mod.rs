@@ -22,9 +22,7 @@ use personhog_coordination::routing_table::{RoutingTable, RoutingTableConfig, St
 use personhog_coordination::store::PersonhogStore;
 use personhog_coordination::strategy::AssignmentStrategy;
 
-pub static ETCD_ENDPOINT: std::sync::LazyLock<&str> = std::sync::LazyLock::new(|| {
-    std::env::var("ETCD_ENDPOINT").map_or("http://localhost:2379", |v| &*v.leak())
-});
+pub static ETCD_ENDPOINT: std::sync::LazyLock<&str> = std::sync::LazyLock::new(|| std::env::var("ETCD_ENDPOINT").map_or("http://localhost:2379", |v| &*v.leak()));
 pub const WAIT_TIMEOUT: Duration = Duration::from_secs(10);
 pub const POLL_INTERVAL: Duration = Duration::from_millis(100);
 

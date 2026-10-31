@@ -285,6 +285,7 @@ live_each_spec() { # <start> <run> <spec...>
         "$each_start"
         each_status=0
         ENACT_NODE_READS="$live_recording/node/$each_n" ENACT_FOOTPRINT_ROOT="$PWD" \
+            ENACT_SKIPS_FILE="$live_recording/skips/$each_n.jsonl" \
             NODE_OPTIONS="--import $PWD/showcase/scripts/node_reads.mjs${NODE_OPTIONS:+ $NODE_OPTIONS}" \
             "$each_run" "$each_spec" || each_status=$?
         live_stop_from "$each_mark"

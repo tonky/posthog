@@ -52,7 +52,7 @@ the programs it starts:
   scratch work tree under /tmp), or nothing of the repository when no argument names a
   path in it: host facts (`lscpu`) and the programs the adapter names (`quiet`). git's
   queries of the repository's tree are modelled by their arguments (`_git_tree_query`):
-  `ls-files` probes every path it lists and every directory above them, `--others` reads
+  `ls-files` probes listed paths and models tree enumeration; `--others` reads
   the `.gitignore` files too, and `diff` against the work tree reads every tracked file.
   Any other git over the repository makes its target opaque (incomplete: it runs for any
   change): the tracer misses the `lstat`s git decides by. Any other program (`node`, a
@@ -79,6 +79,8 @@ stays every target's, as do one read whole and one whose functions a shared exte
 
 import _signal
 import _thread
+import contextlib
+import contextvars
 import os
 import sys
 import time
@@ -89,7 +91,7 @@ CO_NEWLOCALS = 0x0002  # inspect.CO_NEWLOCALS, without importing inspect into ev
 SHARED = "<shared>"
 # This recorder and the version of what it writes, in each map (`recorder`): a change to
 # what it records bumps it, re-recording only its footprints (`analysis.recorders`).
-RECORDER = "enact_footprint.py/6"
+RECORDER = "enact_footprint.py/7"
 TARGETS_NAME = "enact-footprint"
 SHARED_NAME = "enact-footprint-shared"
 
@@ -101,6 +103,7 @@ ENV_CORE = "ENACT_FOOTPRINT_CORE"
 ENV_QUIET = "ENACT_FOOTPRINT_QUIET"
 ENV_READERS = "ENACT_FOOTPRINT_READERS"
 ENV_EXE = "ENACT_EXE"
+ENV_OUTER_KERNEL_TRACE = "ENACT_OUTER_KERNEL_TRACE"
 
 # Programs that read no files.
 PURE = {"true", "false", "echo", "printf", "uname", "sleep", "hostname", "whoami", "id",
@@ -301,6 +304,7 @@ footprints: dict[str, Footprint] = {SHARED: Footprint()}
 shared = footprints[SHARED]
 current: Footprint | None = None  # the target recording (the targets tool's sink)
 current_key: str | None = None
+_ctx_target: contextvars.ContextVar[str | None] = contextvars.ContextVar("enact_footprint_target", default=None)
 depth = 0  # nesting of shared extents, every thread's
 children_dir = ""
 child_stem = ""
@@ -320,6 +324,7 @@ stats: dict[str, int] = {}
 local = _thread._local()
 _rel_cache: dict[str, str | None] = {}
 tracer = ""  # `enact trace exec`'s enact ($ENACT_EXE) on Linux: what runs a program unmodelled
+outer_kernel_trace = False  # outer kernel tracer supervises subprocess file/dir/probe opens
 _popen_pending = False  # `subprocess` not imported yet: Popen is patched once it is
 # The repository modules the process loaded, in order, and where each target last ended in
 # that order (`loaded_marks`): a target's modules are those loaded before its mark.
@@ -348,9 +353,41 @@ def count(name: str, n: int = 1) -> None:
     stats[name] = stats.get(name, 0) + n
 
 
+def active_target_key() -> str | None:
+    """The target active in the current context (`request_target`), process (`switch`), or env."""
+    ctx_key = _ctx_target.get()
+    if ctx_key is not None and ctx_key != SHARED:
+        return ctx_key
+    if current_key is not None and current_key != SHARED:
+        return current_key
+    env_target = os.environ.get("ENACT_TRACE_TARGET") or os.environ.get(ENV_TARGET)
+    return env_target if env_target and env_target != SHARED else None
+
+
+@contextlib.contextmanager
+def request_target(key: str | None):
+    """Scopes all function calls, file opens, stats, and outbound HTTP calls in the current
+    thread or async task (`contextvars.ContextVar`) to `key`'s footprint."""
+    if not key:
+        yield
+        return
+    footprints.setdefault(key, Footprint())
+    token = _ctx_target.set(key)
+    try:
+        yield
+    finally:
+        _ctx_target.reset(token)
+        _mark_loaded(key)
+
+
 def sink() -> Footprint | None:
     """Where a file the process uses now is recorded: shared inside an extent."""
-    return shared if depth > 0 else current
+    if depth > 0:
+        return shared
+    ctx_key = _ctx_target.get()
+    if ctx_key is not None:
+        return footprints.setdefault(ctx_key, Footprint())
+    return current
 
 
 def relative(path) -> str | None:
@@ -408,6 +445,10 @@ def _ran(fp: Footprint, code) -> None:
 
 
 def on_start(code, _offset):
+    ctx_key = _ctx_target.get()
+    if ctx_key is not None:
+        _ran(footprints.setdefault(ctx_key, Footprint()), code)
+        return None
     fp = current
     if fp is not None:
         _ran(fp, code)
@@ -908,15 +949,18 @@ def spawn(program, argv: list, env, cwd=None, traceable=False):
     count(f"spawn:{name}")
     if _kind(_absolute(_in(cwd, path)) or path) == "file":
         note(_in(cwd, path), fp=fp)  # a program of the repository's own: what it runs is read
+    if _is_python(path):
+        _propagate(fp, env, key)
+        return None
+    if outer_kernel_trace:
+        count("kernel_delegated_spawns")
+        return None
     words = [a for a in argv[1:] if isinstance(a, str)]
     why = f"{name}: {' '.join(map(str, argv))[:160]}"
     if name in SHELLS and len(words) >= 2 and words[0] == "-c":
         if _shell_is_pure(words[1]):
             return None
         why = f"shell: {words[1][:160]}"
-    elif _is_python(path):
-        _propagate(fp, env, key)
-        return None
     elif name in PURE:
         return None
     elif name in READERS:
@@ -1070,8 +1114,8 @@ def _git_tree_query(git: str, words: list[str], cwd, env, fp: Footprint) -> bool
 
 def _git_ls_files(git: str, args: list[str], work: str, fp: Footprint) -> bool:
     """A names-only `ls-files`: tracked files (`-c`, the default) and untracked ones git
-    doesn't ignore (`-o --exclude-standard`). It probes each path it lists (one deleted
-    changes the listing) and every directory above them (a file added there does)."""
+    doesn't ignore (`-o --exclude-standard`). It probes each listed path and records
+    the query's tree enumeration separately from directory presence."""
     specs, flags = _git_operands(args)
     if specs is None or not flags <= GIT_LS_FILES:
         return False
@@ -1136,9 +1180,9 @@ def _git_operands(args: list[str]):
 def _note_tree(work: str, found: list[str], listed: list[str], specs: list[str], fp: Footprint,
                read: bool, ignores: bool) -> None:
     """A git query in `work` over `found` (paths relative to it): reads (`read`) or probes
-    of the `listed` ones, probes of each directory above them and of each pathspec's
-    directory (a file added below one changes the answer; the root's own files are no
-    directory's), and with `ignores` each such directory's `.gitignore`."""
+    of the `listed` ones, and enumeration of the queried tree's directories. Presence
+    alone cannot represent a new name in an existing directory. With `ignores`, each
+    such directory's `.gitignore` is an input too."""
     base = _repo_dir(work)
     if base is None:
         return
@@ -1149,8 +1193,7 @@ def _note_tree(work: str, found: list[str], listed: list[str], specs: list[str],
         rel = os.path.normpath(prefix + path)
         if rel.startswith("..") or rel == ".git" or rel.startswith(".git/"):
             continue
-        if path in output:
-            (fp.reads if read else fp.probes).add(rel)
+        (fp.reads if read and path in output else fp.probes).add(rel)
         while "/" in rel:
             rel = rel.rpartition("/")[0]
             if rel in dirs:
@@ -1163,9 +1206,9 @@ def _note_tree(work: str, found: list[str], listed: list[str], specs: list[str],
                 break
             literal.append(part)
         scope = _repo_dir(os.path.join(work, *literal)) if literal else base
-        if scope:
-            fp.probes.add(scope)
-    fp.probes.update(dirs)
+        if scope is not None:
+            fp.dirs.add(scope)
+    fp.dirs.update(dirs)
     if ignores:
         for directory in dirs | {""}:
             ignore = f"{directory}/.gitignore" if directory else ".gitignore"
@@ -1190,6 +1233,8 @@ def _propagate(fp: Footprint, env, key: str | None) -> None:
         env[ENV_CORE] = os.environ.get(ENV_CORE, "")
         env[ENV_QUIET] = os.environ.get(ENV_QUIET, "")
         env[ENV_READERS] = os.environ.get(ENV_READERS, "")
+        if outer_kernel_trace:
+            env[ENV_OUTER_KERNEL_TRACE] = "1"
         boot = os.path.join(children_dir, "boot")
         pythonpath = env.get("PYTHONPATH", "")
         if boot not in pythonpath.split(os.pathsep):
@@ -1922,9 +1967,10 @@ def _importer(frame) -> str:
         return EXTERNAL
     if not code.co_flags & CO_NEWLOCALS:
         return rel
-    if depth > 0 or current_key in (None, SHARED):
+    active_key = _ctx_target.get() or current_key
+    if depth > 0 or active_key in (None, SHARED):
         return SHARED
-    return KEY + current_key
+    return KEY + active_key
 
 
 def _imported(name: str, globals_: dict, fromlist, level: int) -> list[str]:
@@ -2054,17 +2100,123 @@ def narrow_own_modules(fps: dict[str, Footprint] | None = None, order: list[str]
 
 # --- driving -----------------------------------------------------------------------------
 
+def wsgi_middleware(app):
+    """WSGI middleware extracting `X-Enact-Target` into `request_target`."""
+    def wrapped(environ, start_response):
+        target = environ.get("HTTP_X_ENACT_TARGET")
+        if target:
+            with request_target(target.strip()):
+                return list(app(environ, start_response))
+        return app(environ, start_response)
+    return wrapped
+
+
+def asgi_middleware(app):
+    """ASGI middleware extracting `x-enact-target` into `request_target`."""
+    async def wrapped(scope, receive, send):
+        target = None
+        for k, v in scope.get("headers") or ():
+            if k.lower() == b"x-enact-target":
+                target = v.decode("latin1").strip()
+                break
+        if target:
+            with request_target(target):
+                return await app(scope, receive, send)
+        return await app(scope, receive, send)
+    return wrapped
+
+
+def _patch_http_context() -> None:
+    """Propagates `X-Enact-Target` on outbound `http.client` calls and scopes inbound
+    `http.server` / `wsgiref` requests to `request_target`."""
+    try:
+        import http.client
+        orig_putrequest = http.client.HTTPConnection.putrequest
+        orig_endheaders = http.client.HTTPConnection.endheaders
+
+        def putrequest(self, method, url, *args, **kwargs):
+            self._enact_has_target_hdr = False
+            return orig_putrequest(self, method, url, *args, **kwargs)
+
+        orig_putheader = http.client.HTTPConnection.putheader
+
+        def putheader(self, header, *values):
+            if isinstance(header, str) and header.lower() == "x-enact-target":
+                self._enact_has_target_hdr = True
+            elif isinstance(header, bytes) and header.lower() == b"x-enact-target":
+                self._enact_has_target_hdr = True
+            return orig_putheader(self, header, *values)
+
+        def endheaders(self, message_body=None, *, encode_chunked=False):
+            target = active_target_key()
+            if target and not getattr(self, "_enact_has_target_hdr", False):
+                orig_putheader(self, "X-Enact-Target", target)
+                self._enact_has_target_hdr = True
+            return orig_endheaders(self, message_body, encode_chunked=encode_chunked)
+
+        http.client.HTTPConnection.putrequest = putrequest
+        http.client.HTTPConnection.putheader = putheader
+        http.client.HTTPConnection.endheaders = endheaders
+    except Exception:
+        pass
+    try:
+        import http.server
+        orig_parse = http.server.BaseHTTPRequestHandler.parse_request
+
+        def parse_request(self):
+            ok = orig_parse(self)
+            if ok and hasattr(self, "headers") and self.headers is not None:
+                target = self.headers.get("X-Enact-Target")
+                if target:
+                    self._enact_ctx = request_target(target.strip())
+                    self._enact_ctx.__enter__()
+            return ok
+
+        orig_handle_one = http.server.BaseHTTPRequestHandler.handle_one_request
+
+        def handle_one_request(self):
+            self._enact_ctx = None
+            try:
+                return orig_handle_one(self)
+            finally:
+                ctx = getattr(self, "_enact_ctx", None)
+                if ctx is not None:
+                    self._enact_ctx = None
+                    ctx.__exit__(None, None, None)
+
+        http.server.BaseHTTPRequestHandler.parse_request = parse_request
+        http.server.BaseHTTPRequestHandler.handle_one_request = handle_one_request
+    except Exception:
+        pass
+    try:
+        import wsgiref.handlers
+        orig_run = wsgiref.handlers.BaseHandler.run
+
+        def run(self, application):
+            target = self.environ.get("HTTP_X_ENACT_TARGET") if hasattr(self, "environ") and self.environ else None
+            if target:
+                with request_target(target.strip()):
+                    return orig_run(self, application)
+            return orig_run(self, application)
+
+        wsgiref.handlers.BaseHandler.run = run
+    except Exception:
+        pass
+
+
 def _install(repo: str, recorders) -> None:
-    global root, own, tracer
+    global root, own, tracer, outer_kernel_trace
     root = os.path.realpath(repo) + os.sep
+    outer_kernel_trace = os.environ.get(ENV_OUTER_KERNEL_TRACE, "").lower() in ("1", "true", "yes")
     exe = os.environ.get(ENV_EXE, "")
-    tracer = exe if sys.platform == "linux" and exe and os.access(exe, os.X_OK) else ""
+    tracer = "" if outer_kernel_trace else (exe if sys.platform == "linux" and exe and os.access(exe, os.X_OK) else "")
     own = tuple(os.path.realpath(r) for r in recorders) + (os.path.realpath(__file__),)
     monitoring.use_tool_id(TARGETS_TOOL, TARGETS_NAME)
     monitoring.register_callback(TARGETS_TOOL, PY_START, on_start)
     sys.addaudithook(on_audit)
     _patch_imports()
     _patch_stat()
+    _patch_http_context()
 
 
 def start(repo: str, recorders=(), quiet_programs=(), unlisted_callers=(), readers=None) -> None:

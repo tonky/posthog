@@ -5,9 +5,7 @@ use common_s3::{S3Client, S3Error, S3Impl};
 
 const TEST_BUCKET: &str = "test-bucket";
 // MinIO
-static S3_ENDPOINT: std::sync::LazyLock<&str> = std::sync::LazyLock::new(|| {
-    std::env::var("OBJECT_STORAGE_ENDPOINT").map_or("http://127.0.0.1:19000", |v| &*v.leak())
-});
+static S3_ENDPOINT: std::sync::LazyLock<&str> = std::sync::LazyLock::new(|| std::env::var("OBJECT_STORAGE_ENDPOINT").map_or("http://127.0.0.1:19000", |v| &*v.leak()));
 
 async fn create_test_s3_client() -> (S3Impl, AwsS3SdkClient) {
     let config = aws_config::defaults(BehaviorVersion::latest())

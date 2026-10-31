@@ -14,7 +14,7 @@
 # Everything the job starts is its own (live_posthog.sh): databases, a ClickHouse database,
 # Kafka topics under its prefix, Redis database 5, and a free port per listener (upstream's
 # 8000, 3307 and 6738-6746 are fixed). Its reports, artifacts and screenshots go to
-# .enact/state/e2e (patches/0008), never beside the specs.
+# .enact/state/e2e (.enact/vitest/node_env_preload.cjs), never beside the specs.
 #
 # Recording footprints for enact (ENACT_FOOTPRINT_DIR set): each spec runs alone, against
 # Django, Celery and the Temporal worker started afresh for it (live_each_spec,
@@ -156,9 +156,13 @@ e2e_app() {
 
 # "Run Playwright tests".
 e2e_run() { # [spec...]
+    local reporters=()
+    [ -z "${ENACT_SKIPS_FILE:-}" ] || reporters=("--reporter=list,$root/showcase/scripts/node_reads.mjs")
     (cd playwright && CI=1 BASE_URL="$site" E2E_PROXY_URL="$proxy" PLAYWRIGHT_RETRIES=1 \
-        PLAYWRIGHT_RESULTS_DIR="$results/run" pnpm exec playwright test "$@" \
-        --workers="${PLAYWRIGHT_WORKERS:-6}" --update-snapshots)
+        PLAYWRIGHT_RESULTS_DIR="$results/run" \
+        NODE_OPTIONS="${NODE_OPTIONS:+$NODE_OPTIONS }--require $root/.enact/vitest/node_env_preload.cjs" \
+        pnpm exec playwright test "$@" \
+        ${reporters[@]+"${reporters[@]}"} --workers="${PLAYWRIGHT_WORKERS:-6}" --update-snapshots)
 }
 rm -rf "$results/run" && mkdir -p "$results/run"
 live_each_spec e2e_app e2e_run ${specs[@]+"${specs[@]}"}

@@ -19,9 +19,7 @@ use time::OffsetDateTime;
 use tokio::sync::oneshot;
 use uuid::Uuid;
 
-static KAFKA_BROKERS: std::sync::LazyLock<&str> = std::sync::LazyLock::new(|| {
-    std::env::var("KAFKA_HOSTS").map_or("localhost:9092", |v| &*v.leak())
-});
+static KAFKA_BROKERS: std::sync::LazyLock<&str> = std::sync::LazyLock::new(|| std::env::var("KAFKA_HOSTS").map_or("localhost:9092", |v| &*v.leak()));
 const TEST_TOPIC_BASE: &str = "kdedup-watermark-consumer-integration-test";
 
 async fn create_topic_with_partitions(topic: &str, num_partitions: i32) -> Result<()> {

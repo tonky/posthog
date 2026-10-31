@@ -56,9 +56,7 @@ use common::{
 };
 
 // Infrastructure configuration
-static KAFKA_BROKERS: std::sync::LazyLock<&str> = std::sync::LazyLock::new(|| {
-    std::env::var("KAFKA_HOSTS").map_or("localhost:9092", |v| &*v.leak())
-});
+static KAFKA_BROKERS: std::sync::LazyLock<&str> = std::sync::LazyLock::new(|| std::env::var("KAFKA_HOSTS").map_or("localhost:9092", |v| &*v.leak()));
 const TEST_BUCKET: &str = "test-kafka-deduplicator-e2e";
 const TEST_TOPIC_BASE: &str = "kdedup-e2e-rebalance-test";
 

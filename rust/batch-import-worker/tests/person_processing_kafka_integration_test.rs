@@ -26,9 +26,7 @@ use std::time::Duration;
 use tokio::sync::Mutex as TokioMutex;
 use uuid::Uuid;
 
-static KAFKA_BROKERS: std::sync::LazyLock<&str> = std::sync::LazyLock::new(|| {
-    std::env::var("KAFKA_HOSTS").map_or("localhost:9092", |v| &*v.leak())
-});
+static KAFKA_BROKERS: std::sync::LazyLock<&str> = std::sync::LazyLock::new(|| std::env::var("KAFKA_HOSTS").map_or("localhost:9092", |v| &*v.leak()));
 
 // Global mutex to serialize Kafka integration tests
 static KAFKA_TEST_MUTEX: OnceLock<TokioMutex<()>> = OnceLock::new();
@@ -180,13 +178,7 @@ async fn test_person_processing_filter_with_kafka() -> Result<()> {
         "token1:user1,token2:user3",
     );
     std::env::set_var("KAFKA_HOSTS", *KAFKA_BROKERS);
-    std::env::set_var(
-        "DATABASE_URL",
-        std::env::var("DATABASE_URL")
-            .map_or("postgres://posthog:posthog@localhost:5432/posthog", |v| {
-                &*v.leak()
-            }),
-    );
+    std::env::set_var("DATABASE_URL", std::env::var("DATABASE_URL") .map_or("postgres://posthog:posthog@localhost:5432/posthog", |v| &*v.leak()));
 
     let config = Config::init_from_env()?;
     let context = Arc::new(AppContext::new(&config).await?);
@@ -281,13 +273,7 @@ async fn test_empty_person_processing_filter() -> Result<()> {
     // Empty filter - all events should have keys
     std::env::set_var("FORCE_DISABLE_PERSON_PROCESSING", "");
     std::env::set_var("KAFKA_HOSTS", *KAFKA_BROKERS);
-    std::env::set_var(
-        "DATABASE_URL",
-        std::env::var("DATABASE_URL")
-            .map_or("postgres://posthog:posthog@localhost:5432/posthog", |v| {
-                &*v.leak()
-            }),
-    );
+    std::env::set_var("DATABASE_URL", std::env::var("DATABASE_URL") .map_or("postgres://posthog:posthog@localhost:5432/posthog", |v| &*v.leak()));
 
     let config = Config::init_from_env()?;
     let context = Arc::new(AppContext::new(&config).await?);

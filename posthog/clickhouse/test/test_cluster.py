@@ -12,7 +12,7 @@ from unittest.mock import Mock, patch, sentinel
 from clickhouse_driver import Client
 from clickhouse_driver.errors import ServerException
 
-from posthog.clickhouse.client import connection, sync_execute
+from posthog.clickhouse.client import connection
 from posthog.clickhouse.client.connection import ClickHouseCredentials, ClickHouseUser, NodeRole, Workload
 from posthog.clickhouse.cluster import (
     AUTHENTICATION_FAILED,
@@ -143,11 +143,6 @@ def test_exception_summary(snapshot, cluster: ClickhouseCluster) -> None:
         cluster.map_all_hosts(Query("invalid query")).result()
 
     assert replace_memory_addresses_and_ips(e.value.message) == snapshot
-
-    # The snapshot holds a Linux server's stack trace; a macOS build of ClickHouse (run natively,
-    # outside a container) reports Poco's constructor as frame 0.
-    if sync_execute("SELECT value FROM system.build_options WHERE name = 'SYSTEM'") == [("Darwin",)]:
-        pytest.skip("the snapshot's stack frames are a Linux ClickHouse build's")
 
     with pytest.raises(ExceptionGroup) as e:
         cluster.map_all_hosts(Query("SELECT * FROM invalid_table_name")).result()

@@ -2,9 +2,6 @@ import { execFileSync } from 'node:child_process'
 
 import { expect, LOGIN_PASSWORD, LOGIN_USERNAME, test } from '../utils/playwright-test-core'
 
-// The run's Postgres, which CI serves on 5432 (PGPORT from the run's env when it runs elsewhere)
-const PG_PORT = process.env.PGPORT ?? '5432'
-
 test.describe('SQL Editor direct Postgres queries', () => {
     test('creates a Postgres direct source and queries it successfully', async ({ page }) => {
         test.setTimeout(180000)
@@ -14,7 +11,7 @@ test.describe('SQL Editor direct Postgres queries', () => {
 
         try {
             execFileSync('psql', [
-                `postgresql://posthog:posthog@127.0.0.1:${PG_PORT}/posthog`,
+                'postgresql://posthog:posthog@127.0.0.1:5432/posthog',
                 '-c',
                 `
                     DROP TABLE IF EXISTS ${tableName};
@@ -60,7 +57,7 @@ test.describe('SQL Editor direct Postgres queries', () => {
 
             await test.step('Create the Postgres direct source for the selected table', async () => {
                 sourceId = await page.evaluate(
-                    async ({ name, table, port }) => {
+                    async ({ name, table }) => {
                         const csrfToken =
                             document.cookie
                                 .split(';')
@@ -89,7 +86,7 @@ test.describe('SQL Editor direct Postgres queries', () => {
                                     payload: {
                                         source_type: 'Postgres',
                                         host: 'localhost',
-                                        port,
+                                        port: '5432',
                                         database: 'posthog',
                                         user: 'posthog',
                                         password: 'posthog',
@@ -121,7 +118,7 @@ test.describe('SQL Editor direct Postgres queries', () => {
                         }
                         throw new Error('Failed to create Postgres direct source after retries')
                     },
-                    { name: sourceName, table: tableName, port: PG_PORT }
+                    { name: sourceName, table: tableName }
                 )
             })
 
@@ -197,7 +194,7 @@ test.describe('SQL Editor direct Postgres queries', () => {
             }
             try {
                 execFileSync('psql', [
-                    `postgresql://posthog:posthog@127.0.0.1:${PG_PORT}/posthog`,
+                    'postgresql://posthog:posthog@127.0.0.1:5432/posthog',
                     '-c',
                     `DROP TABLE IF EXISTS ${tableName};`,
                 ])

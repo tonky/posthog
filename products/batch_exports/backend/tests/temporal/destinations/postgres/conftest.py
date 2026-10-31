@@ -19,9 +19,7 @@ def postgres_config():
     return {
         "user": settings.PG_USER,
         "password": settings.PG_PASSWORD,
-        # A database per test worker: the run's shards share one Postgres server (upstream's
-        # CI runs one per job), and one shard's teardown dropped the schema another's tests used.
-        "database": f"exports_test_database{settings.XDIST_SUFFIX}",
+        "database": "exports_test_database",
         "schema": "exports_test_schema",
         "host": settings.PG_HOST,
         "port": int(settings.PG_PORT),

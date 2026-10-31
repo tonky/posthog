@@ -21,9 +21,7 @@ use object_store::{ObjectStore, ObjectStoreExt};
 use std::io::Write;
 use uuid::Uuid;
 
-static SEAWEEDFS_ENDPOINT: std::sync::LazyLock<&str> = std::sync::LazyLock::new(|| {
-    std::env::var("OBJECT_STORAGE_ENDPOINT").map_or("http://localhost:8333", |v| &*v.leak())
-});
+static SEAWEEDFS_ENDPOINT: std::sync::LazyLock<&str> = std::sync::LazyLock::new(|| std::env::var("OBJECT_STORAGE_ENDPOINT").map_or("http://localhost:8333", |v| &*v.leak()));
 const TEST_BUCKET: &str = "posthog";
 
 fn seaweedfs_store() -> Arc<dyn ObjectStore> {
@@ -60,10 +58,7 @@ async fn seaweedfs_reachable(store: &Arc<dyn ObjectStore>) -> bool {
         Ok(Ok(_)) | Ok(Err(object_store::Error::NotFound { .. }))
     );
     if !reachable && std::env::var("CI").is_ok() {
-        panic!(
-            "SeaweedFS unreachable at {} in CI — the dev stack must be up",
-            *SEAWEEDFS_ENDPOINT
-        );
+        panic!("SeaweedFS unreachable at {} in CI — the dev stack must be up", *SEAWEEDFS_ENDPOINT);
     }
     reachable
 }
@@ -73,10 +68,7 @@ async fn test_temp_bucket_seaweedfs_round_trip() {
     let store = seaweedfs_store();
 
     if !seaweedfs_reachable(&store).await {
-        eprintln!(
-            "SeaweedFS unreachable at {}, skipping test",
-            *SEAWEEDFS_ENDPOINT
-        );
+        eprintln!("SeaweedFS unreachable at {}, skipping test", *SEAWEEDFS_ENDPOINT);
         return;
     }
 
@@ -151,10 +143,7 @@ fn open_plaintext_stream_from_bytes(data: &[u8]) -> batch_import_worker::staging
 async fn test_data_error_pause_quarantines_staged_part_and_resume_redownloads() {
     let store = seaweedfs_store();
     if !seaweedfs_reachable(&store).await {
-        eprintln!(
-            "SeaweedFS unreachable at {}, skipping test",
-            *SEAWEEDFS_ENDPOINT
-        );
+        eprintln!("SeaweedFS unreachable at {}, skipping test", *SEAWEEDFS_ENDPOINT);
         return;
     }
 
@@ -239,10 +228,7 @@ async fn test_data_error_pause_quarantines_staged_part_and_resume_redownloads() 
 async fn test_remote_staged_source_round_trip_on_seaweedfs() {
     let store = seaweedfs_store();
     if !seaweedfs_reachable(&store).await {
-        eprintln!(
-            "SeaweedFS unreachable at {}, skipping test",
-            *SEAWEEDFS_ENDPOINT
-        );
+        eprintln!("SeaweedFS unreachable at {}, skipping test", *SEAWEEDFS_ENDPOINT);
         return;
     }
 

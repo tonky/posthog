@@ -32,8 +32,7 @@ use capture::setup;
 use common_continuous_profiling::ContinuousProfilingConfig;
 use limiters::redis::{QuotaResource, OVERFLOW_LIMITER_CACHE_KEY, QUOTA_LIMITER_CACHE_KEY};
 
-pub static TEST_KAFKA_HOSTS: std::sync::LazyLock<&str> =
-    std::sync::LazyLock::new(|| std::env::var("KAFKA_HOSTS").map_or("kafka:9092", |v| &*v.leak()));
+pub static TEST_KAFKA_HOSTS: std::sync::LazyLock<&str> = std::sync::LazyLock::new(|| std::env::var("KAFKA_HOSTS").map_or("kafka:9092", |v| &*v.leak()));
 
 /// Settings for the `INGESTION` producer every test server publishes through.
 pub fn test_producer_env() -> HashMap<String, String> {

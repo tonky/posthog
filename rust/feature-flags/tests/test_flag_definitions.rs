@@ -2161,11 +2161,7 @@ async fn test_etag_graceful_degradation_without_stored_etag() {
 }
 
 /// Stands in for the dedicated cluster. The shared cache is database 0, so keys cannot collide.
-static DEDICATED_REDIS_URL: std::sync::LazyLock<&str> = std::sync::LazyLock::new(|| {
-    std::env::var("TEST_REDIS_URL").map_or("redis://localhost:6379/1", |url| {
-        &*format!("{}/1", url.trim_end_matches('/')).leak()
-    })
-});
+static DEDICATED_REDIS_URL: std::sync::LazyLock<&str> = std::sync::LazyLock::new(|| std::env::var("TEST_REDIS_URL").map_or("redis://localhost:6379/1", |url| &*format!("{/1", url.trim_end_matches('/')).leak() }));
 
 /// Setup both dedicated-cluster tests need: the reader pointed at the dedicated database with
 /// the toggle on, plus a team to request.

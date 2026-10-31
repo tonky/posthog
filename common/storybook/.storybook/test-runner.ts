@@ -7,8 +7,6 @@ import path from 'path'
 
 import type { Mocks } from '~/mocks/utils'
 
-import { recordLoads, saveLoads } from './enact-loads'
-
 // Storybook 10 loads this config as a native ES module, where `__dirname` is
 // not defined — derive it from the module URL instead.
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -121,11 +119,7 @@ const LOADER_SELECTORS = [
     '[data-attr="loading-bar"]',
 ]
 
-// STORYBOOK_SNAPSHOTS_DIR, when set, takes the screenshots instead: a run's own directory,
-// which starts empty as CI's wiped one does, beside the committed baselines.
-const customSnapshotsDir = process.env.STORYBOOK_SNAPSHOTS_DIR
-    ? path.resolve(process.env.STORYBOOK_SNAPSHOTS_DIR)
-    : path.resolve(__dirname, '../../../frontend/__snapshots__')
+const customSnapshotsDir = path.resolve(__dirname, '../../../frontend/__snapshots__')
 // eslint-disable-next-line no-console
 console.log('[test-runner] Storybook snapshots will be saved to', customSnapshotsDir)
 
@@ -197,8 +191,6 @@ export default {
                 }
             })
         })
-
-        recordLoads(page, browserContext)
 
         // The rest replicates @storybook/test-runner's defaultPrepare (not exported).
         const targetURL = process.env.TARGET_URL
@@ -310,7 +302,6 @@ export default {
     },
 
     async postVisit(page, context) {
-        saveLoads(page, context.id)
         ATTEMPT_COUNT_PER_ID[context.id] = (ATTEMPT_COUNT_PER_ID[context.id] || 0) + 1
         // The generated test also calls postVisit when the story or its play function already
         // failed (so configs can do failure handling — our jest environment takes the failure

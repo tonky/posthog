@@ -23,9 +23,7 @@ pub fn gzip_bytes(data: &[u8]) -> Vec<u8> {
     encoder.finish().unwrap()
 }
 
-pub static MINIO_ENDPOINT: std::sync::LazyLock<&str> = std::sync::LazyLock::new(|| {
-    std::env::var("OBJECT_STORAGE_ENDPOINT").map_or("http://localhost:19000", |v| &*v.leak())
-});
+pub static MINIO_ENDPOINT: std::sync::LazyLock<&str> = std::sync::LazyLock::new(|| std::env::var("OBJECT_STORAGE_ENDPOINT").map_or("http://localhost:19000", |v| &*v.leak()));
 pub const MINIO_ACCESS_KEY: &str = "object_storage_root_user";
 pub const MINIO_SECRET_KEY: &str = "object_storage_root_password";
 

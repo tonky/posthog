@@ -108,7 +108,7 @@ class TemplateInputsTest(unittest.TestCase):
             "posthog/api/team.py",
             "frontend/src/index.ts",
             ".enact/components.cue",
-            ".enact/state/completed_tasks.json",
+            ".enact/state/summary.html",
             # Its Postgres service and environment are keyed as enve evaluates them: another
             # service's command (ClickHouse's) rebuilt every template.
             "enve.cue",

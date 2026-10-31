@@ -12,12 +12,7 @@ use serde_json::{json, Value};
 use sqlx::postgres::PgPoolOptions;
 use sqlx::Row;
 
-static DB_URL: std::sync::LazyLock<&str> = std::sync::LazyLock::new(|| {
-    std::env::var("TEST_PERSONS_DATABASE_URL").map_or(
-        "postgres://posthog:posthog@localhost:5432/posthog_persons",
-        |v| &*v.leak(),
-    )
-});
+static DB_URL: std::sync::LazyLock<&str> = std::sync::LazyLock::new(|| std::env::var("TEST_PERSONS_DATABASE_URL").map_or("postgres://posthog:posthog@localhost:5432/posthog_persons", |v| &*v.leak()));
 
 fn fixtures() -> Vec<Value> {
     let mut cases = vec![
