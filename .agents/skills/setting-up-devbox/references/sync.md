@@ -21,7 +21,8 @@ hogli devbox:sync --terminate       # remove the mirror when done
 - **Remote-only files stay.** The sync mode is `one-way-safe`, so the box's prewarmed `node_modules`, virtualenv, and `target/` are never deleted. Files that exist on the box but not locally when the mirror is created also stay, such as files the branch deleted, so remove them on the box when a check could pick them up. Lockfiles do sync, so after a lockfile change install dependencies on the box through `devbox:exec` before trusting its checks.
 - **A feature branch conflicts on first sync.** A new box is on `master`, so every file the branch changed shows as a conflict in the sync state. Conflicts are per path: other files, including new ones, still sync. Resolve a path, or check out the same branch on the box, only when that file must be mirrored.
 - **Don't edit mirrored files on the box.** Remote edits fight the local source of truth. `devbox:open --vscode` and `--cursor` warn when a sync is active.
-- **Check before recreating.** Compare the box's branch and SHA and the sync state first. If they match and no source file conflicts, keep the existing mirror. Source-file conflicts block reliable QA until resolved. A conflict in box-local config such as `.env` is acceptable when tracked source is clean.
+- **Check before recreating.** Compare the box's branch and SHA and the sync state first. If they match and no source file conflicts, keep the existing mirror. Source-file conflicts block reliable QA until resolved. A conflict in box-local config is acceptable when tracked source is clean.
+- **`.env` and `.env.local` don't sync.** The box writes its own `.env` at startup, and a worktree copies the main checkout's `.env`, so each side keeps its own. Change the box's copy on the box.
 
 ## Ignore rules
 
