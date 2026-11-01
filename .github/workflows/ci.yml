@@ -200,6 +200,7 @@ jobs:
         find . -mindepth 1 -maxdepth 1 -exec rm -rf {} +
         git init -q .
         echo "$mirror/objects" > .git/objects/info/alternates
+        [ ! -f "$mirror/shallow" ] || cp "$mirror/shallow" .git/shallow
         git remote add origin "$url"
         git config --local "http.$GITHUB_SERVER_URL/.extraheader" "$header"
         git config --local gc.auto 0
@@ -962,6 +963,7 @@ jobs:
         find . -mindepth 1 -maxdepth 1 -exec rm -rf {} +
         git init -q .
         echo "$mirror/objects" > .git/objects/info/alternates
+        [ ! -f "$mirror/shallow" ] || cp "$mirror/shallow" .git/shallow
         git remote add origin "$url"
         git config --local "http.$GITHUB_SERVER_URL/.extraheader" "$header"
         git config --local gc.auto 0
@@ -1757,6 +1759,7 @@ jobs:
         find . -mindepth 1 -maxdepth 1 -exec rm -rf {} +
         git init -q .
         echo "$mirror/objects" > .git/objects/info/alternates
+        [ ! -f "$mirror/shallow" ] || cp "$mirror/shallow" .git/shallow
         git remote add origin "$url"
         git config --local "http.$GITHUB_SERVER_URL/.extraheader" "$header"
         git config --local gc.auto 0
@@ -2321,6 +2324,7 @@ jobs:
         find . -mindepth 1 -maxdepth 1 -exec rm -rf {} +
         git init -q .
         echo "$mirror/objects" > .git/objects/info/alternates
+        [ ! -f "$mirror/shallow" ] || cp "$mirror/shallow" .git/shallow
         git remote add origin "$url"
         git config --local "http.$GITHUB_SERVER_URL/.extraheader" "$header"
         git config --local gc.auto 0
@@ -3850,6 +3854,7 @@ jobs:
         find . -mindepth 1 -maxdepth 1 -exec rm -rf {} +
         git init -q .
         echo "$mirror/objects" > .git/objects/info/alternates
+        [ ! -f "$mirror/shallow" ] || cp "$mirror/shallow" .git/shallow
         git remote add origin "$url"
         git config --local "http.$GITHUB_SERVER_URL/.extraheader" "$header"
         git config --local gc.auto 0
@@ -4133,6 +4138,7 @@ jobs:
         find . -mindepth 1 -maxdepth 1 -exec rm -rf {} +
         git init -q .
         echo "$mirror/objects" > .git/objects/info/alternates
+        [ ! -f "$mirror/shallow" ] || cp "$mirror/shallow" .git/shallow
         git remote add origin "$url"
         git config --local "http.$GITHUB_SERVER_URL/.extraheader" "$header"
         git config --local gc.auto 0
@@ -4747,6 +4753,7 @@ jobs:
         find . -mindepth 1 -maxdepth 1 -exec rm -rf {} +
         git init -q .
         echo "$mirror/objects" > .git/objects/info/alternates
+        [ ! -f "$mirror/shallow" ] || cp "$mirror/shallow" .git/shallow
         git remote add origin "$url"
         git config --local "http.$GITHUB_SERVER_URL/.extraheader" "$header"
         git config --local gc.auto 0
@@ -5394,6 +5401,7 @@ jobs:
         find . -mindepth 1 -maxdepth 1 -exec rm -rf {} +
         git init -q .
         echo "$mirror/objects" > .git/objects/info/alternates
+        [ ! -f "$mirror/shallow" ] || cp "$mirror/shallow" .git/shallow
         git remote add origin "$url"
         git config --local "http.$GITHUB_SERVER_URL/.extraheader" "$header"
         git config --local gc.auto 0
@@ -5665,6 +5673,7 @@ jobs:
         find . -mindepth 1 -maxdepth 1 -exec rm -rf {} +
         git init -q .
         echo "$mirror/objects" > .git/objects/info/alternates
+        [ ! -f "$mirror/shallow" ] || cp "$mirror/shallow" .git/shallow
         git remote add origin "$url"
         git config --local "http.$GITHUB_SERVER_URL/.extraheader" "$header"
         git config --local gc.auto 0
@@ -6405,6 +6414,7 @@ jobs:
         find . -mindepth 1 -maxdepth 1 -exec rm -rf {} +
         git init -q .
         echo "$mirror/objects" > .git/objects/info/alternates
+        [ ! -f "$mirror/shallow" ] || cp "$mirror/shallow" .git/shallow
         git remote add origin "$url"
         git config --local "http.$GITHUB_SERVER_URL/.extraheader" "$header"
         git config --local gc.auto 0
