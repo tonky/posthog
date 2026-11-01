@@ -173,8 +173,8 @@ pipeline: schema.#Pipeline & {
 		]
 	}
 	triggers: {
-		pull_request: {branches: ["master", "main", "perf/ci-modernization"], paths: []}
-		push:         {branches: ["master", "main", "perf/ci-modernization", "perf/ci-showcase", "showcase/**"], paths: ["**/*"]}
+		pull_request: {branches: ["master", "main", "perf/ci-modernization", "perf/ci-showcase"], paths: []}
+		push:         {branches: ["master", "main", "perf/ci-modernization", "perf/ci-showcase"], paths: ["**/*"]}
 		schedule:     []
 	}
 	components: {

@@ -7,7 +7,6 @@ on:
     - main
     - perf/ci-modernization
     - perf/ci-showcase
-    - showcase/**
     paths:
     - "**/*"
   pull_request:
@@ -16,7 +15,6 @@ on:
     - main
     - perf/ci-modernization
     - perf/ci-showcase
-    - showcase/**
   workflow_dispatch:
     inputs:
       all:
