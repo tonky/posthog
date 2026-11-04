@@ -144,6 +144,9 @@ frontend/types/
 # Dist release target dir
 target/*
 
+# ClickHouse UDFs built for a macOS host (posthog/user_scripts/run_udf.sh), and udf_versioner.py's copies of them
+posthog/user_scripts/**/*_darwin_*
+
 # Ignore user's Cursor rules
 .cursor/**/user*.mdc
 # Ignore Cursor plans

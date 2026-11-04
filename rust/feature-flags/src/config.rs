@@ -1126,10 +1126,18 @@ impl Config {
             "TEST_PERSONS_DATABASE_URL",
             "postgres://posthog:posthog@localhost:5432/posthog_persons",
         );
+        let redis_url = url("TEST_REDIS_URL", "redis://localhost:6379/");
+        // The cookieless client dials host and port: the same Redis as redis_url.
+        let (cookieless_redis_host, cookieless_redis_port) = redis_url
+            .trim_start_matches("redis://")
+            .trim_end_matches('/')
+            .rsplit_once(':')
+            .and_then(|(host, port)| Some((host.to_string(), port.parse().ok()?)))
+            .unwrap_or_else(|| ("localhost".to_string(), 6379));
         Self {
             continuous_profiling: ContinuousProfilingConfig::default(),
             address: SocketAddr::from_str("127.0.0.1:0").unwrap(),
-            redis_url: url("TEST_REDIS_URL", "redis://localhost:6379/"),
+            redis_url,
             redis_reader_url: "".to_string(),
             flags_redis_url: "".to_string(),
             flags_redis_reader_url: "".to_string(),
@@ -1182,8 +1190,8 @@ impl Config {
             cookieless_disabled: false,
             cookieless_identifies_ttl_seconds: 345600,
             cookieless_salt_ttl_seconds: 345600,
-            cookieless_redis_host: "localhost".to_string(),
-            cookieless_redis_port: 6379,
+            cookieless_redis_host,
+            cookieless_redis_port,
             new_analytics_capture_endpoint: "/i/v0/e/".to_string(),
             new_analytics_capture_excluded_team_ids: TeamIdCollection::None,
             element_chain_as_string_excluded_teams: TeamIdCollection::None,

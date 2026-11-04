@@ -1,3 +1,5 @@
+import os
+
 from posthog.test.base import BaseTest
 from unittest.mock import patch
 
@@ -8,7 +10,7 @@ from posthog.models.project import Project
 from posthog.tasks.team_metadata import update_related_teams_metadata_cache_task
 
 
-@override_settings(FLAGS_REDIS_URL="redis://localhost:6379")
+@override_settings(FLAGS_REDIS_URL=f"redis://localhost:{os.getenv('REDIS_PORT', '6379')}")
 class TestTeamMetadataInvalidationSignals(BaseTest):
     def test_organization_rename_enqueues_fanout(self) -> None:
         with patch("posthog.tasks.team_metadata.update_related_teams_metadata_cache_task") as mock_task:
@@ -80,7 +82,7 @@ class TestTeamMetadataInvalidationSignals(BaseTest):
         mock_counter.labels.return_value.inc.assert_called_once_with()
 
 
-@override_settings(FLAGS_REDIS_URL="redis://localhost:6379")
+@override_settings(FLAGS_REDIS_URL=f"redis://localhost:{os.getenv('REDIS_PORT', '6379')}")
 class TestRelatedTeamsMetadataFanoutTask(BaseTest):
     def test_organization_fanout_enqueues_every_team(self) -> None:
         _, second_team = Project.objects.create_with_team(
@@ -118,7 +120,7 @@ class TestRelatedTeamsMetadataFanoutTask(BaseTest):
         mock_logger.exception.assert_called_once()
 
 
-@override_settings(FLAGS_REDIS_URL="redis://localhost:6379")
+@override_settings(FLAGS_REDIS_URL=f"redis://localhost:{os.getenv('REDIS_PORT', '6379')}")
 class TestOrgProjectDeleteCascadesToTeamClear(BaseTest):
     def test_deleting_project_clears_team_metadata_via_cascade(self) -> None:
         project, team = Project.objects.create_with_team(

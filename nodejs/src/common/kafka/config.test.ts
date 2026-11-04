@@ -7,7 +7,8 @@ describe('getKafkaConfigFromEnv', () => {
 
     beforeEach(() => {
         jest.resetModules()
-        process.env = { ...OLD_ENV }
+        // Without the environment's own Kafka settings: the snapshots hold only the test's.
+        process.env = Object.fromEntries(Object.entries(OLD_ENV).filter(([key]) => !key.startsWith('KAFKA_')))
     })
 
     afterAll(() => {

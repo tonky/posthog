@@ -163,13 +163,15 @@ impl TestServer {
 
         let config = Config {
             address: "127.0.0.1:0".parse().unwrap(),
-            redis_url: "redis://localhost:6379/".to_string(),
+            redis_url: std::env::var("TEST_REDIS_URL")
+                .unwrap_or_else(|_| "redis://localhost:6379/".to_string()),
             redis_reader_url: String::new(),
             redis_timeout_ms: 1000,
             read_repair_ttl_seconds: 600,
             object_storage_region: "us-east-1".to_string(),
             object_storage_bucket: "posthog".to_string(),
-            object_storage_endpoint: "http://localhost:19000".to_string(),
+            object_storage_endpoint: std::env::var("OBJECT_STORAGE_ENDPOINT")
+                .unwrap_or_else(|_| "http://localhost:19000".to_string()),
             enable_metrics: hypercache_server::config::FlexBool(false),
             debug: hypercache_server::config::FlexBool(true),
             max_concurrency: 100,
@@ -210,7 +212,10 @@ impl TestServer {
 
         let aws_config = aws_config::defaults(aws_config::BehaviorVersion::latest())
             .region(aws_config::Region::new("us-east-1"))
-            .endpoint_url("http://localhost:19000")
+            .endpoint_url(
+                std::env::var("OBJECT_STORAGE_ENDPOINT")
+                    .map_or("http://localhost:19000", |v| &*v.leak()),
+            )
             .load()
             .await;
 

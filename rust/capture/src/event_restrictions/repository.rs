@@ -335,7 +335,9 @@ mod integration_tests {
     use rand::distributions::Alphanumeric;
     use rand::Rng;
 
-    const REDIS_URL: &str = "redis://localhost:6379/";
+    static REDIS_URL: std::sync::LazyLock<&str> = std::sync::LazyLock::new(|| {
+        std::env::var("TEST_REDIS_URL").map_or("redis://localhost:6379/", |v| &*v.leak())
+    });
 
     fn random_prefix() -> String {
         let suffix: String = rand::thread_rng()

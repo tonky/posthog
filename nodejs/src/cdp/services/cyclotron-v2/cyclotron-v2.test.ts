@@ -17,7 +17,7 @@ import {
 import { CyclotronV2Worker, sleep } from './worker'
 import { CyclotronV2RateLimitedWorker } from './worker-rate-limited'
 
-const DB_URL = 'postgres://posthog:posthog@localhost:5432/test_cyclotron_node'
+const DB_URL = `postgres://posthog:posthog@localhost:${process.env.PGPORT ?? '5432'}/test_cyclotron_node`
 const QUEUE = 'test-queue'
 
 // ── Helpers ──────────────────────────────────────────────────────────

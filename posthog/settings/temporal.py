@@ -3,7 +3,7 @@ import os
 from django.core.exceptions import ImproperlyConfigured
 
 from posthog.settings.access import SECRET_KEY
-from posthog.settings.base_variables import CLOUD_DEPLOYMENT, DEBUG
+from posthog.settings.base_variables import CLOUD_DEPLOYMENT, DEBUG, TEST
 from posthog.settings.utils import get_from_env, get_list, str_to_bool
 
 TEMPORAL_NAMESPACE: str = os.getenv("TEMPORAL_NAMESPACE", "default")
@@ -244,7 +244,10 @@ CLICKHOUSE_MAX_BLOCK_SIZE_OVERRIDES: dict[int, int] = dict(
 # In production (DEBUG=False), we use separate queues for each worker type.
 def _set_temporal_task_queue(task_queue: str) -> str:
     if DEBUG:
-        return "development-task-queue"
+        # A queue per test worker: the shards share one Temporal server (upstream's CI runs one
+        # per job), and a worker took another shard's workflows, writing their runs to its database.
+        worker = os.getenv("PYTEST_XDIST_WORKER")
+        return f"development-task-queue_{worker}" if TEST and worker else "development-task-queue"
     return task_queue
 
 

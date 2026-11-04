@@ -1,3 +1,4 @@
+import os
 import json
 import requests
 from typing import Any, cast
@@ -266,7 +267,7 @@ class TestUtils(BaseTest):
         )  # Non-existent
 
     def test_public_ip_only_adapter(self):
-        address = "http://localhost:8123"  # Clickhouse's HTTP port
+        address = f"http://localhost:{os.environ.get('CLICKHOUSE_HTTP_PORT', '8123')}"  # Clickhouse's HTTP port
 
         # We can connect OK by default
         self.assertTrue(requests.get(address).ok)

@@ -1,4 +1,6 @@
+import os
 from dataclasses import dataclass, field
+from urllib.parse import urlparse
 
 from posthog.hogql.database.models import FieldOrTable
 from posthog.hogql.database.s3_table import S3Table
@@ -11,6 +13,7 @@ from posthog.hogql.database.schema.web_analytics_preaggregated import (
 from posthog.settings.base_variables import DEBUG
 from posthog.settings.object_storage import (
     OBJECT_STORAGE_ACCESS_KEY_ID,
+    OBJECT_STORAGE_ENDPOINT,
     OBJECT_STORAGE_EXTERNAL_WEB_ANALYTICS_BUCKET,
     OBJECT_STORAGE_REGION,
     OBJECT_STORAGE_SECRET_ACCESS_KEY,
@@ -26,7 +29,10 @@ def get_s3_function_args(s3_path: str) -> str:
 
 def get_s3_url(table_name: str, team_id: int) -> str:
     if DEBUG:
-        s3_endpoint = "http://objectstorage:19000"
+        # docker container for object storage from clickhouse (by the host CLICKHOUSE_OBJECT_STORAGE_HOST
+        # names, where there's no docker network), on the port the app reaches it on
+        host = os.environ.get("CLICKHOUSE_OBJECT_STORAGE_HOST", "objectstorage")
+        s3_endpoint = f"http://{host}:{urlparse(OBJECT_STORAGE_ENDPOINT).port or 19000}"
         bucket = "posthog"
         key = f"{table_name}/{team_id}/data.native"
         return f"{s3_endpoint}/{bucket}/{key}"

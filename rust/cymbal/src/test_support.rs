@@ -11,13 +11,27 @@ use testcontainers::core::{IntoContainerPort, WaitFor};
 use testcontainers::runners::AsyncRunner;
 use testcontainers::{ContainerAsync, GenericImage};
 
-/// Dropping this stops the container, so tests hold it for their duration.
-pub type RedisContainer = ContainerAsync<GenericImage>;
+/// Dropping this stops the container, so tests hold it for their duration. None when
+/// `TEST_REDIS_URL` names a running Redis instead.
+pub type RedisContainer = Option<ContainerAsync<GenericImage>>;
 
 /// Boot a throwaway Redis and return a connected client. The readiness banner can
 /// land just before the socket accepts, so the connect and a probe script are
 /// retried, otherwise the first command flakes with "connection refused".
 pub async fn start_redis() -> (Arc<RedisClient>, RedisContainer) {
+    // A running Redis, emptied as a fresh container would be (the tests run one at a time).
+    if let Ok(url) = std::env::var("TEST_REDIS_URL") {
+        let mut connection = redis::Client::open(url.as_str())
+            .unwrap()
+            .get_multiplexed_async_connection()
+            .await
+            .unwrap();
+        redis::cmd("FLUSHDB")
+            .query_async::<()>(&mut connection)
+            .await
+            .unwrap();
+        return (connect(url).await, None);
+    }
     let container = GenericImage::new("redis", "7-alpine")
         .with_exposed_port(6379.tcp())
         .with_wait_for(WaitFor::message_on_stdout("Ready to accept connections"))
@@ -26,8 +40,13 @@ pub async fn start_redis() -> (Arc<RedisClient>, RedisContainer) {
         .unwrap();
     let host = container.get_host().await.unwrap();
     let port = container.get_host_port_ipv4(6379).await.unwrap();
-    let url = format!("redis://{host}:{port}");
+    (
+        connect(format!("redis://{host}:{port}")).await,
+        Some(container),
+    )
+}
 
+async fn connect(url: String) -> Arc<RedisClient> {
     for _ in 0..20 {
         if let Ok(client) = RedisClient::with_config(
             url.clone(),
@@ -43,7 +62,7 @@ pub async fn start_redis() -> (Arc<RedisClient>, RedisContainer) {
                 .await
                 .is_ok()
             {
-                return (Arc::new(client), container);
+                return Arc::new(client);
             }
         }
         tokio::time::sleep(Duration::from_millis(100)).await;

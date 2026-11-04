@@ -1,0 +1,16 @@
+# Layered over rust/.config/nextest.toml by run_rust_tests.sh (`--tool-config-file`).
+#
+# kafka-assigner's grpc_integration tests each create a topic and at once ask the broker for
+# its metadata. Upstream's broker (Redpanda) answers CreateTopics once the partitions have
+# leaders; Apache Kafka's KRaft controller answers once the topic is committed, before the
+# broker serves it: the broker publishes each metadata change after creating the previous
+# change's partition logs (2 ms a partition on Linux, 8 ms on macOS, which flushes each
+# checkpoint to disk). Created side by side, a test's topic is still unknown when it asks
+# ("failed to fetch Kafka metadata"), whatever the retries. One at a time, each topic is
+# served before its own logs are created.
+[test-groups]
+"@tool:posthog-overlay:kafka-topics" = { max-threads = 1 }
+
+[[profile.default.overrides]]
+filter = 'package(kafka-assigner) & binary(grpc_integration)'
+test-group = "@tool:posthog-overlay:kafka-topics"

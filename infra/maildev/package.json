@@ -1,0 +1,8 @@
+{
+  "name": "posthog-ci-maildev",
+  "private": true,
+  "description": "docker-compose.base.yml's maildev (maildev/maildev:2.0.5), run as an enve service",
+  "dependencies": {
+    "maildev": "2.0.5"
+  }
+}

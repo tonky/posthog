@@ -7,6 +7,7 @@ import asyncio
 import datetime as dt
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
+from urllib.parse import urlparse
 
 from django.conf import settings
 
@@ -173,7 +174,7 @@ def _get_s3_endpoint_url() -> str:
     localhost URL rather than the hostname of the container.
     """
     if _is_local_dev_or_test():
-        return "http://localhost:19000"
+        return f"http://localhost:{urlparse(settings.OBJECT_STORAGE_ENDPOINT).port or 19000}"
     return settings.BATCH_EXPORT_OBJECT_STORAGE_ENDPOINT
 
 

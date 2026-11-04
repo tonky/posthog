@@ -107,7 +107,7 @@ export function getDefaultSessionRecordingApiConfig(): SessionRecordingApiConfig
         ...getDefaultClickhouseConfig(),
         CLICKHOUSE_PASSWORD_FILE: '',
         SESSION_RECORDING_API_REDIS_HOST: '127.0.0.1',
-        SESSION_RECORDING_API_REDIS_PORT: 6379,
+        SESSION_RECORDING_API_REDIS_PORT: Number(process.env.REDIS_PORT ?? 6379),
         SESSION_RECORDING_KMS_ENDPOINT: undefined,
         SESSION_RECORDING_DYNAMODB_ENDPOINT: undefined,
     }

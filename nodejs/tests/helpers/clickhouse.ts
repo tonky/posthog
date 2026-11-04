@@ -51,7 +51,7 @@ export class Clickhouse {
 
         const clickhouse = createClickhouseClient({
             // We prefer to run queries on the offline cluster.
-            url: `http://${CLICKHOUSE_HOST}:8123`,
+            url: `http://${CLICKHOUSE_HOST}:${process.env.CLICKHOUSE_HTTP_PORT ?? '8123'}`,
             username: CLICKHOUSE_USER,
             password: CLICKHOUSE_PASSWORD || undefined,
             database: CLICKHOUSE_DATABASE,
@@ -153,10 +153,12 @@ export class Clickhouse {
                         Math.round((performance.now() - timer) / 100) / 10
                     }s since start. Error: ${error}`
                 )
-                const res = await fetch('http://localhost:8123/ping').catch((e) => {
-                    console.log('ClickHouse ping failed', e)
-                    return null
-                })
+                const res = await fetch(`http://localhost:${process.env.CLICKHOUSE_HTTP_PORT ?? '8123'}/ping`).catch(
+                    (e) => {
+                        console.log('ClickHouse ping failed', e)
+                        return null
+                    }
+                )
                 if (res) {
                     console.log('ClickHouse ping', res.status, await res.text())
                 }

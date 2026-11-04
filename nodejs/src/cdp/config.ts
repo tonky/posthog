@@ -270,10 +270,10 @@ export function getDefaultCdpConfig(): CdpConfig {
         CDP_HOGFLOW_AWAITED_STEPS_ENABLED: isProdEnv() ? false : true,
         CDP_INTERNAL_EVENTS_CONSUMER_METADATA_BROKER_LIST: '',
         CDP_REDIS_HOST: '127.0.0.1',
-        CDP_REDIS_PORT: 6379,
+        CDP_REDIS_PORT: Number(process.env.REDIS_PORT ?? 6379),
         CDP_REDIS_PASSWORD: '',
         CDP_REDIS_READER_HOST: '',
-        CDP_REDIS_READER_PORT: 6379,
+        CDP_REDIS_READER_PORT: Number(process.env.REDIS_PORT ?? 6379),
 
         // Points at the `valkey-cluster` compose service, which publishes on 6390 to stay
         // clear of the 6379 the primary CDP Redis already uses.

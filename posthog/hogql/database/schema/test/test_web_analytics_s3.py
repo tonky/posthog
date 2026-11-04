@@ -1,3 +1,6 @@
+import os
+from urllib.parse import urlparse
+
 from posthog.test.base import BaseTest
 from unittest.mock import patch
 
@@ -7,6 +10,7 @@ from posthog.hogql.database.schema.web_analytics_s3 import get_s3_function_args,
 
 from posthog.settings.object_storage import (
     OBJECT_STORAGE_ACCESS_KEY_ID,
+    OBJECT_STORAGE_ENDPOINT,
     OBJECT_STORAGE_EXTERNAL_WEB_ANALYTICS_BUCKET,
     OBJECT_STORAGE_REGION,
     OBJECT_STORAGE_SECRET_ACCESS_KEY,
@@ -44,7 +48,11 @@ class TestWebAnalyticsS3(BaseTest):
 
         url = get_s3_url(table_name=table_name, team_id=team_id)
 
-        expected_url = "http://objectstorage:19000/posthog/web_stats_daily_export/2/data.native"
+        # The object store as ClickHouse reaches it (patches/0001): the environment's host and the
+        # run's port, upstream's compose name and port by default.
+        host = os.environ.get("CLICKHOUSE_OBJECT_STORAGE_HOST", "objectstorage")
+        port = urlparse(OBJECT_STORAGE_ENDPOINT).port
+        expected_url = f"http://{host}:{port}/posthog/web_stats_daily_export/2/data.native"
 
         assert url == expected_url
 

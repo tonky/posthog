@@ -439,7 +439,7 @@ export function getDefaultIngestionConsumerConfig(): IngestionConsumerConfig {
         INGESTION_FEATURE_FLAG_CALLED_DEDUP_EXCLUDED_TEAMS: '',
         INGESTION_FEATURE_FLAG_CALLED_DEDUP_TTL_SECONDS: 60 * 60,
         INGESTION_FEATURE_FLAG_CALLED_DEDUP_REDIS_HOST: '',
-        INGESTION_FEATURE_FLAG_CALLED_DEDUP_REDIS_PORT: 6379,
+        INGESTION_FEATURE_FLAG_CALLED_DEDUP_REDIS_PORT: Number(process.env.REDIS_PORT ?? 6379),
 
         // Clickhouse topics
         CLICKHOUSE_JSON_EVENTS_KAFKA_TOPIC: KAFKA_EVENTS_JSON,
@@ -474,7 +474,7 @@ export function getDefaultIngestionConsumerConfig(): IngestionConsumerConfig {
         COOKIELESS_SESSION_INACTIVITY_MS: 30 * 60 * 1000,
         COOKIELESS_IDENTIFIES_TTL_SECONDS: (72 + 12 + 14 + 24) * 60 * 60,
         COOKIELESS_REDIS_HOST: '',
-        COOKIELESS_REDIS_PORT: 6379,
+        COOKIELESS_REDIS_PORT: Number(process.env.REDIS_PORT ?? 6379),
 
         // Property definitions
         PROPERTY_DEFS_CONSUMER_GROUP_ID: 'property-defs-consumer',

@@ -1,3 +1,4 @@
+import os
 from datetime import UTC, datetime
 from decimal import Decimal
 from io import StringIO
@@ -162,7 +163,9 @@ class TestLLMGatewayTeamCommand(BaseTest):
         self.assertIn("refresh ok", out)
 
 
-@override_settings(AI_GATEWAY_REDIS_URL="redis://localhost:6379/15")
+@override_settings(
+    AI_GATEWAY_REDIS_URL=f"redis://localhost:{os.getenv('REDIS_PORT', '6379')}/{os.getenv('AI_GATEWAY_TEST_REDIS_DB', '15')}"
+)
 class TestLLMGatewayTeamProjectQuota(BaseTest):
     def _run(self, *args: str) -> str:
         out = StringIO()

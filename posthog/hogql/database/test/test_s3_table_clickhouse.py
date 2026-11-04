@@ -1,9 +1,13 @@
 """Integration tests for S3/Parquet queries via ClickHouse."""
 
+import os
 import uuid
 import datetime
+from urllib.parse import urlparse
 
 from posthog.test.base import BaseTest, ClickhouseTestMixin
+
+from django.conf import settings
 
 import boto3
 import pyarrow as pa
@@ -13,8 +17,9 @@ from botocore.exceptions import ClientError
 
 from posthog.clickhouse.client import sync_execute
 
-MINIO_ENDPOINT = "http://localhost:19000"
-MINIO_CH_ENDPOINT = "http://objectstorage:19000"
+_MINIO_PORT = urlparse(settings.OBJECT_STORAGE_ENDPOINT).port or 19000
+MINIO_ENDPOINT = f"http://localhost:{_MINIO_PORT}"
+MINIO_CH_ENDPOINT = f"http://{os.environ.get('CLICKHOUSE_OBJECT_STORAGE_HOST', 'objectstorage')}:{_MINIO_PORT}"
 MINIO_ACCESS_KEY = "object_storage_root_user"
 MINIO_SECRET_KEY = "object_storage_root_password"
 BUCKET = "test-s3-tz-bug"

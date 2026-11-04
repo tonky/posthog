@@ -35,6 +35,21 @@ const ROUTER_METRICS_BASE_PORT: u16 = 24154;
 const LEADER_METRICS_BASE_PORT: u16 = 24160;
 const MAX_ROUTERS: u32 = 4;
 
+/// A port of the range above, moved with the whole range to start at
+/// PERSONHOG_HARNESS_PORT_BASE when it is set: two stacks on one host then
+/// listen on ranges of their own.
+fn port(default: u16) -> u16 {
+    match std::env::var("PERSONHOG_HARNESS_PORT_BASE") {
+        Ok(base) => {
+            let base: u16 = base
+                .parse()
+                .expect("PERSONHOG_HARNESS_PORT_BASE is a port number");
+            base + (default - REPLICA_GRPC_PORT)
+        }
+        Err(_) => default,
+    }
+}
+
 const ETCD_PREFIX: &str = "/personhog-test-harness/";
 const READY_DEADLINE: Duration = Duration::from_secs(90);
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
@@ -181,9 +196,12 @@ impl Stack {
             "replica",
             &config.bin_dir.join("personhog-replica"),
             &[
-                ("GRPC_ADDRESS", format!("127.0.0.1:{REPLICA_GRPC_PORT}")),
+                (
+                    "GRPC_ADDRESS",
+                    format!("127.0.0.1:{}", port(REPLICA_GRPC_PORT)),
+                ),
                 ("PRIMARY_DATABASE_URL", config.persons_db_url.clone()),
-                ("METRICS_PORT", REPLICA_METRICS_PORT.to_string()),
+                ("METRICS_PORT", port(REPLICA_METRICS_PORT).to_string()),
             ],
             &log_dir,
         )?);
@@ -204,7 +222,7 @@ impl Stack {
                     "FLUSH_INTERVAL_MS",
                     config.writer_flush_interval_ms.to_string(),
                 ),
-                ("METRICS_PORT", WRITER_METRICS_PORT.to_string()),
+                ("METRICS_PORT", port(WRITER_METRICS_PORT).to_string()),
             ],
             &log_dir,
         )?);
@@ -230,11 +248,11 @@ impl Stack {
                     ("ROUTER_MODE", "leader".to_string()),
                     (
                         "GRPC_ADDRESS",
-                        format!("127.0.0.1:{}", ROUTER_GRPC_BASE_PORT + i as u16),
+                        format!("127.0.0.1:{}", port(ROUTER_GRPC_BASE_PORT + i as u16)),
                     ),
                     (
                         "REPLICA_URL",
-                        format!("http://127.0.0.1:{REPLICA_GRPC_PORT}"),
+                        format!("http://127.0.0.1:{}", port(REPLICA_GRPC_PORT)),
                     ),
                     ("ETCD_ENDPOINTS", config.etcd_endpoints.clone()),
                     ("ETCD_PREFIX", ETCD_PREFIX.to_string()),
@@ -243,13 +261,13 @@ impl Stack {
                     ("IDENTITY_ENABLED", config.spawn_identity.to_string()),
                     (
                         "IDENTITY_URL",
-                        format!("http://127.0.0.1:{IDENTITY_GRPC_PORT}"),
+                        format!("http://127.0.0.1:{}", port(IDENTITY_GRPC_PORT)),
                     ),
                     ("POD_NAME", name.clone()),
                     ("COORDINATOR_ENABLED", (!is_traffic_router).to_string()),
                     (
                         "METRICS_PORT",
-                        (ROUTER_METRICS_BASE_PORT + i as u16).to_string(),
+                        port(ROUTER_METRICS_BASE_PORT + i as u16).to_string(),
                     ),
                 ],
                 &log_dir,
@@ -257,7 +275,7 @@ impl Stack {
             routers.push((name, proc));
         }
 
-        let traffic_router_port = ROUTER_GRPC_BASE_PORT + (config.routers - 1) as u16;
+        let traffic_router_port = port(ROUTER_GRPC_BASE_PORT + (config.routers - 1) as u16);
         let router_url = format!("http://127.0.0.1:{traffic_router_port}");
 
         // Identity resolves and creates on the Postgres primary and pushes
@@ -271,12 +289,15 @@ impl Stack {
                 "identity",
                 &config.bin_dir.join("personhog-identity"),
                 &[
-                    ("GRPC_ADDRESS", format!("127.0.0.1:{IDENTITY_GRPC_PORT}")),
+                    (
+                        "GRPC_ADDRESS",
+                        format!("127.0.0.1:{}", port(IDENTITY_GRPC_PORT)),
+                    ),
                     ("PRIMARY_DATABASE_URL", config.persons_db_url.clone()),
                     ("ROUTER_URL", router_url.clone()),
                     ("ETCD_ENDPOINTS", config.etcd_endpoints.clone()),
                     ("ETCD_PREFIX", ETCD_PREFIX.to_string()),
-                    ("METRICS_PORT", IDENTITY_METRICS_PORT.to_string()),
+                    ("METRICS_PORT", port(IDENTITY_METRICS_PORT).to_string()),
                     ("PERSON_TABLE", config.pg_target_table.clone()),
                     (
                         "PERSON_DISTINCT_ID_TABLE",
@@ -341,7 +362,7 @@ impl Stack {
         let (lifecycle_op, lifecycle_op_person) =
             crate::seed::lifecycle_tables_for(&self.config.pg_target_table);
 
-        let grpc_port = LEADER_GRPC_BASE_PORT + index as u16;
+        let grpc_port = port(LEADER_GRPC_BASE_PORT + index as u16);
         // A real pod name: the leader derives its advertise address from
         // its concrete bind, registers it, and the router dials what the
         // routing table carries — the same path a deployment takes.
@@ -386,7 +407,7 @@ impl Stack {
                 ("LIFECYCLE_OP_PERSON_TABLE", lifecycle_op_person.to_string()),
                 (
                     "METRICS_PORT",
-                    (LEADER_METRICS_BASE_PORT + index as u16).to_string(),
+                    port(LEADER_METRICS_BASE_PORT + index as u16).to_string(),
                 ),
             ],
             &self.config.extra_leader_env,
@@ -738,12 +759,12 @@ impl Stack {
         }
 
         for i in 0..self.routers.len() {
-            let addr = format!("127.0.0.1:{}", ROUTER_GRPC_BASE_PORT + i as u16);
+            let addr = format!("127.0.0.1:{}", port(ROUTER_GRPC_BASE_PORT + i as u16));
             wait_tcp(&addr, Duration::from_secs(10)).await?;
         }
         if self.identity_url.is_some() {
             wait_tcp(
-                &format!("127.0.0.1:{IDENTITY_GRPC_PORT}"),
+                &format!("127.0.0.1:{}", port(IDENTITY_GRPC_PORT)),
                 Duration::from_secs(10),
             )
             .await?;

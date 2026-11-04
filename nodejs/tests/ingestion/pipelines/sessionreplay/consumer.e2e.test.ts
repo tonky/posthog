@@ -41,7 +41,7 @@ import { Team } from '~/types'
 
 // Test configuration - matches local dev environment (MinIO API on port 19000)
 const TEST_CONFIG = {
-    S3_ENDPOINT: 'http://localhost:19000',
+    S3_ENDPOINT: process.env.OBJECT_STORAGE_ENDPOINT ?? 'http://localhost:19000',
     S3_REGION: 'us-east-1',
     S3_BUCKET: 'posthog',
     S3_PREFIX: 'session_recordings_integration_test',

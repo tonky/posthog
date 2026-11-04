@@ -102,7 +102,7 @@ export function getDefaultLogsIngestionConsumerConfig(): LogsIngestionConsumerCo
         LOGS_INGESTION_CONSUMER_DLQ_TOPIC: KAFKA_LOGS_INGESTION_DLQ,
         LOGS_INGESTION_CONSUMER_CLICKHOUSE_TOPIC: KAFKA_LOGS_CLICKHOUSE,
         LOGS_REDIS_HOST: '127.0.0.1',
-        LOGS_REDIS_PORT: 6379,
+        LOGS_REDIS_PORT: Number(process.env.REDIS_PORT ?? 6379),
         LOGS_REDIS_PASSWORD: '',
         LOGS_REDIS_TLS: isProdEnv() ? true : false,
         LOGS_LIMITER_ENABLED_TEAMS: isProdEnv() ? '' : '*',
@@ -136,7 +136,7 @@ export function getDefaultLogsIngestionConsumerConfig(): LogsIngestionConsumerCo
         // Overlapping fields with CommonConfig, included for standalone usage
         // ok to connect to localhost over plaintext
         // nosemgrep: trailofbits.generic.redis-unencrypted-transport.redis-unencrypted-transport
-        REDIS_URL: 'redis://127.0.0.1',
+        REDIS_URL: process.env.REDIS_URL ?? 'redis://127.0.0.1',
         REDIS_POOL_MIN_SIZE: 1,
         REDIS_POOL_MAX_SIZE: 3,
         KAFKA_CLIENT_RACK: undefined,
@@ -181,7 +181,7 @@ export function getDefaultTracesIngestionConsumerConfig(): TracesIngestionConsum
         TRACES_INGESTION_CONSUMER_DLQ_TOPIC: KAFKA_TRACES_INGESTION_DLQ,
         TRACES_INGESTION_CONSUMER_CLICKHOUSE_TOPIC: KAFKA_TRACES_CLICKHOUSE,
         TRACES_REDIS_HOST: '127.0.0.1',
-        TRACES_REDIS_PORT: 6379,
+        TRACES_REDIS_PORT: Number(process.env.REDIS_PORT ?? 6379),
         TRACES_REDIS_PASSWORD: '',
         TRACES_REDIS_TLS: isProdEnv() ? true : false,
         TRACES_LIMITER_ENABLED_TEAMS: isProdEnv() ? '' : '*',
@@ -202,7 +202,7 @@ export function getDefaultTracesIngestionConsumerConfig(): TracesIngestionConsum
         // Overlapping fields with CommonConfig, included for standalone usage
         // ok to connect to localhost over plaintext
         // nosemgrep: trailofbits.generic.redis-unencrypted-transport.redis-unencrypted-transport
-        REDIS_URL: 'redis://127.0.0.1',
+        REDIS_URL: process.env.REDIS_URL ?? 'redis://127.0.0.1',
         REDIS_POOL_MIN_SIZE: 1,
         REDIS_POOL_MAX_SIZE: 3,
         KAFKA_CLIENT_RACK: undefined,

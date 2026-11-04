@@ -1,3 +1,6 @@
+# Its own workspace, as cli/: a checkout nested inside another Cargo workspace builds it too.
+[workspace]
+
 [package]
 name = "funnels"
 version = "0.1.0"

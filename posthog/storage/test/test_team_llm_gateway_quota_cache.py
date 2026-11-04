@@ -1,3 +1,4 @@
+import os
 from datetime import UTC, datetime, timedelta
 
 from posthog.test.base import BaseTest
@@ -44,7 +45,9 @@ from ee.billing.quota_limiting import (
     remove_limited_team_tokens,
 )
 
-_GATEWAY_REDIS_URL = "redis://localhost:6379/15"
+_GATEWAY_REDIS_URL = (
+    f"redis://localhost:{os.getenv('REDIS_PORT', '6379')}/{os.getenv('AI_GATEWAY_TEST_REDIS_DB', '15')}"
+)
 _NOW = datetime(2026, 9, 22, 12, 0, 0, tzinfo=UTC)
 
 

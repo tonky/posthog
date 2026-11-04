@@ -2,6 +2,7 @@ import uuid
 from datetime import datetime, timedelta
 from functools import partial
 from typing import Any, Optional
+from urllib.parse import urlparse
 from uuid import UUID
 
 import pytest
@@ -28,6 +29,8 @@ from posthog.dags.backups import (
     sharded_backup,
     wait_for_backup,
 )
+
+OBJECT_STORAGE_PORT = urlparse(settings.OBJECT_STORAGE_ENDPOINT).port or 19000
 
 
 @pytest.mark.parametrize(
@@ -214,8 +217,9 @@ def run_backup_test(
         client.execute(
             """
             BACKUP TABLE person_distinct_id_overrides
-            TO S3('http://objectstorage:19000/{bucket_name}/{database}/person_distinct_id_overrides/{shard}/full-{date}')
+            TO S3('http://{bucket_domain}/{bucket_name}/{database}/person_distinct_id_overrides/{shard}/full-{date}')
             """.format(
+                bucket_domain=settings.DATAWAREHOUSE_BUCKET_DOMAIN,
                 bucket_name=bucket_name,
                 database=settings.CLICKHOUSE_DATABASE,
                 shard="noshard" if not sharded else "1",
@@ -245,13 +249,15 @@ def run_backup_test(
     run_id = uuid.uuid4()
     s3_client = boto3.client(
         "s3",
-        endpoint_url="http://localhost:19000",
+        endpoint_url=f"http://localhost:{OBJECT_STORAGE_PORT}",
         aws_access_key_id="object_storage_root_user",
         aws_secret_access_key="object_storage_root_password",
     )
     with (
         patch("django.conf.settings.CLICKHOUSE_BACKUPS_BUCKET", bucket_name),
-        patch.object(Backup, "_bucket_base_path", return_value=f"http://objectstorage:19000/{bucket_name}"),
+        patch.object(
+            Backup, "_bucket_base_path", return_value=f"http://{settings.DATAWAREHOUSE_BUCKET_DOMAIN}/{bucket_name}"
+        ),
     ):
         # Prepare needed data before running the job
         # Insert some data and create the backup log table flushing the logs
@@ -271,7 +277,7 @@ def run_backup_test(
             resources={
                 "cluster": cluster,
                 "s3": S3Resource(
-                    endpoint_url="http://localhost:19000",
+                    endpoint_url=f"http://localhost:{OBJECT_STORAGE_PORT}",
                     aws_access_key_id="object_storage_root_user",
                     aws_secret_access_key="object_storage_root_password",
                 ),

@@ -1,3 +1,4 @@
+import os
 import json
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -50,7 +51,9 @@ from posthog.tasks.gateway_credential import (
     update_gateway_credential_cache_task,
 )
 
-_TEST_GATEWAY_REDIS_URL = "redis://localhost:6379/15"
+_TEST_GATEWAY_REDIS_URL = (
+    f"redis://localhost:{os.getenv('REDIS_PORT', '6379')}/{os.getenv('AI_GATEWAY_TEST_REDIS_DB', '15')}"
+)
 
 GATEWAY_SCOPE = "llm_gateway:read"
 SECRET_KEY_KIND = "project_secret_api_key"

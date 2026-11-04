@@ -86,7 +86,7 @@ async fn start_harness() -> Harness {
         Arc::new(InflightTracker::new()),
         NUM_PARTITIONS,
         Arc::new(DirtyIndex::new(1_000_000)),
-        test_recovery(&topic, KAFKA_BOOTSTRAP),
+        test_recovery(&topic, *KAFKA_BOOTSTRAP),
         PropertySizeLimits::new(655360, 524288),
         WarningsProducer::new(producer, "clickhouse_ingestion_warnings".to_string()),
         Arc::new(DashMap::new()),

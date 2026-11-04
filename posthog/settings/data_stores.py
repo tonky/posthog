@@ -320,6 +320,8 @@ CLICKHOUSE_SATELLITE_CLUSTERS: list[str] = [
     s.strip() for s in os.getenv("CLICKHOUSE_SATELLITE_CLUSTERS", "ai_events,aux,ops,sessions").split(",") if s.strip()
 ]
 CLICKHOUSE_CA: str | None = os.getenv("CLICKHOUSE_CA", None)
+# The native protocol's port; unset, the driver's default (9000, 9440 secure).
+CLICKHOUSE_TCP_PORT: int | None = get_from_env("CLICKHOUSE_TCP_PORT", None, type_cast=int, optional=True)
 CLICKHOUSE_SECURE: bool = get_from_env("CLICKHOUSE_SECURE", not TEST and not DEBUG, type_cast=str_to_bool)
 CLICKHOUSE_VERIFY: bool = get_from_env("CLICKHOUSE_VERIFY", True, type_cast=str_to_bool)
 CLICKHOUSE_ENABLE_STORAGE_POLICY: bool = get_from_env("CLICKHOUSE_ENABLE_STORAGE_POLICY", False, type_cast=str_to_bool)
@@ -455,10 +457,11 @@ CLICKHOUSE_LLM_ANALYTICS_MAX_CONCURRENT_QUERIES: int = get_from_env(
 )
 
 _clickhouse_http_protocol = "http://"
-_clickhouse_http_port = "8123"
+_clickhouse_http_port = os.getenv("CLICKHOUSE_HTTP_PORT", "8123")
 if CLICKHOUSE_SECURE:
     _clickhouse_http_protocol = "https://"
-    _clickhouse_http_port = "8443"
+    _clickhouse_http_port = os.getenv("CLICKHOUSE_HTTP_PORT", "8443")
+CLICKHOUSE_HTTP_PORT: int = int(_clickhouse_http_port)
 
 CLICKHOUSE_HTTP_URL: str = f"{_clickhouse_http_protocol}{CLICKHOUSE_HOST}:{_clickhouse_http_port}/"
 

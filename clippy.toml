@@ -1,0 +1,3 @@
+# Clippy's defaults, as upstream's checkout has no clippy.toml. Clippy looks for one in each
+# directory up from the crate, so a checkout nested in another repository (the enact
+# repository's usecases/) would take that repository's limits; this file ends the search.

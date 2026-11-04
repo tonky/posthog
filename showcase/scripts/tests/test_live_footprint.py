@@ -1,0 +1,316 @@
+"""live_footprint.py's shared footprint holds what the job that recorded it ran: its own run
+script (not the other live stack's), and the frontend build's inputs only when its app served
+the build's outputs (the e2e specs' browser), never the desktop app's stylesheets, a workspace
+of their own the bundle never takes in. Every e2e and MCP spec holds the shared footprint, so a
+file in it that the job never read selects its whole suite. A spec's own footprint takes in
+node_reads.mjs's records of its Node.js processes and their worker threads (NodeReadsTest).
+"""
+
+import importlib.util
+import json
+import os
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from hermetic import helper_env  # noqa: E402
+
+SCRIPTS = Path(__file__).resolve().parents[1]
+
+CORE = (
+    Path(os.environ["ENACT_FOOTPRINT_CORE"])
+    if os.environ.get("ENACT_FOOTPRINT_CORE")
+    else Path(__file__).resolve().parents[6] / "crates/enact-runner/recorders/python/enact_footprint.py"
+    if (Path(__file__).resolve().parents[6] / "crates/enact-runner/recorders/python/enact_footprint.py").exists()
+    else SCRIPTS.parent / "pytest_plugins/enact_footprint.py"
+)
+spec = importlib.util.spec_from_file_location("provenance_core", CORE)
+core = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = core
+spec.loader.exec_module(core)
+
+class ChildRecorderProvenanceTest(unittest.TestCase):
+    def test_actual_and_unknown_recorder_ids_survive_every_merge_boundary(self):
+        old = core.Footprint.load({"reads": ["child.txt"], "recorders": ["enact-trace/1", "custom/7"]}, native=True)
+        current = core.Footprint.load({"recorders": ["enact-trace/2"]}, native=True)
+        merged = core.Footprint.load(old.copy().dump())
+        merged.update(current)
+        entry = merged.entry(0, {})
+        self.assertEqual(set(entry["recorders"]), {core.RECORDER, "enact-trace/1", "enact-trace/2", "custom/7"})
+        self.assertIn("child.txt", entry["files"])
+        self.assertFalse(merged.opaque)
+
+    def test_a_legacy_native_record_without_provenance_is_incomplete(self):
+        child = core.Footprint.load({"reads": ["child.txt"]}, native=True)
+        self.assertTrue(any("kernel recorder provenance" in why for why in child.opaque))
+        self.assertIn("child.txt", child.entry(0, {})["files"])
+        self.assertNotIn("enact-trace/2", child.entry(0, {})["recorders"])
+
+    def test_python_children_do_not_invent_native_coverage(self):
+        child = core.Footprint.load({"reads": ["python.txt"]})
+        self.assertFalse(child.opaque)
+        self.assertEqual(child.entry(0, {})["recorders"], [core.RECORDER])
+
+    def test_socket_connect_attributes_loopback_services_and_emits_target_service_deps(self):
+        fp = core.footprints.setdefault("api/test_db.py", core.Footprint())
+        fp.services.clear()
+        fp.duration_sec = 0.25
+        prev = core.current
+        core.current = fp
+        try:
+            core._audit_socket_connect((None, ("127.0.0.1", 5432)))
+            core._audit_socket_connect((None, ("localhost", 6379)))
+            core._audit_socket_connect((None, ("127.0.0.1", 9092)))
+            core._audit_socket_connect((None, ("8.8.8.8", 5432)))
+        finally:
+            core.current = prev
+        self.assertEqual(fp.services, {"postgres", "redis", "kafka"})
+        entry = fp.entry(0, {}, shared=core.shared)
+        self.assertEqual(entry.get("duration_ms"), 250)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = core.write_map(tmp, "svc-", {}, {"api/test_db.py": entry})
+            written = json.loads(Path(path).read_text())
+            self.assertEqual(
+                written.get("target_service_deps"),
+                {"api/test_db.py": ["kafka", "postgres", "redis"]},
+            )
+            v2_path = core.write_raw_v2(tmp, "v2-")
+            raw_v2 = json.loads(Path(v2_path).read_text())
+            self.assertEqual(raw_v2.get("version"), 2)
+            self.assertEqual(
+                raw_v2["targets"]["api/test_db.py"].get("services"),
+                ["kafka", "postgres", "redis"],
+            )
+            self.assertEqual(raw_v2["targets"]["api/test_db.py"].get("duration_ms"), 250)
+        core.footprints.pop("api/test_db.py", None)
+
+
+FILES = [
+    "showcase/scripts/live_posthog.sh",
+    "showcase/scripts/run_e2e_tests.sh",
+    "showcase/scripts/build_e2e.sh",
+    "showcase/scripts/run_mcp_integration.sh",
+    "pyproject.toml",
+    "frontend/build.mjs",
+    "frontend/src/styles/base.scss",
+    "products/desktop/apps/code/global.css",
+    "products/web_analytics/manifest.tsx",
+]
+
+
+class LiveFootprintTest(unittest.TestCase):
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.repo = Path(tmp.name)
+        for file in FILES:
+            (self.repo / file).parent.mkdir(parents=True, exist_ok=True)
+            (self.repo / file).write_text("x\n")
+        # A production build's record: the frontend counts as built.
+        (self.repo / "frontend/app-esbuild-meta.json").write_text('{"outputs": {}}')
+        self.recording = self.repo / "recording"
+        for sub in ("records", "node/1"):
+            (self.recording / sub).mkdir(parents=True)
+
+    def shared(self, job: str, served: bool) -> set[str]:
+        if served:
+            records = self.recording / "records"
+            (records / "1.started").write_text("<shared>\n")
+            (records / "1.json").write_text(json.dumps({"footprint": {"reads": ["frontend/dist/index.html"]}}))
+        return set(self.written_map(job)["shared"]["files"])
+
+    def written_map(self, job: str) -> dict:
+        out = self.repo / "maps"
+        env = helper_env() | {"ENACT_FOOTPRINT_DIR": str(out), "LIVE_JOB": job}
+        subprocess.run(
+            [sys.executable, str(SCRIPTS / "live_footprint.py"), "write", str(self.recording), "spec.ts=0"],
+            cwd=self.repo,
+            env=env,
+            check=True,
+            capture_output=True,
+        )
+        (written,) = [p for p in out.iterdir() if p.suffix == ".json"]
+        return json.loads(written.read_text())
+
+    def native_shared_map(self, recorders=None) -> dict:
+        records = self.recording / "records"
+        (records / "1.started").write_text("spec.ts\n")
+        (records / "1.json").write_text(json.dumps({"footprint": {"reads": ["app.py"]}}))
+        (records / "2-xnative.started").write_text("<shared>\nexec:sh\n")
+        child = {"reads": ["native.txt"]}
+        if recorders is not None:
+            child["recorders"] = recorders
+        (records / "xnative.json").write_text(json.dumps({"footprint": child}))
+        node = self.recording / "node/1"
+        (node / "1.started").write_text("node\n")
+        (node / "1.json").write_text(json.dumps({"reads": ["spec.ts"]}))
+        return self.written_map("run_mcp_integration.sh")
+
+    def test_native_shared_provenance_survives_alongside_both_adapter_stamps(self):
+        raw = self.native_shared_map(["enact-trace/2", "external/9"])
+        expected = {core.RECORDER, "live_footprint.py/3", "enact-trace/2", "external/9"}
+        self.assertEqual(set(raw["shared"]["recorders"]), expected)
+        # Shared metadata is laid over the spec by the normal map reader.
+        self.assertEqual(set(raw["targets"]["spec.ts"]["recorders"]), {core.RECORDER, "live_footprint.py/3"})
+        self.assertNotEqual(raw["targets"]["spec.ts"].get("outcome"), "partial")
+
+    def test_a_shared_legacy_native_record_cannot_leave_a_complete_spec(self):
+        raw = self.native_shared_map()
+        self.assertEqual(raw["targets"]["spec.ts"]["outcome"], "partial")
+        stats = next((self.repo / "maps").glob("*.stats"))
+        reasons = json.loads(stats.read_text())["opaque"]["spec.ts"]
+        self.assertTrue(any("kernel recorder provenance" in reason for reason in reasons), reasons)
+
+    def test_the_mcp_job_holds_its_own_script_and_no_build(self):
+        shared = self.shared("run_mcp_integration.sh", served=False)
+        self.assertIn("showcase/scripts/run_mcp_integration.sh", shared)
+        self.assertIn("showcase/scripts/live_posthog.sh", shared)
+        for file in ["showcase/scripts/run_e2e_tests.sh", "showcase/scripts/build_e2e.sh", "frontend/build.mjs"]:
+            self.assertNotIn(file, shared)
+        self.assertFalse([f for f in shared if f.endswith((".css", ".scss"))], shared)
+
+    def test_a_served_build_holds_its_inputs_but_not_the_desktop_app(self):
+        shared = self.shared("run_e2e_tests.sh", served=True)
+        for file in [
+            "showcase/scripts/run_e2e_tests.sh",
+            "showcase/scripts/build_e2e.sh",
+            "frontend/build.mjs",
+            "frontend/src/styles/base.scss",
+            "products/web_analytics/manifest.tsx",
+        ]:
+            self.assertIn(file, shared)
+        self.assertNotIn("showcase/scripts/run_mcp_integration.sh", shared)
+        self.assertNotIn("products/desktop/apps/code/global.css", shared)
+
+    def test_an_unknown_job_holds_every_script(self):
+        shared = self.shared("", served=False)
+        for file in ["showcase/scripts/run_e2e_tests.sh", "showcase/scripts/run_mcp_integration.sh"]:
+            self.assertIn(file, shared)
+
+    def test_playwright_skip_records_mark_skipped_on_and_missing_records_are_partial(self):
+        records = self.recording / "records"
+        for idx, spec in enumerate(["pass.spec.ts", "skip.spec.ts", "unreported.spec.ts"], 1):
+            (records / f"{idx}.started").write_text(f"{spec}\n")
+            (records / f"{idx}.json").write_text(json.dumps({"footprint": {"reads": ["app.py"]}}))
+            node = self.recording / f"node/{idx}"
+            node.mkdir(parents=True, exist_ok=True)
+            (node / "1.started").write_text("node\n")
+            (node / "1.json").write_text(json.dumps({"reads": [spec]}))
+        skips = self.recording / "skips"
+        skips.mkdir(parents=True, exist_ok=True)
+        (skips / "1.jsonl").write_text(
+            json.dumps({"target": "pass.spec.ts", "outcome": "passed", "skipped": False, "reads": []}) + "\n"
+        )
+        (skips / "2.jsonl").write_text(
+            json.dumps({"target": "skip.spec.ts", "outcome": "passed", "skipped": True, "reads": []}) + "\n"
+        )
+        out = self.repo / "maps"
+        env = helper_env() | {"ENACT_FOOTPRINT_DIR": str(out), "LIVE_JOB": "run_e2e_tests.sh"}
+        subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPTS / "live_footprint.py"),
+                "write",
+                str(self.recording),
+                "pass.spec.ts=0",
+                "skip.spec.ts=0",
+                "unreported.spec.ts=0",
+            ],
+            cwd=self.repo,
+            env=env,
+            check=True,
+            capture_output=True,
+        )
+        (written,) = [p for p in out.iterdir() if p.suffix == ".json"]
+        targets = json.loads(written.read_text())["targets"]
+        platform = "linux" if sys.platform.startswith("linux") else sys.platform
+        self.assertNotIn("skipped_on", targets["pass.spec.ts"])
+        self.assertNotIn("outcome", targets["pass.spec.ts"])
+        self.assertEqual(targets["skip.spec.ts"].get("skipped_on"), [platform])
+        self.assertNotIn("outcome", targets["skip.spec.ts"])
+        self.assertNotIn("skipped_on", targets["unreported.spec.ts"])
+        self.assertEqual(targets["unreported.spec.ts"].get("outcome"), "partial")
+
+
+# The spec's runner: reads a.txt, starts a worker that reads b.txt and then never returns (as
+# esbuild's thread), and exits as soon as the worker has read.
+MAIN = """
+import fs from 'node:fs'
+import { Worker } from 'node:worker_threads'
+fs.readFileSync('a.txt')
+const worker = process.argv[2] === 'eval'
+    ? new Worker(fs.readFileSync('worker.cjs', 'utf8'), { eval: true })
+    : new Worker(new URL('./worker.cjs', import.meta.url))
+worker.unref()
+worker.once('message', () => process.exit(0))
+"""
+WORKER = """
+const fs = require('fs')
+const { parentPort } = require('worker_threads')
+fs.readFileSync('b.txt')
+parentPort.postMessage('read')
+setInterval(() => {}, 1000)
+"""
+
+
+class NodeReadsTest(unittest.TestCase):
+    """node_reads.mjs records a spec's Node.js processes and their worker threads (live_footprint.py
+    turns the records into its footprint). A worker thread can end with its process without an exit
+    event: esbuild's sync-transform thread, which tsx starts on a cold cache (the first
+    copy-instructions.ts run of each mcp recording), never returns. Its reads count, and the spec is
+    complete when every worker recorded; a worker that never ran the preload (an eval worker) leaves
+    the spec incomplete.
+    """
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.repo = Path(tmp.name).resolve()
+        for name, text in [("a.txt", "a\n"), ("b.txt", "b\n"), ("main.mjs", MAIN), ("worker.cjs", WORKER)]:
+            (self.repo / name).write_text(text)
+        # No production build: the app served none.
+        (self.repo / "frontend").mkdir()
+        self.recording = self.repo / "recording"
+        (self.recording / "records").mkdir(parents=True)
+        # The app's record for the spec: it ran some Python.
+        (self.recording / "records/1.started").write_text("spec.ts\n")
+        (self.recording / "records/1.json").write_text(json.dumps({"footprint": {"reads": ["app.py"]}}))
+
+    def footprint(self, mode: str) -> dict:
+        env = helper_env() | {
+            "ENACT_NODE_READS": str(self.recording / "node/1"),
+            "ENACT_FOOTPRINT_ROOT": str(self.repo),
+            "NODE_OPTIONS": f"--import {SCRIPTS / 'node_reads.mjs'}",
+        }
+        subprocess.run(["node", "main.mjs", mode], cwd=self.repo, env=env, check=True, timeout=60)
+        out = self.repo / "maps"
+        env = helper_env() | {"ENACT_FOOTPRINT_DIR": str(out), "LIVE_JOB": "run_mcp_integration.sh"}
+        env.pop("NODE_OPTIONS", None)
+        subprocess.run(
+            [sys.executable, str(SCRIPTS / "live_footprint.py"), "write", str(self.recording), "spec.ts=0"],
+            cwd=self.repo,
+            env=env,
+            check=True,
+            capture_output=True,
+        )
+        (written,) = [p for p in out.iterdir() if p.suffix == ".json"]
+        return json.loads(written.read_text())["targets"]["spec.ts"]
+
+    def test_a_worker_ending_with_its_process_records_its_reads(self):
+        target = self.footprint("file")
+        self.assertNotIn("outcome", target)
+        for file in ["a.txt", "b.txt", "worker.cjs", "main.mjs"]:
+            self.assertIn(file, target["files"])
+
+    def test_a_worker_without_the_preload_leaves_the_spec_incomplete(self):
+        target = self.footprint("eval")
+        self.assertIn("outcome", target)
+        self.assertNotIn("b.txt", target["files"])
+        self.assertTrue(os.listdir(self.recording / "node/1"))
+
+
+if __name__ == "__main__":
+    unittest.main()

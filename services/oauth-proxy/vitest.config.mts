@@ -34,7 +34,7 @@ function htmlRawPlugin(): Plugin {
 }
 
 export default defineConfig({
-    plugins: [tsconfigPaths(), htmlRawPlugin(), binaryRawPlugin()],
+    plugins: [tsconfigPaths({ root: '.' }), htmlRawPlugin(), binaryRawPlugin()],
     test: {
         environment: 'node',
     },

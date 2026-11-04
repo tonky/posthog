@@ -6,7 +6,7 @@ import { parseJSON } from '~/common/utils/json-parse'
 import { RerunJobManager } from './rerun-job.manager'
 import { RERUN_QUEUE_NAME, RerunJobState } from './rerun-job.types'
 
-const DB_URL = 'postgres://posthog:posthog@localhost:5432/test_cyclotron_node'
+const DB_URL = `postgres://posthog:posthog@localhost:${process.env.PGPORT ?? '5432'}/test_cyclotron_node`
 const TEST_MAX_COUNT = 1000
 
 describe('RerunJobManager', () => {

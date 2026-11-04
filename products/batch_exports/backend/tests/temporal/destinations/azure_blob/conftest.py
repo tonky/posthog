@@ -1,3 +1,4 @@
+import os
 import uuid
 import logging
 
@@ -20,14 +21,19 @@ pytestmark = [pytest.mark.asyncio, pytest.mark.django_db]
 AZURITE_ACCOUNT_NAME = "devstoreaccount1"
 AZURITE_ACCOUNT_KEY = "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw=="
 
+# The emulator's blob port: its default, unless the environment runs it on another.
+AZURITE_BLOB_PORT = os.getenv("AZURITE_BLOB_PORT", "10000")
+
 AZURITE_CONNECTION_STRING = (
     f"DefaultEndpointsProtocol=http;"
     f"AccountName={AZURITE_ACCOUNT_NAME};"
     f"AccountKey={AZURITE_ACCOUNT_KEY};"
-    f"BlobEndpoint=http://localhost:10000/{AZURITE_ACCOUNT_NAME};"
+    f"BlobEndpoint=http://localhost:{AZURITE_BLOB_PORT}/{AZURITE_ACCOUNT_NAME};"
 )
 
-AZURITE_CONNECTION_STRING_DOCKER = AZURITE_CONNECTION_STRING.replace("localhost:10000", "objectstorage-azure:10000")
+AZURITE_CONNECTION_STRING_DOCKER = AZURITE_CONNECTION_STRING.replace(
+    f"localhost:{AZURITE_BLOB_PORT}", "objectstorage-azure:10000"
+)
 
 
 @pytest.fixture

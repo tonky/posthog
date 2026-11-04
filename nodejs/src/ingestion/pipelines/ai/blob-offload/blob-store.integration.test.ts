@@ -19,7 +19,7 @@ jest.setTimeout(30000)
 // The shared `posthog` bucket is deliberate: SeaweedFS maps each bucket to a
 // collection with its own volume slots, and the dev node's 8 slots are already
 // allocated — a dedicated test bucket would hang on volume assignment.
-const ENDPOINT = 'http://localhost:8333'
+const ENDPOINT = process.env.SESSION_RECORDING_V2_S3_ENDPOINT ?? 'http://localhost:8333'
 const BUCKET = 'posthog'
 // URL-significant characters on purpose (the percent-encoded CopySource was a
 // prior review finding, and only a real implementation can falsify it); a

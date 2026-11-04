@@ -175,7 +175,7 @@ async def run_external_data_job_workflow(
             DATAWAREHOUSE_LOCAL_ACCESS_KEY=settings.OBJECT_STORAGE_ACCESS_KEY_ID,
             DATAWAREHOUSE_LOCAL_ACCESS_SECRET=settings.OBJECT_STORAGE_SECRET_ACCESS_KEY,
             DATAWAREHOUSE_LOCAL_BUCKET_REGION="us-east-1",
-            DATAWAREHOUSE_BUCKET_DOMAIN="objectstorage:19000",
+            DATAWAREHOUSE_BUCKET_DOMAIN=settings.DATAWAREHOUSE_BUCKET_DOMAIN,
         ),
         mock.patch.object(DeltaMaintenance, "run_scheduled") as mock_run_scheduled,
         mock.patch(

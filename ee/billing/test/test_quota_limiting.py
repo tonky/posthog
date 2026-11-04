@@ -1,3 +1,4 @@
+import os
 import datetime
 from typing import Any, cast
 from uuid import uuid4
@@ -3258,9 +3259,14 @@ class TestRefreshOrgSelfDrivingQuota(BaseTest):
         live_mock.assert_not_called()
 
 
-@override_settings(CLOUD_DEPLOYMENT="US", AI_GATEWAY_REDIS_URL="redis://localhost:6379/15")
+@override_settings(
+    CLOUD_DEPLOYMENT="US",
+    AI_GATEWAY_REDIS_URL=f"redis://localhost:{os.getenv('REDIS_PORT', '6379')}/{os.getenv('AI_GATEWAY_TEST_REDIS_DB', '15')}",
+)
 class TestLLMGatewayQuotaProjectionHooks(BaseTest):
-    _GATEWAY_REDIS_URL = "redis://localhost:6379/15"
+    _GATEWAY_REDIS_URL = (
+        f"redis://localhost:{os.getenv('REDIS_PORT', '6379')}/{os.getenv('AI_GATEWAY_TEST_REDIS_DB', '15')}"
+    )
 
     def setUp(self):
         super().setUp()
