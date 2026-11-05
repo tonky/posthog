@@ -2,8 +2,8 @@
   "platforms": {
     "aarch64-darwin": {
       "binding": {
-        "environment_sha256": "6253414214deda9821439346c2586a264d27e1254592259e0f6404a10a9c4bf4",
-        "inventory_sha256": "715ec4d23d697b1c606ac72ad3df727b2e0f2b4bb02614fa3217b6c9f2ef146f",
+        "environment_sha256": "22e25755e307fad8f3d2a838450ba2fe96a29d0a5743eb417edef3b340d7495d",
+        "inventory_sha256": "d680465e63bfc7fca42241106a3b0569df92723e13517c2e667b5fd905198ea5",
         "profile": null,
         "version": 2
       },
@@ -3508,7 +3508,7 @@
           }
         },
         "lockSourcePath": "enve.lock",
-        "projectSha256": "b2c4e4d8ac701c536f01fcae20b33b0c7f32afe73dc7abb77a97d219c28851db"
+        "projectSha256": "609b5504445fc5437016b4ab4500bf05d493d1f5557f25de81f096d8f89c35e4"
       },
       "environment": {
         "AWS_ENDPOINT_URL": "http://127.0.0.1:${ENVE_SERVICE_SEAWEEDFS_PORT}",
@@ -4462,8 +4462,8 @@
     },
     "aarch64-linux": {
       "binding": {
-        "environment_sha256": "6253414214deda9821439346c2586a264d27e1254592259e0f6404a10a9c4bf4",
-        "inventory_sha256": "c503abe6395d1957615efc83df84d36166ee845a69ff45020ca9a5327717222d",
+        "environment_sha256": "22e25755e307fad8f3d2a838450ba2fe96a29d0a5743eb417edef3b340d7495d",
+        "inventory_sha256": "f549ebb40b9c270e2ca5a42dc33c360b19df49400d674a8594e6d4adaf1683f8",
         "profile": null,
         "version": 2
       },
@@ -7422,6 +7422,17 @@
             "k35v740z5dfa098gw641r0db6kah9fvs-glib-2.88.3",
             "na9inwswsrgxxqpqrz3ms78qn7pyxg44-gcc-16.2.0-lib",
             "p1bbd8gmc81qf2qrsd0z3wcw0dp40ljz-gnum4-1.4.21"
+          ]
+        },
+        {
+          "hash_name": "f8n589x4ylycnji497pldwhcfhmf3kvz-clang-21.1.8-lib",
+          "nar_hash": "sha256:1cjqyhxz3hm63k4rv21nyvc6vv4mpwgbm9mcq947yrrsv1s5bjrb",
+          "nar_size": 903552384,
+          "references": [
+            "7bab191a19xwb2if0lpc51dw79nidycb-llvm-21.1.8-lib",
+            "f8n589x4ylycnji497pldwhcfhmf3kvz-clang-21.1.8-lib",
+            "hx9wvdx2l59iahwf9nmrx7rwkm6cymgs-glibc-2.44-25",
+            "na9inwswsrgxxqpqrz3ms78qn7pyxg44-gcc-16.2.0-lib"
           ]
         },
         {
@@ -13366,6 +13377,38 @@
             },
             {
               "constraint": {
+                "attr": "llvmPackages.libclang",
+                "context": "profiles.dev",
+                "output": "lib",
+                "system": "aarch64-linux",
+                "version": null
+              },
+              "package": {
+                "attr_path": "llvmPackages.libclang",
+                "name": "clang",
+                "origin": {
+                  "Channel": {
+                    "build": 347153807,
+                    "evaluation": 1829922,
+                    "release": "nixpkgs/nixpkgs-26.11pre1086972.7dd199b0e299/"
+                  }
+                },
+                "outputs": {
+                  "debug": "/nix/store/5gx408ijr1aq1f3cqmvc4h0hvjcl9sjw-clang-21.1.8-debug",
+                  "dev": "/nix/store/79db864sxz7rvsc74fy4a47wnyh3rr93-clang-21.1.8-dev",
+                  "lib": "/nix/store/f8n589x4ylycnji497pldwhcfhmf3kvz-clang-21.1.8-lib",
+                  "out": "/nix/store/90fsiw1iv22w38ijzfv7jw9j6xczhq78-clang-21.1.8",
+                  "python": "/nix/store/njixbksnl5v1ik7wqgwyjr5c17parzk8-clang-21.1.8-python"
+                },
+                "rev": "7dd199b0e2993e37b4775ed66b1c291699608c9f",
+                "store_paths": [
+                  "/nix/store/90fsiw1iv22w38ijzfv7jw9j6xczhq78-clang-21.1.8"
+                ],
+                "version": "21.1.8"
+              }
+            },
+            {
+              "constraint": {
                 "attr": "mesa",
                 "context": "profiles.dev",
                 "output": null,
@@ -14307,7 +14350,7 @@
           }
         },
         "lockSourcePath": "enve.lock",
-        "projectSha256": "b2c4e4d8ac701c536f01fcae20b33b0c7f32afe73dc7abb77a97d219c28851db"
+        "projectSha256": "609b5504445fc5437016b4ab4500bf05d493d1f5557f25de81f096d8f89c35e4"
       },
       "environment": {
         "AWS_ENDPOINT_URL": "http://127.0.0.1:${ENVE_SERVICE_SEAWEEDFS_PORT}",
@@ -14406,7 +14449,7 @@
         "KAFKA_HOSTS": "127.0.0.1:${ENVE_SERVICE_KAFKA_PORT}",
         "KAFKA_PORT": "9092",
         "KAFKA_URL": "127.0.0.1:${ENVE_SERVICE_KAFKA_PORT}",
-        "LD_RUN_PATH": "$ENVE_STORE_DIR/na9inwswsrgxxqpqrz3ms78qn7pyxg44-gcc-16.2.0-lib/lib:$ENVE_STORE_DIR/db07pw9avlwysb3v68cfp9cijg2mmfns-openssl-3.5.8/lib",
+        "LD_RUN_PATH": "$ENVE_STORE_DIR/na9inwswsrgxxqpqrz3ms78qn7pyxg44-gcc-16.2.0-lib/lib:$ENVE_STORE_DIR/f8n589x4ylycnji497pldwhcfhmf3kvz-clang-21.1.8-lib/lib:$ENVE_STORE_DIR/db07pw9avlwysb3v68cfp9cijg2mmfns-openssl-3.5.8/lib",
         "MAILDEV_HOST": "127.0.0.1",
         "MAILDEV_PORT": "1080",
         "MAILDEV_URL": "http://127.0.0.1:1080",
@@ -14904,6 +14947,22 @@
           },
           "version": "1.8.2"
         },
+        "libclang": {
+          "closure": "f8n589x4ylycnji497pldwhcfhmf3kvz-clang-21.1.8-lib",
+          "libraries": true,
+          "outputs": [
+            "f8n589x4ylycnji497pldwhcfhmf3kvz-clang-21.1.8-lib"
+          ],
+          "source": {
+            "attr": "llvmPackages.libclang",
+            "build": 347153807,
+            "evaluation": 1829922,
+            "kind": "channel",
+            "release": "nixpkgs/nixpkgs-26.11pre1086972.7dd199b0e299/",
+            "rev": "7dd199b0e2993e37b4775ed66b1c291699608c9f"
+          },
+          "version": "21.1.8"
+        },
         "nodejs": {
           "closure": "8lgcgi9riqm71v9ibjw5qjcwwr5nfm83-nodejs-24.21.0",
           "outputs": [
@@ -15392,8 +15451,8 @@
     },
     "x86_64-linux": {
       "binding": {
-        "environment_sha256": "6253414214deda9821439346c2586a264d27e1254592259e0f6404a10a9c4bf4",
-        "inventory_sha256": "461ccbacac85fbe93ce93841df153d94d4c9e8be03e82b8abeb922b55f978b23",
+        "environment_sha256": "22e25755e307fad8f3d2a838450ba2fe96a29d0a5743eb417edef3b340d7495d",
+        "inventory_sha256": "d363001c990b9809233aaf4f631b34290e35bd6baae4ff90b28d65e578d399b4",
         "profile": null,
         "version": 2
       },
@@ -17487,6 +17546,17 @@
           "references": [
             "admwq91a8y32wmfw5hkilkmlwhnsr8yp-numactl-2.0.18",
             "h4wfwic161kxrr74jlzla5lsm28hgary-glibc-2.44-25"
+          ]
+        },
+        {
+          "hash_name": "adr7l6vazpqqjy2wab0v27pzp17c4sq6-clang-21.1.8-lib",
+          "nar_hash": "sha256:0np4x907r5fbyprmgwk7smzd18w9sk44fqpxirf3z3nm6k6sr1mx",
+          "nar_size": 872315768,
+          "references": [
+            "adr7l6vazpqqjy2wab0v27pzp17c4sq6-clang-21.1.8-lib",
+            "h4wfwic161kxrr74jlzla5lsm28hgary-glibc-2.44-25",
+            "j7qx4s4mr17j1wqgvqdzj33lmrnzb387-gcc-16.2.0-lib",
+            "kwbs82a1v1hy20plq2pjchaa0z85zy8w-llvm-21.1.8-lib"
           ]
         },
         {
@@ -24272,6 +24342,38 @@
             },
             {
               "constraint": {
+                "attr": "llvmPackages.libclang",
+                "context": "profiles.dev",
+                "output": "lib",
+                "system": "x86_64-linux",
+                "version": null
+              },
+              "package": {
+                "attr_path": "llvmPackages.libclang",
+                "name": "clang",
+                "origin": {
+                  "Channel": {
+                    "build": 347153810,
+                    "evaluation": 1829922,
+                    "release": "nixpkgs/nixpkgs-26.11pre1086972.7dd199b0e299/"
+                  }
+                },
+                "outputs": {
+                  "debug": "/nix/store/90rzxgp1973rq9yaafsmpw509ar3wcis-clang-21.1.8-debug",
+                  "dev": "/nix/store/f6fhgn8v4qr7hma88lkbd9np47svnxp2-clang-21.1.8-dev",
+                  "lib": "/nix/store/adr7l6vazpqqjy2wab0v27pzp17c4sq6-clang-21.1.8-lib",
+                  "out": "/nix/store/jmgw1yz3xm3bpgrk9r84jkcynskdbd40-clang-21.1.8",
+                  "python": "/nix/store/hjs3x3an21x9biq9xa5sk4l32hgkr80d-clang-21.1.8-python"
+                },
+                "rev": "7dd199b0e2993e37b4775ed66b1c291699608c9f",
+                "store_paths": [
+                  "/nix/store/jmgw1yz3xm3bpgrk9r84jkcynskdbd40-clang-21.1.8"
+                ],
+                "version": "21.1.8"
+              }
+            },
+            {
+              "constraint": {
                 "attr": "mesa",
                 "context": "profiles.dev",
                 "output": null,
@@ -25213,7 +25315,7 @@
           }
         },
         "lockSourcePath": "enve.lock",
-        "projectSha256": "b2c4e4d8ac701c536f01fcae20b33b0c7f32afe73dc7abb77a97d219c28851db"
+        "projectSha256": "609b5504445fc5437016b4ab4500bf05d493d1f5557f25de81f096d8f89c35e4"
       },
       "environment": {
         "AWS_ENDPOINT_URL": "http://127.0.0.1:${ENVE_SERVICE_SEAWEEDFS_PORT}",
@@ -25312,7 +25414,7 @@
         "KAFKA_HOSTS": "127.0.0.1:${ENVE_SERVICE_KAFKA_PORT}",
         "KAFKA_PORT": "9092",
         "KAFKA_URL": "127.0.0.1:${ENVE_SERVICE_KAFKA_PORT}",
-        "LD_RUN_PATH": "$ENVE_STORE_DIR/j7qx4s4mr17j1wqgvqdzj33lmrnzb387-gcc-16.2.0-lib/lib:$ENVE_STORE_DIR/cxd8d2vg70c3pa31v2473hphaa1v0j44-openssl-3.5.8/lib",
+        "LD_RUN_PATH": "$ENVE_STORE_DIR/j7qx4s4mr17j1wqgvqdzj33lmrnzb387-gcc-16.2.0-lib/lib:$ENVE_STORE_DIR/adr7l6vazpqqjy2wab0v27pzp17c4sq6-clang-21.1.8-lib/lib:$ENVE_STORE_DIR/cxd8d2vg70c3pa31v2473hphaa1v0j44-openssl-3.5.8/lib",
         "MAILDEV_HOST": "127.0.0.1",
         "MAILDEV_PORT": "1080",
         "MAILDEV_URL": "http://127.0.0.1:1080",
@@ -25809,6 +25911,22 @@
             "rev": "7dd199b0e2993e37b4775ed66b1c291699608c9f"
           },
           "version": "1.8.2"
+        },
+        "libclang": {
+          "closure": "adr7l6vazpqqjy2wab0v27pzp17c4sq6-clang-21.1.8-lib",
+          "libraries": true,
+          "outputs": [
+            "adr7l6vazpqqjy2wab0v27pzp17c4sq6-clang-21.1.8-lib"
+          ],
+          "source": {
+            "attr": "llvmPackages.libclang",
+            "build": 347153810,
+            "evaluation": 1829922,
+            "kind": "channel",
+            "release": "nixpkgs/nixpkgs-26.11pre1086972.7dd199b0e299/",
+            "rev": "7dd199b0e2993e37b4775ed66b1c291699608c9f"
+          },
+          "version": "21.1.8"
         },
         "nodejs": {
           "closure": "gxq2cd70i077rah1d4hkzc1lpq8q4pv8-nodejs-24.21.0",

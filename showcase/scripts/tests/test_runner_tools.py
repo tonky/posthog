@@ -51,11 +51,14 @@ class RunnerToolsTest(unittest.TestCase):
             with self.subTest(tool=tool):
                 path = shutil.which(tool)
                 self.assertIsNotNone(path, f"{tool} is not on PATH")
-                # The store, or enve's own when /nix/store links to it.
+                # The store, enve's own when /nix/store links to it, or the one ENVE_STORE_DIR
+                # names (a runner's host cache, /cache/repo/enve-store).
                 real = os.path.realpath(path)
+                stores = ["/nix/store/"] + [
+                    os.path.join(os.path.realpath(d), "") for d in [os.environ.get("ENVE_STORE_DIR")] if d
+                ]
                 self.assertTrue(
-                    path.startswith("/nix/store/")
-                    or real.startswith("/nix/store/")
+                    any(p.startswith(store) for p in (path, real) for store in stores)
                     or "/enve/store/" in path
                     or "/enve/store/" in real,
                     f"{tool} resolves to the host's {path}",

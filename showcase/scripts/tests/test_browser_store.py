@@ -21,7 +21,11 @@ class BrowserStoreTest(unittest.TestCase):
         self.assertIsNotNone(raw_path, "PLAYWRIGHT_BROWSERS_PATH is not set")
         assert raw_path is not None
         self.assertTrue(
-            raw_path.startswith("/nix/store/") or "/enve/store/" in os.path.realpath(raw_path),
+            raw_path.startswith("/nix/store/")
+            or "/enve/store/" in os.path.realpath(raw_path)
+            # A relocated store (a runner's host cache, /cache/repo/enve-store).
+            or bool(store := os.environ.get("ENVE_STORE_DIR"))
+            and os.path.realpath(raw_path).startswith(os.path.join(os.path.realpath(store), "")),
             f"PLAYWRIGHT_BROWSERS_PATH resolves outside the store: {raw_path}",
         )
         browsers_dir = Path(raw_path)

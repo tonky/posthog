@@ -33,7 +33,7 @@ pipeline: components: {
 		root:       "."
 		depends_on: ["py-root", "pytest_plugins"]
 		workspace_scope: include: [
-			".github/workflows", "proto", "rust", "nodejs",
+			".github/workflows", ".github/actions", ".depot/actions", "proto", "rust", "nodejs",
 			"docs/onboarding/package.json", "frontend/@posthog/lemon-ui/package.json",
 			"packages/llm-normalizer/package.json", "packages/quill/package.json",
 			"packages/quill/apps/storybook/package.json", "packages/quill/packages/blocks/package.json",

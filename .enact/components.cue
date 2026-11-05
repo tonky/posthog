@@ -1053,7 +1053,7 @@ pipeline: schema.#Pipeline & {
 			technology:      "python"
 			root:            "tools/hogli-commands"
 			depends_on:      ["py-root", "geoip"]
-			workspace_scope: include: ["devenv", ".github/scripts/migration-deletion-allowlist.txt", "frontend/package.json", "services/mcp/tsconfig.json"]
+			workspace_scope: include: ["devenv", ".github/actions", ".github/scripts/migration-deletion-allowlist.txt", "frontend/package.json", "services/mcp/tsconfig.json"]
 			watch_paths: [
 				"tools/hogli-commands/**", "tools/hogli/**", "hogli.yaml", "devenv/**",
 				"bin/[!cde]*", "bin/e[!n]*", "bin/en[!av]*", "bin/c[!e]*", "bin/d[!o]*", "bin/do[!w]*",

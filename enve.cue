@@ -157,6 +157,8 @@ profiles: dev: schema.#Profile & {
 		{pname: "perl"},
 		{pname: "pkg-config"},
 		{pname: "openssl", attr: "openssl.dev"},
+		// bindgen's libclang (librocksdb-sys), loaded by name: upstream's Ubuntu runners ship it.
+		{pname: "libclang", attr: "llvmPackages.libclang.lib", libraries: true, platforms: ["linux"]},
 		// Apple Silicon linker (`-fuse-ld=lld`) and libomp for xgboost's macOS wheel.
 		{pname: "lld", attr: "llvmPackages_23.lld", version: "23.1.3", platforms: ["aarch64-darwin"]},
 		{pname: "openmp", attr: "llvmPackages.openmp", libraries: true, platforms: ["aarch64-darwin"]},
@@ -277,9 +279,13 @@ profiles: dev: schema.#Profile & {
 			user:     "posthog"
 			port:     5432
 			command:  "postgres -D \"$DATA_DIR\" -k \"$SOCKET_DIR\" -p $PORT -c max_connections=1000 -c idle_in_transaction_session_timeout=300000 -c max_prepared_transactions=10"
-			lifecycle: init: [
-				"initdb -D \"$DATA_DIR\" -U postgres --auth-local=trust --auth-host=trust --locale=C.UTF-8 --encoding=UTF8",
-			]
+			// initdb takes over the 30 s default hook budget on a loaded shared runner host.
+			lifecycle: {
+				timeout: "2m"
+				init: [
+					"initdb -D \"$DATA_DIR\" -U postgres --auth-local=trust --auth-host=trust --locale=C.UTF-8 --encoding=UTF8",
+				]
+			}
 		}
 		redis: {
 			// DB allocation: 0 Rust, 1 Rust flags, 2 Rust ignored, 3 /flags integration, 16+n Python shard, 32+n AI-gateway.
