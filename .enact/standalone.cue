@@ -81,8 +81,11 @@ pipeline: components: {
 		watch_paths: ["packages/owners-yaml/**", "owners.yaml", "{.agents,.github,docs,ee,frontend,nodejs,packages,posthog,products,rust,services}/**/owners.yaml"]
 	}
 	"desktop": {
+		// A cold pnpm store fetches ~4,000 packages: about 13 min on the fork's runners, past
+		// the 600 s default step limit, so the install never finished to warm the store.
 		_install: {
 			name:    "Install"
+			timeout: "30m"
 			command: "cd ../.. && showcase/scripts/build_once.sh desktop-node-modules products/desktop/node_modules/.enact-build-key products/desktop/package.json products/desktop/pnpm-lock.yaml products/desktop/pnpm-workspace.yaml packages/agent/package.json packages/agent/pnpm-lock.yaml packages/agent/pnpm-workspace.yaml -- bash -c 'SKIP_ELECTRON_REBUILD=1 pnpm --dir products/desktop install --frozen-lockfile && showcase/scripts/exclusive.sh agent-node-modules node products/desktop/scripts/build-agent-workspace.mjs'"
 		}
 		name:            "desktop"
