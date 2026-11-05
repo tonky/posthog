@@ -27,7 +27,7 @@ ROOT="$PWD"
 # too. pytest's entry-point plugin lookup (importlib.metadata) lists every directory on the
 # path, so each footprint holds that listing: beside the helpers, each new script would
 # stale every Python footprint. With ENACT_FOOTPRINT_DIR (a directory: `enact trace
-# record` and `trace sample` set it), each test file's footprint is recorded there as an
+# record` and `reach sample` set it), each test file's footprint is recorded there as an
 # enact reach map (pytest_footprint.py).
 export PYTHONPATH="$ROOT/showcase/pytest_plugins${PYTHONPATH:+:$PYTHONPATH}"
 export POSTHOG_REPO_ROOT="$ROOT"

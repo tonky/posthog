@@ -8,7 +8,7 @@
 # or on a fork PR the VR CLI's exact pixel-hash check, which a different renderer (fonts)
 # fails, so neither runs here.
 #
-#   run_storybook_tests.sh <shard> <total> [story files...]
+#   run_storybook_tests.sh [--browser chromium|webkit] <shard> <total> [story files...]
 #   run_storybook_tests.sh --build
 #
 # The story files (from the checkout's root) narrow the run, as upstream's selective mode;
@@ -18,6 +18,11 @@
 # Each shard writes its screenshots and report to a directory of its own under
 # .enact/state/storybook (.enact/vitest/node_env_preload.cjs), never the committed baselines.
 set -euo pipefail
+browser=chromium
+if [ "${1:-}" = --browser ]; then
+    browser="${2:?usage: run_storybook_tests.sh [--browser chromium|webkit] <shard> <total> [story files...] | --build}"
+    shift 2
+fi
 # enact gives the story files relative to the task's directory; jest matches them as
 # patterns against absolute paths, so they go as upstream's selective mode passes them,
 # from the checkout's root.
@@ -45,10 +50,10 @@ showcase/scripts/build_once.sh storybook-build common/storybook/dist/.enact-buil
         NODE_OPTIONS=--max-old-space-size=32768 pnpm --filter=@posthog/storybook build --test'
 [ "${1:-}" != --build ] || exit 0
 
-shard="${1:?usage: run_storybook_tests.sh <shard> <total> [story files...] | --build}"
-total="${2:?usage: run_storybook_tests.sh <shard> <total> [story files...] | --build}"
+shard="${1:?usage: run_storybook_tests.sh [--browser chromium|webkit] <shard> <total> [story files...] | --build}"
+total="${2:?usage: run_storybook_tests.sh [--browser chromium|webkit] <shard> <total> [story files...] | --build}"
 
-out="$(pwd)/.enact/state/storybook/chromium-${shard}-of-${total}"
+out="$(pwd)/.enact/state/storybook/${browser}-${shard}-of-${total}"
 rm -rf "$out" && mkdir -p "$out"
 port="$(python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')"
 
@@ -74,9 +79,9 @@ args=(--shard "$shard/$total")
 [ "${#stories[@]}" -eq 0 ] || args=(-- "${stories[@]}")
 status=0
 OPT_OUT_CAPTURE=1 NODE_OPTIONS="${NODE_OPTIONS:+$NODE_OPTIONS }--max-old-space-size=16384 --require $root/.enact/vitest/node_env_preload.cjs" \
-    STORYBOOK_SKIP_TAGS=test-skip,test-skip-chromium \
+    STORYBOOK_SKIP_TAGS="test-skip,test-skip-${browser}" \
     STORYBOOK_SNAPSHOTS_DIR="$out/snapshots" JEST_JUNIT_OUTPUT_DIR="$out" ENACT_STORYBOOK_LOADS="$loads" \
-    pnpm --filter=@posthog/storybook test:visual:ci:update --browsers chromium \
+    pnpm --filter=@posthog/storybook test:visual:ci:update --browsers "$browser" \
     --url "http://127.0.0.1:$port" "${args[@]}" || status=$?
 if [ -n "$loads" ]; then
     node showcase/scripts/storybook_footprint.mjs common/storybook/dist "$loads" "http://127.0.0.1:$port" || status=$((status ? status : 1))

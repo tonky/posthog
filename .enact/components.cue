@@ -627,7 +627,8 @@ pipeline: schema.#Pipeline & {
 					tasks: [
 						{name: "Build products", command: "showcase/scripts/build_products.sh"},
 						{name: "Warm jest", command: "CI=true pnpm --filter=@posthog/frontend exec jest --listTests >/dev/null"},
-						{name: "Run Tests", command: "CI=true pnpm --filter=@posthog/frontend exec jest --maxWorkers=2 --forceExit {targets}"},
+						// ENACT_TEST_VERBOSE: each test's line (`✓`/`✕`), which enact reads into per-test outcomes.
+						{name: "Run Tests", command: "CI=true pnpm --filter=@posthog/frontend exec jest --maxWorkers=2 --forceExit ${ENACT_TEST_VERBOSE:+--verbose} {targets}"},
 					]
 				}
 			}
@@ -827,7 +828,7 @@ pipeline: schema.#Pipeline & {
 				recorded_by:      ["enact-node"]
 				tasks: [
 					{name: "Warm jest", command: "pnpm --dir typescript test --listTests --modulePathIgnorePatterns='<rootDir>/[.]turbo(/|$)' >/dev/null"},
-					{name: "Run Tests", command: "pnpm --dir typescript test {relative_targets} --modulePathIgnorePatterns='<rootDir>/[.]turbo(/|$)'"},
+					{name: "Run Tests", command: "pnpm --dir typescript test ${ENACT_TEST_VERBOSE:+--verbose} {relative_targets} --modulePathIgnorePatterns='<rootDir>/[.]turbo(/|$)'"},
 				]
 				target_scope: tests: ["common/hogvm/typescript/src/**/*.test.ts"]
 			}
@@ -891,7 +892,7 @@ pipeline: schema.#Pipeline & {
 			root:       "services/mcp"
 			depends_on: ["js-root", "quill", "vitest_marker"]
 			workspace_scope: include: [
-				".config", "common/mosaic", "services/mcp", "packages/llm-normalizer",
+				".config", "cli/lib", "common/mosaic", "services/mcp", "packages/llm-normalizer",
 				"products", "frontend/src/mocks", "frontend/src/taxonomy", "frontend/bin",
 			]
 			watch_paths: [

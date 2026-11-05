@@ -162,7 +162,7 @@ profiles: dev: schema.#Profile & {
 		{pname: "openmp", attr: "llvmPackages.openmp", libraries: true, platforms: ["aarch64-darwin"]},
 		{pname: "cargo-nextest"},
 		{pname: "jq"},
-		pkgs.#PlaywrightBrowsers & {version: "1.60.0", features: ["chromium-headless-shell", "chromium"]},
+		pkgs.#PlaywrightBrowsers & {version: "1.60.0", features: ["chromium-headless-shell", "chromium", "webkit"]},
 		// Pinned cargo-shear 1.1.12 (1.14 flags dev-target-only deps that upstream lint ignores).
 		schema.#ArchiveBuildSpec & {
 			pname:   "cargo-shear"

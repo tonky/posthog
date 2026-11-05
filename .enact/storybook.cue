@@ -74,6 +74,17 @@ pipeline: components: {
 					{name: "Run Tests", command: "showcase/scripts/run_storybook_tests.sh {shard_index} {shard_total} {targets}", timeout: "45m"},
 				]
 			}
+			webkit: {
+				name:      "WebKit"
+				needs:     ["build"]
+				recorder:  "own"
+				shards:    4
+				resources: {cpus: 2.0, memory_mb: 4096}
+				tasks: [
+					{name: "Build products", command: "showcase/scripts/build_quill.sh && showcase/scripts/build_hogvm.sh && showcase/scripts/build_products.sh"},
+					{name: "Run Tests", command: "showcase/scripts/run_storybook_tests.sh --browser webkit {shard_index} {shard_total} {targets}", timeout: "45m"},
+				]
+			}
 		}
 		target_scope: {
 			fallback: "all"

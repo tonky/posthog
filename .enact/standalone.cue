@@ -81,8 +81,41 @@ pipeline: components: {
 		watch_paths: ["packages/owners-yaml/**", "owners.yaml", "{.agents,.github,docs,ee,frontend,nodejs,packages,posthog,products,rust,services}/**/owners.yaml"]
 	}
 	"desktop": {
-		name: "desktop", title: "PostHog desktop app", technology: "typescript"
-		root: "products/desktop", depends_on: ["root"]
+		_install: {
+			name:    "Install"
+			command: "cd ../.. && showcase/scripts/build_once.sh desktop-node-modules products/desktop/node_modules/.enact-build-key products/desktop/package.json products/desktop/pnpm-lock.yaml products/desktop/pnpm-workspace.yaml packages/agent/package.json packages/agent/pnpm-lock.yaml packages/agent/pnpm-workspace.yaml -- bash -c 'SKIP_ELECTRON_REBUILD=1 pnpm --dir products/desktop install --frozen-lockfile && showcase/scripts/exclusive.sh agent-node-modules node products/desktop/scripts/build-agent-workspace.mjs'"
+		}
+		name:            "desktop"
+		title:           "PostHog desktop app"
+		technology:      "typescript"
+		root:            "products/desktop"
+		depends_on:      ["root", "build_once"]
+		workspace_scope: include: ["packages/agent"]
+		watch_paths:     ["products/desktop/**", "packages/agent/**"]
+		jobs: {
+			lint: {
+				name: "Lint"
+				tasks: [
+					_install,
+					{name: "Lint", command: "pnpm exec biome ci . && pnpm --dir ../../packages/agent exec biome ci . && node scripts/check-host-boundaries.mjs"},
+				]
+			}
+			typecheck: {
+				name: "Typecheck"
+				tasks: [
+					_install,
+					{name: "Typecheck", command: "pnpm run typecheck"},
+				]
+			}
+			test: {
+				name:   "Test"
+				shards: 1
+				tasks: [
+					_install,
+					{name: "Run Tests", command: "node scripts/rebuild-better-sqlite3-node.mjs && pnpm test"},
+				]
+			}
+		}
 	}
 	"cli": {
 		name:             "cli"

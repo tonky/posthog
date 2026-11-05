@@ -249,7 +249,7 @@ JEST_REPORTER
             # is one too, and --ci ends it.
             "${ENACT_EXE:-enact}" trace run --node-functions --outcomes --shared-tmpdir --no-fingerprint \
                 --reach-file "$ENACT_FOOTPRINT_DIR/nodejs-traced-$n.json" -t "$test" -- \
-                pnpm run "test:$lane" --reporters=default "--reporters=$reporter" --ci "$target" || status=1
+                pnpm run "test:$lane" --reporters=default "--reporters=$reporter" --ci ${ENACT_TEST_VERBOSE:+--verbose} "$target" || status=1
         done
         [ "${#rest[@]}" -gt 0 ] || exit "$status"
         set -- "${rest[@]}"
@@ -265,13 +265,14 @@ JEST_REPORTER
     # The scripts end in --testPathIgnorePatterns, an array option: paths given right after it
     # are more patterns to ignore, and the lane runs every other file. A flag first ends the
     # array (--ci, as on CI's runners: missing snapshots fail rather than being written).
+    # ENACT_TEST_VERBOSE: each test's line (`✓`/`✕`), which enact reads into per-test outcomes.
     if [[ " $NODEJS_LANES " == *" parallel "* ]]; then
-        pnpm run test:parallel --ci "$@" || { rc=$?; [ "$status" -ne 0 ] || status=$rc; }
+        pnpm run test:parallel --ci ${ENACT_TEST_VERBOSE:+--verbose} "$@" || { rc=$?; [ "$status" -ne 0 ] || status=$rc; }
     fi
     # Both lanes run; the first failure is the status. No --passWithNoTests: a lane that runs
     # has files (every shard of the suite draws some, and a targeted run lists them).
     if [[ " $NODEJS_LANES " == *" serial "* ]]; then
-        pnpm run test:serial --ci "$@" || { rc=$?; [ "$status" -ne 0 ] || status=$rc; }
+        pnpm run test:serial --ci ${ENACT_TEST_VERBOSE:+--verbose} "$@" || { rc=$?; [ "$status" -ne 0 ] || status=$rc; }
     fi
     exit "$status"
 fi

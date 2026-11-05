@@ -24,10 +24,11 @@ _testStage: {
 	name:   "tests"
 	matrix: true
 	select: [
-		J.test, J.test_typescript, J.test_hono, J.test_ignored, J.rust_ingestion_e2e,
+		J.test, J.test_typescript, J.test_hono, J.test_ignored, J.rust_ingestion_e2e, J.webkit,
 		{component: "products", job: J.typecheck},
 		{component: "frontend", job: J.typecheck},
 		{component: "mcp", job: J.typecheck},
+		{component: "desktop", job: J.typecheck},
 		J.audit, J.build, J.jscpd,
 	]
 	fail_fast: false
@@ -101,8 +102,8 @@ pipeline: schema.#Pipeline & {
 
 	ci: {
 		diagnostic_paths: [".enact/state/nodejs/*.services.log"]
-		no_cache: {
-			labels:          ["no-cache", "showcase"]
+		rerun: {
+			labels:          ["rerun", "showcase"]
 			branch_prefixes: ["showcase/"]
 		}
 		concurrency: max_parallel_jobs: 16
@@ -127,11 +128,12 @@ pipeline: schema.#Pipeline & {
 				cost_per_min:    0.010
 				timeout_minutes: 90
 				pool: {
-					cpus:      4
-					memory_mb: 8192
+					cpus:      16
+					memory_mb: 36864
 					sizes: {
 						"tonky-ci-s": {cpus: 2, memory_mb: 4096}
 						"tonky-ci-m": {cpus: 4, memory_mb: 8192}
+						"tonky-ci-l": {cpus: 6, memory_mb: 13312}
 					}
 				}
 			}

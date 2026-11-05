@@ -3,7 +3,7 @@ as an enact reach map (`{"shared": {...}, "targets": {"<test file>": {"files": [
 "functions": {"<file>": [...]}, "dirs": [...], "probes": [...]}}}`, what every test file
 holds written once as `shared`), one file per pytest process in
 $ENACT_FOOTPRINT_DIR. run_sharded_pytest.sh loads it when ENACT_FOOTPRINT_DIR is set, which
-`enact trace record base:test` and `enact trace sample` do for every task of the job they
+`enact reach record base:test` and `enact reach sample` do for every task of the job they
 run: the suite is recorded with its services, shards and resource limits, and enact merges
 the maps and notes each traced file's layout.
 
