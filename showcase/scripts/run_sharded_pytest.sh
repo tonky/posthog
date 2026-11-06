@@ -36,7 +36,7 @@ export ENACT_REPLAY_RESULTS="${ENACT_REPLAY_RESULTS:-$ROOT/.enact/state/pytest}"
 # pytest_fail_early: a broken session-scoped fixture ends the pytest at once (exit 2).
 # pytest_unmarked_db_setup: a test reaching django_db_setup without a django_db marker gets
 # every test database set up, so a selection of such tests alone runs as in the whole suite.
-PLUGINS=(-p pytest_timings -p pytest_snapshot_worker -p pytest_fail_early -p pytest_unmarked_db_setup)
+PLUGINS=(-p pytest_timings -p pytest_snapshot_worker -p pytest_fail_early -p pytest_unmarked_db_setup -p pytest_query_tags)
 if [ -n "${ENACT_FOOTPRINT_DIR:-}" ]; then
     PLUGINS+=(-p pytest_footprint)
 fi

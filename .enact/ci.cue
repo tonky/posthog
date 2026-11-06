@@ -122,7 +122,7 @@ pipeline: schema.#Pipeline & {
 		budget: {enforce: true, untraced_tests: 10, wall_minutes: 30}
 		workers: {
 			"mac1": {
-				labels:          ["self-hosted", "Linux", "ARM64", "tonky-ci"]
+				labels:          ["self-hosted", "Linux", "ARM64", "tonky-ci", "mac1"]
 				tier:            "dedicated"
 				available:       1
 				cost_per_min:    0.010
@@ -138,7 +138,7 @@ pipeline: schema.#Pipeline & {
 				}
 			}
 			"standard": {
-				labels:          ["self-hosted", "Linux", "X64", "tonky-ci"]
+				labels:          ["self-hosted", "Linux", "X64", "tonky-ci", "ibp8"]
 				tier:            "dedicated"
 				available:       1
 				cost_per_min:    0.010
@@ -157,7 +157,7 @@ pipeline: schema.#Pipeline & {
 				// A second X64 host (8c/14G): s and m only; a gate lane holding l7 drains it to zero.
 				// A size costs the rate times its share of the largest size: 0.006 prices its m as
 				// the 13 GB pools price theirs.
-				labels: ["self-hosted", "Linux", "X64", "tonky-ci"], tier: "dedicated", available: 1, cost_per_min: 0.006, timeout_minutes: 90
+				labels: ["self-hosted", "Linux", "X64", "tonky-ci", "l7"], tier: "dedicated", available: 1, cost_per_min: 0.006, timeout_minutes: 90
 				pool: {
 					cpus: 8, memory_mb: 12288
 					sizes: {

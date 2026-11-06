@@ -373,6 +373,7 @@ jobs:
     - Linux
     - ARM64
     - tonky-ci
+    - mac1
     - tonky-ci-m
     timeout-minutes: 90
     steps:
@@ -522,11 +523,13 @@ jobs:
           docker-compose.profiles.yml
           frontend/src/lib/agentScopes.generated.ts
           frontend/src/lib/components/AgentObjectTags/objectKinds.generated.ts
+          frontend/src/lib/components/DomainConnect/templates
           frontend/src/products.json
           frontend/src/queries/schema.json
           infra
           packages/agent/packages/agent-contracts/src/model-catalog.generated.ts
           packages/agent/packages/agent-contracts/src/objectTagKinds.generated.ts
+          packages/agent/packages/agent/src/utils/gateway-routing-cases.json
           rust/common/ingestion_warnings/warning_types.generated.json
           rust/persons_migrations
           services/mcp/scripts/build-cli-agent-scopes.ts
@@ -565,6 +568,9 @@ jobs:
           posthog/dags
           products/desktop
           packages/agent
+          services/llm-gateway/src/llm_gateway/rate_limiting/model_cost_overrides.py
+          products/tasks/backend/models.py
+          products/canvas/packages/canvas_builder/canvas-sdk.mjs
           Dockerfile
           showcase/scripts/hadolint.sh
           frontend
@@ -573,6 +579,7 @@ jobs:
           playwright
           services/mcp
           .github/scripts/jest-retries.cjs
+          posthog/hogql_queries/utils/breakdowns.py
           products/games
           products/canvas/packages
           products/visual_review/cli
@@ -852,11 +859,13 @@ jobs:
           docker-compose.profiles.yml
           frontend/src/lib/agentScopes.generated.ts
           frontend/src/lib/components/AgentObjectTags/objectKinds.generated.ts
+          frontend/src/lib/components/DomainConnect/templates
           frontend/src/products.json
           frontend/src/queries/schema.json
           infra
           packages/agent/packages/agent-contracts/src/model-catalog.generated.ts
           packages/agent/packages/agent-contracts/src/objectTagKinds.generated.ts
+          packages/agent/packages/agent/src/utils/gateway-routing-cases.json
           rust/common/ingestion_warnings/warning_types.generated.json
           rust/persons_migrations
           services/mcp/scripts/build-cli-agent-scopes.ts
@@ -895,6 +904,9 @@ jobs:
           posthog/dags
           products/desktop
           packages/agent
+          services/llm-gateway/src/llm_gateway/rate_limiting/model_cost_overrides.py
+          products/tasks/backend/models.py
+          products/canvas/packages/canvas_builder/canvas-sdk.mjs
           Dockerfile
           showcase/scripts/hadolint.sh
           frontend
@@ -903,6 +915,7 @@ jobs:
           playwright
           services/mcp
           .github/scripts/jest-retries.cjs
+          posthog/hogql_queries/utils/breakdowns.py
           products/games
           products/canvas/packages
           products/visual_review/cli
@@ -1195,7 +1208,7 @@ jobs:
           restore-keys: ${{ runner.os }}-python-
       - name: Restore Rust target & cargo cache [cli/target]
         id: rust_l1_cache_cli_target
-        if: ${{ (hashFiles('cli/Cargo.lock', 'cli/**/Cargo.toml') != '' && contains(format(',{0},', fromJson(needs.detect.outputs.stage_cargo)['preflight'].cargo_targets), ',cli/target,')) && steps.stage_plan.outputs.stage_has_work == 'true' }}
+        if: ${{ (hashFiles('cli/Cargo.lock', 'cli/**/Cargo.toml') != '' && contains(format(',{0},', fromJson(needs.detect.outputs.stage_cargo)['preflight'].cargo_targets), ',cli/target,') && steps.runner_caches.outputs.host == '') && steps.stage_plan.outputs.stage_has_work == 'true' }}
         continue-on-error: true
         uses: actions/cache/restore@v6
         with:
@@ -1208,9 +1221,25 @@ jobs:
           restore-keys: |-
             ${{ runner.os }}-rust-cli_target-${{ hashFiles('enve.lock', 'cli/rust-toolchain.toml', 'cli/rust-toolchain', 'cli/enve.lock') }}-${{ fromJson(needs.detect.outputs.stage_cargo)['preflight'].cargo_cache }}-${{ hashFiles('cli/Cargo.lock', 'cli/**/Cargo.toml') }}-
             ${{ runner.os }}-rust-cli_target-${{ hashFiles('enve.lock', 'cli/rust-toolchain.toml', 'cli/rust-toolchain', 'cli/enve.lock') }}-${{ fromJson(needs.detect.outputs.stage_cargo)['preflight'].cargo_cache }}-
+      - name: Restore Rust target & cargo cache [cli/target] from the Host Cache
+        if: ${{ (hashFiles('cli/Cargo.lock', 'cli/**/Cargo.toml') != '' && contains(format(',{0},', fromJson(needs.detect.outputs.stage_cargo)['preflight'].cargo_targets), ',cli/target,') && steps.runner_caches.outputs.host != '') && steps.stage_plan.outputs.stage_has_work == 'true' }}
+        continue-on-error: true
+        run: |-
+          src="$ENACT_HOST_CACHE/repo/cargo-target/$ENACT_RUST_HOST_KEY"
+          if [ -d "$src" ]; then
+            mkdir -p "$ENACT_RUST_TARGET"
+            cp -a --reflink=auto "$src/." "$ENACT_RUST_TARGET/"
+            touch "$src"
+            echo "Restored $ENACT_RUST_TARGET from the host cache"
+          else
+            echo "No host-cached $ENACT_RUST_TARGET yet"
+          fi
+        env:
+          ENACT_RUST_HOST_KEY: ${{ runner.os }}-rust-cli_target-${{ hashFiles('enve.lock', 'cli/rust-toolchain.toml', 'cli/rust-toolchain', 'cli/enve.lock') }}-${{ fromJson(needs.detect.outputs.stage_cargo)['preflight'].cargo_cache }}
+          ENACT_RUST_TARGET: cli/target
       - name: Restore Rust target & cargo cache [rust/target]
         id: rust_l1_cache_rust_target
-        if: ${{ (hashFiles('rust/Cargo.lock', 'rust/**/Cargo.toml') != '' && contains(format(',{0},', fromJson(needs.detect.outputs.stage_cargo)['preflight'].cargo_targets), ',rust/target,')) && steps.stage_plan.outputs.stage_has_work == 'true' }}
+        if: ${{ (hashFiles('rust/Cargo.lock', 'rust/**/Cargo.toml') != '' && contains(format(',{0},', fromJson(needs.detect.outputs.stage_cargo)['preflight'].cargo_targets), ',rust/target,') && steps.runner_caches.outputs.host == '') && steps.stage_plan.outputs.stage_has_work == 'true' }}
         continue-on-error: true
         uses: actions/cache/restore@v6
         with:
@@ -1223,6 +1252,22 @@ jobs:
           restore-keys: |-
             ${{ runner.os }}-rust-rust_target-${{ hashFiles('enve.lock', 'rust/rust-toolchain.toml', 'rust/rust-toolchain', 'rust/enve.lock') }}-${{ fromJson(needs.detect.outputs.stage_cargo)['preflight'].cargo_cache }}-${{ hashFiles('rust/Cargo.lock', 'rust/**/Cargo.toml') }}-
             ${{ runner.os }}-rust-rust_target-${{ hashFiles('enve.lock', 'rust/rust-toolchain.toml', 'rust/rust-toolchain', 'rust/enve.lock') }}-${{ fromJson(needs.detect.outputs.stage_cargo)['preflight'].cargo_cache }}-
+      - name: Restore Rust target & cargo cache [rust/target] from the Host Cache
+        if: ${{ (hashFiles('rust/Cargo.lock', 'rust/**/Cargo.toml') != '' && contains(format(',{0},', fromJson(needs.detect.outputs.stage_cargo)['preflight'].cargo_targets), ',rust/target,') && steps.runner_caches.outputs.host != '') && steps.stage_plan.outputs.stage_has_work == 'true' }}
+        continue-on-error: true
+        run: |-
+          src="$ENACT_HOST_CACHE/repo/cargo-target/$ENACT_RUST_HOST_KEY"
+          if [ -d "$src" ]; then
+            mkdir -p "$ENACT_RUST_TARGET"
+            cp -a --reflink=auto "$src/." "$ENACT_RUST_TARGET/"
+            touch "$src"
+            echo "Restored $ENACT_RUST_TARGET from the host cache"
+          else
+            echo "No host-cached $ENACT_RUST_TARGET yet"
+          fi
+        env:
+          ENACT_RUST_HOST_KEY: ${{ runner.os }}-rust-rust_target-${{ hashFiles('enve.lock', 'rust/rust-toolchain.toml', 'rust/rust-toolchain', 'rust/enve.lock') }}-${{ fromJson(needs.detect.outputs.stage_cargo)['preflight'].cargo_cache }}
+          ENACT_RUST_TARGET: rust/target
     - name: Record Restored Package Caches
       if: ${{ (steps.runner_caches.outputs.host == '') && steps.stage_plan.outputs.stage_has_work == 'true' }}
       continue-on-error: true
@@ -1329,7 +1374,7 @@ jobs:
             .enact/state/pnpm-store
             node_modules/.cache
       - name: Save Rust target & cargo cache [cli/target]
-        if: ${{ (((env.ENACT_SAVE_EVENT == 'true' && hashFiles('cli/Cargo.lock', 'cli/**/Cargo.toml') != '' && contains(format(',{0},', fromJson(needs.detect.outputs.stage_cargo)['preflight'].cargo_targets), ',cli/target,')) && (github.event_name == 'schedule' || github.event_name != 'pull_request' && github.ref_name == github.event.repository.default_branch || !startsWith(steps.rust_l1_cache_cli_target.outputs.cache-matched-key, format('{0}-rust-cli_target-{1}-{2}-{3}-', runner.os, hashFiles('enve.lock', 'cli/rust-toolchain.toml', 'cli/rust-toolchain', 'cli/enve.lock'), fromJson(needs.detect.outputs.stage_cargo)['preflight'].cargo_cache, hashFiles('cli/Cargo.lock', 'cli/**/Cargo.toml'))))) && steps.rust_l1_cache_cli_target.outputs.cache-hit != 'true') && steps.stage_plan.outputs.stage_has_work == 'true' }}
+        if: ${{ (((env.ENACT_SAVE_EVENT == 'true' && hashFiles('cli/Cargo.lock', 'cli/**/Cargo.toml') != '' && contains(format(',{0},', fromJson(needs.detect.outputs.stage_cargo)['preflight'].cargo_targets), ',cli/target,') && steps.runner_caches.outputs.host == '') && (github.event_name == 'schedule' || github.event_name != 'pull_request' && github.ref_name == github.event.repository.default_branch || !startsWith(steps.rust_l1_cache_cli_target.outputs.cache-matched-key, format('{0}-rust-cli_target-{1}-{2}-{3}-', runner.os, hashFiles('enve.lock', 'cli/rust-toolchain.toml', 'cli/rust-toolchain', 'cli/enve.lock'), fromJson(needs.detect.outputs.stage_cargo)['preflight'].cargo_cache, hashFiles('cli/Cargo.lock', 'cli/**/Cargo.toml'))))) && steps.rust_l1_cache_cli_target.outputs.cache-hit != 'true') && steps.stage_plan.outputs.stage_has_work == 'true' }}
         continue-on-error: true
         uses: actions/cache/save@v6
         with:
@@ -1339,8 +1384,25 @@ jobs:
             ~/.cargo/registry/cache
             ~/.cargo/git/db
             cli/target
+      - name: Save Rust target & cargo cache [cli/target] to the Host Cache
+        if: ${{ (env.ENACT_SAVE_EVENT == 'true' && hashFiles('cli/Cargo.lock', 'cli/**/Cargo.toml') != '' && contains(format(',{0},', fromJson(needs.detect.outputs.stage_cargo)['preflight'].cargo_targets), ',cli/target,') && steps.runner_caches.outputs.host != '') && steps.stage_plan.outputs.stage_has_work == 'true' }}
+        continue-on-error: true
+        run: |-
+          [ -d "$ENACT_RUST_TARGET" ] || exit 0
+          dst="$ENACT_HOST_CACHE/repo/cargo-target/$ENACT_RUST_HOST_KEY"
+          tmp="$dst.new.$$"
+          mkdir -p "$(dirname "$dst")"
+          rm -rf "$tmp"
+          cp -a --reflink=auto "$ENACT_RUST_TARGET/." "$tmp/"
+          if [ -d "$dst" ]; then mv "$dst" "$dst.old.$$"; fi
+          mv "$tmp" "$dst"
+          rm -rf "$dst.old.$$"
+          echo "Saved $ENACT_RUST_TARGET to the host cache ($(du -sh "$dst" | cut -f1))"
+        env:
+          ENACT_RUST_HOST_KEY: ${{ runner.os }}-rust-cli_target-${{ hashFiles('enve.lock', 'cli/rust-toolchain.toml', 'cli/rust-toolchain', 'cli/enve.lock') }}-${{ fromJson(needs.detect.outputs.stage_cargo)['preflight'].cargo_cache }}
+          ENACT_RUST_TARGET: cli/target
       - name: Save Rust target & cargo cache [rust/target]
-        if: ${{ (((env.ENACT_SAVE_EVENT == 'true' && hashFiles('rust/Cargo.lock', 'rust/**/Cargo.toml') != '' && contains(format(',{0},', fromJson(needs.detect.outputs.stage_cargo)['preflight'].cargo_targets), ',rust/target,')) && (github.event_name == 'schedule' || github.event_name != 'pull_request' && github.ref_name == github.event.repository.default_branch || !startsWith(steps.rust_l1_cache_rust_target.outputs.cache-matched-key, format('{0}-rust-rust_target-{1}-{2}-{3}-', runner.os, hashFiles('enve.lock', 'rust/rust-toolchain.toml', 'rust/rust-toolchain', 'rust/enve.lock'), fromJson(needs.detect.outputs.stage_cargo)['preflight'].cargo_cache, hashFiles('rust/Cargo.lock', 'rust/**/Cargo.toml'))))) && steps.rust_l1_cache_rust_target.outputs.cache-hit != 'true') && steps.stage_plan.outputs.stage_has_work == 'true' }}
+        if: ${{ (((env.ENACT_SAVE_EVENT == 'true' && hashFiles('rust/Cargo.lock', 'rust/**/Cargo.toml') != '' && contains(format(',{0},', fromJson(needs.detect.outputs.stage_cargo)['preflight'].cargo_targets), ',rust/target,') && steps.runner_caches.outputs.host == '') && (github.event_name == 'schedule' || github.event_name != 'pull_request' && github.ref_name == github.event.repository.default_branch || !startsWith(steps.rust_l1_cache_rust_target.outputs.cache-matched-key, format('{0}-rust-rust_target-{1}-{2}-{3}-', runner.os, hashFiles('enve.lock', 'rust/rust-toolchain.toml', 'rust/rust-toolchain', 'rust/enve.lock'), fromJson(needs.detect.outputs.stage_cargo)['preflight'].cargo_cache, hashFiles('rust/Cargo.lock', 'rust/**/Cargo.toml'))))) && steps.rust_l1_cache_rust_target.outputs.cache-hit != 'true') && steps.stage_plan.outputs.stage_has_work == 'true' }}
         continue-on-error: true
         uses: actions/cache/save@v6
         with:
@@ -1350,6 +1412,23 @@ jobs:
             ~/.cargo/registry/cache
             ~/.cargo/git/db
             rust/target
+      - name: Save Rust target & cargo cache [rust/target] to the Host Cache
+        if: ${{ (env.ENACT_SAVE_EVENT == 'true' && hashFiles('rust/Cargo.lock', 'rust/**/Cargo.toml') != '' && contains(format(',{0},', fromJson(needs.detect.outputs.stage_cargo)['preflight'].cargo_targets), ',rust/target,') && steps.runner_caches.outputs.host != '') && steps.stage_plan.outputs.stage_has_work == 'true' }}
+        continue-on-error: true
+        run: |-
+          [ -d "$ENACT_RUST_TARGET" ] || exit 0
+          dst="$ENACT_HOST_CACHE/repo/cargo-target/$ENACT_RUST_HOST_KEY"
+          tmp="$dst.new.$$"
+          mkdir -p "$(dirname "$dst")"
+          rm -rf "$tmp"
+          cp -a --reflink=auto "$ENACT_RUST_TARGET/." "$tmp/"
+          if [ -d "$dst" ]; then mv "$dst" "$dst.old.$$"; fi
+          mv "$tmp" "$dst"
+          rm -rf "$dst.old.$$"
+          echo "Saved $ENACT_RUST_TARGET to the host cache ($(du -sh "$dst" | cut -f1))"
+        env:
+          ENACT_RUST_HOST_KEY: ${{ runner.os }}-rust-rust_target-${{ hashFiles('enve.lock', 'rust/rust-toolchain.toml', 'rust/rust-toolchain', 'rust/enve.lock') }}-${{ fromJson(needs.detect.outputs.stage_cargo)['preflight'].cargo_cache }}
+          ENACT_RUST_TARGET: rust/target
     - name: Upload Telemetry for [preflight]
       if: always()
       continue-on-error: true
@@ -1543,6 +1622,7 @@ jobs:
     - Linux
     - X64
     - tonky-ci
+    - ibp8
     - tonky-ci-l
     timeout-minutes: 90
     steps:
@@ -1667,6 +1747,7 @@ jobs:
           playwright
           services/mcp
           .github/scripts/jest-retries.cjs
+          posthog/hogql_queries/utils/breakdowns.py
           products/games
           products/canvas/packages
           products/visual_review/cli
@@ -1740,6 +1821,7 @@ jobs:
           playwright
           services/mcp
           .github/scripts/jest-retries.cjs
+          posthog/hogql_queries/utils/breakdowns.py
           products/games
           products/canvas/packages
           products/visual_review/cli
@@ -1914,6 +1996,7 @@ jobs:
     - Linux
     - X64
     - tonky-ci
+    - ibp8
     - tonky-ci-l
     timeout-minutes: 90
     steps:
@@ -2050,6 +2133,7 @@ jobs:
           docker-compose.profiles.yml
           frontend/src/lib/agentScopes.generated.ts
           frontend/src/lib/components/AgentObjectTags/objectKinds.generated.ts
+          frontend/src/lib/components/DomainConnect/templates
           frontend/src/products.json
           frontend/src/queries/schema.json
           frontend/src/taxonomy/core-filter-definitions-by-group.json
@@ -2057,6 +2141,7 @@ jobs:
           livestream/bot
           packages/agent/packages/agent-contracts/src/model-catalog.generated.ts
           packages/agent/packages/agent-contracts/src/objectTagKinds.generated.ts
+          packages/agent/packages/agent/src/utils/gateway-routing-cases.json
           rust/common/ingestion_warnings/warning_types.generated.json
           rust/feature-flags/src/properties
           rust/feature-flags/tests/fixtures
@@ -2143,6 +2228,7 @@ jobs:
           docker-compose.profiles.yml
           frontend/src/lib/agentScopes.generated.ts
           frontend/src/lib/components/AgentObjectTags/objectKinds.generated.ts
+          frontend/src/lib/components/DomainConnect/templates
           frontend/src/products.json
           frontend/src/queries/schema.json
           frontend/src/taxonomy/core-filter-definitions-by-group.json
@@ -2150,6 +2236,7 @@ jobs:
           livestream/bot
           packages/agent/packages/agent-contracts/src/model-catalog.generated.ts
           packages/agent/packages/agent-contracts/src/objectTagKinds.generated.ts
+          packages/agent/packages/agent/src/utils/gateway-routing-cases.json
           rust/common/ingestion_warnings/warning_types.generated.json
           rust/feature-flags/src/properties
           rust/feature-flags/tests/fixtures

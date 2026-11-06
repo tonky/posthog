@@ -84,11 +84,13 @@ _python_monolith_include: list.Concat([_djangoTree, [
 	"docker-compose.base.yml", "docker-compose.dev.yml", "docker-compose.profiles.yml",
 	"frontend/src/lib/agentScopes.generated.ts",
 	"frontend/src/lib/components/AgentObjectTags/objectKinds.generated.ts",
+	"frontend/src/lib/components/DomainConnect/templates",
 	"frontend/src/products.json", "frontend/src/queries/schema.json",
 	"frontend/src/taxonomy/core-filter-definitions-by-group.json",
 	"infra", "livestream/bot",
 	"packages/agent/packages/agent-contracts/src/model-catalog.generated.ts",
 	"packages/agent/packages/agent-contracts/src/objectTagKinds.generated.ts",
+	"packages/agent/packages/agent/src/utils/gateway-routing-cases.json",
 	"rust/common/ingestion_warnings/warning_types.generated.json",
 	"rust/feature-flags/src/properties", "rust/feature-flags/tests/fixtures",
 	"rust/persons_migrations",
@@ -554,7 +556,7 @@ pipeline: schema.#Pipeline & {
 			tags:        ["frontend", "vite", "react", "kea"]
 			workspace_scope: {
 				// jest.config's setupFilesAfterEnv names .github/scripts/jest-retries.cjs.
-				include: ["frontend", "products", "packages", "common", "docs/onboarding", "playwright", "services/mcp", ".github/scripts/jest-retries.cjs"]
+				include: ["frontend", "products", "packages", "common", "docs/onboarding", "playwright", "services/mcp", ".github/scripts/jest-retries.cjs", "posthog/hogql_queries/utils/breakdowns.py"]
 				ignore:  _productsFrontendBin
 			}
 			watch_paths: list.Concat([[

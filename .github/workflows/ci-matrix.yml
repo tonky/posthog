@@ -286,7 +286,7 @@ jobs:
             ${{ runner.os }}-go-
       - name: Restore Rust target & cargo cache [cli/target]
         id: rust_l1_cache_cli_target
-        if: ${{ (hashFiles('cli/Cargo.lock', 'cli/**/Cargo.toml') != '' && contains(format(',{0},', matrix.cargo_targets), ',cli/target,')) && !steps.skip.outputs.hit }}
+        if: ${{ (hashFiles('cli/Cargo.lock', 'cli/**/Cargo.toml') != '' && contains(format(',{0},', matrix.cargo_targets), ',cli/target,') && steps.runner_caches.outputs.host == '') && !steps.skip.outputs.hit }}
         continue-on-error: true
         uses: actions/cache/restore@v6
         with:
@@ -299,9 +299,25 @@ jobs:
           restore-keys: |-
             ${{ runner.os }}-rust-cli_target-${{ hashFiles('enve.lock', 'cli/rust-toolchain.toml', 'cli/rust-toolchain', 'cli/enve.lock') }}-${{ matrix.cargo_cache }}-${{ hashFiles('cli/Cargo.lock', 'cli/**/Cargo.toml') }}-
             ${{ runner.os }}-rust-cli_target-${{ hashFiles('enve.lock', 'cli/rust-toolchain.toml', 'cli/rust-toolchain', 'cli/enve.lock') }}-${{ matrix.cargo_cache }}-
+      - name: Restore Rust target & cargo cache [cli/target] from the Host Cache
+        if: ${{ (hashFiles('cli/Cargo.lock', 'cli/**/Cargo.toml') != '' && contains(format(',{0},', matrix.cargo_targets), ',cli/target,') && steps.runner_caches.outputs.host != '') && !steps.skip.outputs.hit }}
+        continue-on-error: true
+        run: |-
+          src="$ENACT_HOST_CACHE/repo/cargo-target/$ENACT_RUST_HOST_KEY"
+          if [ -d "$src" ]; then
+            mkdir -p "$ENACT_RUST_TARGET"
+            cp -a --reflink=auto "$src/." "$ENACT_RUST_TARGET/"
+            touch "$src"
+            echo "Restored $ENACT_RUST_TARGET from the host cache"
+          else
+            echo "No host-cached $ENACT_RUST_TARGET yet"
+          fi
+        env:
+          ENACT_RUST_HOST_KEY: ${{ runner.os }}-rust-cli_target-${{ hashFiles('enve.lock', 'cli/rust-toolchain.toml', 'cli/rust-toolchain', 'cli/enve.lock') }}-${{ matrix.cargo_cache }}
+          ENACT_RUST_TARGET: cli/target
       - name: Restore Rust target & cargo cache [funnel-udf/target]
         id: rust_l1_cache_funnel_udf_target
-        if: ${{ (hashFiles('funnel-udf/Cargo.lock', 'funnel-udf/**/Cargo.toml') != '' && contains(format(',{0},', matrix.cargo_targets), ',funnel-udf/target,')) && !steps.skip.outputs.hit }}
+        if: ${{ (hashFiles('funnel-udf/Cargo.lock', 'funnel-udf/**/Cargo.toml') != '' && contains(format(',{0},', matrix.cargo_targets), ',funnel-udf/target,') && steps.runner_caches.outputs.host == '') && !steps.skip.outputs.hit }}
         continue-on-error: true
         uses: actions/cache/restore@v6
         with:
@@ -314,9 +330,25 @@ jobs:
           restore-keys: |-
             ${{ runner.os }}-rust-funnel_udf_target-${{ hashFiles('enve.lock', 'funnel-udf/rust-toolchain.toml', 'funnel-udf/rust-toolchain', 'funnel-udf/enve.lock') }}-${{ matrix.cargo_cache }}-${{ hashFiles('funnel-udf/Cargo.lock', 'funnel-udf/**/Cargo.toml') }}-
             ${{ runner.os }}-rust-funnel_udf_target-${{ hashFiles('enve.lock', 'funnel-udf/rust-toolchain.toml', 'funnel-udf/rust-toolchain', 'funnel-udf/enve.lock') }}-${{ matrix.cargo_cache }}-
+      - name: Restore Rust target & cargo cache [funnel-udf/target] from the Host Cache
+        if: ${{ (hashFiles('funnel-udf/Cargo.lock', 'funnel-udf/**/Cargo.toml') != '' && contains(format(',{0},', matrix.cargo_targets), ',funnel-udf/target,') && steps.runner_caches.outputs.host != '') && !steps.skip.outputs.hit }}
+        continue-on-error: true
+        run: |-
+          src="$ENACT_HOST_CACHE/repo/cargo-target/$ENACT_RUST_HOST_KEY"
+          if [ -d "$src" ]; then
+            mkdir -p "$ENACT_RUST_TARGET"
+            cp -a --reflink=auto "$src/." "$ENACT_RUST_TARGET/"
+            touch "$src"
+            echo "Restored $ENACT_RUST_TARGET from the host cache"
+          else
+            echo "No host-cached $ENACT_RUST_TARGET yet"
+          fi
+        env:
+          ENACT_RUST_HOST_KEY: ${{ runner.os }}-rust-funnel_udf_target-${{ hashFiles('enve.lock', 'funnel-udf/rust-toolchain.toml', 'funnel-udf/rust-toolchain', 'funnel-udf/enve.lock') }}-${{ matrix.cargo_cache }}
+          ENACT_RUST_TARGET: funnel-udf/target
       - name: Restore Rust target & cargo cache [rust/target]
         id: rust_l1_cache_rust_target
-        if: ${{ (hashFiles('rust/Cargo.lock', 'rust/**/Cargo.toml') != '' && contains(format(',{0},', matrix.cargo_targets), ',rust/target,')) && !steps.skip.outputs.hit }}
+        if: ${{ (hashFiles('rust/Cargo.lock', 'rust/**/Cargo.toml') != '' && contains(format(',{0},', matrix.cargo_targets), ',rust/target,') && steps.runner_caches.outputs.host == '') && !steps.skip.outputs.hit }}
         continue-on-error: true
         uses: actions/cache/restore@v6
         with:
@@ -329,6 +361,22 @@ jobs:
           restore-keys: |-
             ${{ runner.os }}-rust-rust_target-${{ hashFiles('enve.lock', 'rust/rust-toolchain.toml', 'rust/rust-toolchain', 'rust/enve.lock') }}-${{ matrix.cargo_cache }}-${{ hashFiles('rust/Cargo.lock', 'rust/**/Cargo.toml') }}-
             ${{ runner.os }}-rust-rust_target-${{ hashFiles('enve.lock', 'rust/rust-toolchain.toml', 'rust/rust-toolchain', 'rust/enve.lock') }}-${{ matrix.cargo_cache }}-
+      - name: Restore Rust target & cargo cache [rust/target] from the Host Cache
+        if: ${{ (hashFiles('rust/Cargo.lock', 'rust/**/Cargo.toml') != '' && contains(format(',{0},', matrix.cargo_targets), ',rust/target,') && steps.runner_caches.outputs.host != '') && !steps.skip.outputs.hit }}
+        continue-on-error: true
+        run: |-
+          src="$ENACT_HOST_CACHE/repo/cargo-target/$ENACT_RUST_HOST_KEY"
+          if [ -d "$src" ]; then
+            mkdir -p "$ENACT_RUST_TARGET"
+            cp -a --reflink=auto "$src/." "$ENACT_RUST_TARGET/"
+            touch "$src"
+            echo "Restored $ENACT_RUST_TARGET from the host cache"
+          else
+            echo "No host-cached $ENACT_RUST_TARGET yet"
+          fi
+        env:
+          ENACT_RUST_HOST_KEY: ${{ runner.os }}-rust-rust_target-${{ hashFiles('enve.lock', 'rust/rust-toolchain.toml', 'rust/rust-toolchain', 'rust/enve.lock') }}-${{ matrix.cargo_cache }}
+          ENACT_RUST_TARGET: rust/target
       - name: Restore Node dependency cache
         id: node_l1_cache
         if: ${{ ((contains(matrix.technology, 'typescript') || contains(matrix.technology, 'javascript') || contains(matrix.technology, 'node')) && steps.runner_caches.outputs.host == '') && !steps.skip.outputs.hit }}
@@ -557,7 +605,7 @@ jobs:
             /tmp/go-build
             /tmp/go/pkg/mod
       - name: Save Rust target & cargo cache [cli/target]
-        if: ${{ (((env.ENACT_SAVE_EVENT == 'true' && hashFiles('cli/Cargo.lock', 'cli/**/Cargo.toml') != '' && contains(format(',{0},', matrix.cargo_targets), ',cli/target,') && (matrix.shard_index == '' || matrix.shard_index == 1 || matrix.shard_index == '1')) && (github.event_name == 'schedule' || github.event_name != 'pull_request' && github.ref_name == github.event.repository.default_branch || !startsWith(steps.rust_l1_cache_cli_target.outputs.cache-matched-key, format('{0}-rust-cli_target-{1}-{2}-{3}-', runner.os, hashFiles('enve.lock', 'cli/rust-toolchain.toml', 'cli/rust-toolchain', 'cli/enve.lock'), matrix.cargo_cache, hashFiles('cli/Cargo.lock', 'cli/**/Cargo.toml'))))) && steps.rust_l1_cache_cli_target.outputs.cache-hit != 'true') && !steps.skip.outputs.hit }}
+        if: ${{ (((env.ENACT_SAVE_EVENT == 'true' && hashFiles('cli/Cargo.lock', 'cli/**/Cargo.toml') != '' && contains(format(',{0},', matrix.cargo_targets), ',cli/target,') && (matrix.shard_index == '' || matrix.shard_index == 1 || matrix.shard_index == '1') && steps.runner_caches.outputs.host == '') && (github.event_name == 'schedule' || github.event_name != 'pull_request' && github.ref_name == github.event.repository.default_branch || !startsWith(steps.rust_l1_cache_cli_target.outputs.cache-matched-key, format('{0}-rust-cli_target-{1}-{2}-{3}-', runner.os, hashFiles('enve.lock', 'cli/rust-toolchain.toml', 'cli/rust-toolchain', 'cli/enve.lock'), matrix.cargo_cache, hashFiles('cli/Cargo.lock', 'cli/**/Cargo.toml'))))) && steps.rust_l1_cache_cli_target.outputs.cache-hit != 'true') && !steps.skip.outputs.hit }}
         continue-on-error: true
         uses: actions/cache/save@v6
         with:
@@ -567,8 +615,25 @@ jobs:
             ~/.cargo/registry/cache
             ~/.cargo/git/db
             cli/target
+      - name: Save Rust target & cargo cache [cli/target] to the Host Cache
+        if: ${{ (env.ENACT_SAVE_EVENT == 'true' && hashFiles('cli/Cargo.lock', 'cli/**/Cargo.toml') != '' && contains(format(',{0},', matrix.cargo_targets), ',cli/target,') && (matrix.shard_index == '' || matrix.shard_index == 1 || matrix.shard_index == '1') && steps.runner_caches.outputs.host != '') && !steps.skip.outputs.hit }}
+        continue-on-error: true
+        run: |-
+          [ -d "$ENACT_RUST_TARGET" ] || exit 0
+          dst="$ENACT_HOST_CACHE/repo/cargo-target/$ENACT_RUST_HOST_KEY"
+          tmp="$dst.new.$$"
+          mkdir -p "$(dirname "$dst")"
+          rm -rf "$tmp"
+          cp -a --reflink=auto "$ENACT_RUST_TARGET/." "$tmp/"
+          if [ -d "$dst" ]; then mv "$dst" "$dst.old.$$"; fi
+          mv "$tmp" "$dst"
+          rm -rf "$dst.old.$$"
+          echo "Saved $ENACT_RUST_TARGET to the host cache ($(du -sh "$dst" | cut -f1))"
+        env:
+          ENACT_RUST_HOST_KEY: ${{ runner.os }}-rust-cli_target-${{ hashFiles('enve.lock', 'cli/rust-toolchain.toml', 'cli/rust-toolchain', 'cli/enve.lock') }}-${{ matrix.cargo_cache }}
+          ENACT_RUST_TARGET: cli/target
       - name: Save Rust target & cargo cache [funnel-udf/target]
-        if: ${{ (((env.ENACT_SAVE_EVENT == 'true' && hashFiles('funnel-udf/Cargo.lock', 'funnel-udf/**/Cargo.toml') != '' && contains(format(',{0},', matrix.cargo_targets), ',funnel-udf/target,') && (matrix.shard_index == '' || matrix.shard_index == 1 || matrix.shard_index == '1')) && (github.event_name == 'schedule' || github.event_name != 'pull_request' && github.ref_name == github.event.repository.default_branch || !startsWith(steps.rust_l1_cache_funnel_udf_target.outputs.cache-matched-key, format('{0}-rust-funnel_udf_target-{1}-{2}-{3}-', runner.os, hashFiles('enve.lock', 'funnel-udf/rust-toolchain.toml', 'funnel-udf/rust-toolchain', 'funnel-udf/enve.lock'), matrix.cargo_cache, hashFiles('funnel-udf/Cargo.lock', 'funnel-udf/**/Cargo.toml'))))) && steps.rust_l1_cache_funnel_udf_target.outputs.cache-hit != 'true') && !steps.skip.outputs.hit }}
+        if: ${{ (((env.ENACT_SAVE_EVENT == 'true' && hashFiles('funnel-udf/Cargo.lock', 'funnel-udf/**/Cargo.toml') != '' && contains(format(',{0},', matrix.cargo_targets), ',funnel-udf/target,') && (matrix.shard_index == '' || matrix.shard_index == 1 || matrix.shard_index == '1') && steps.runner_caches.outputs.host == '') && (github.event_name == 'schedule' || github.event_name != 'pull_request' && github.ref_name == github.event.repository.default_branch || !startsWith(steps.rust_l1_cache_funnel_udf_target.outputs.cache-matched-key, format('{0}-rust-funnel_udf_target-{1}-{2}-{3}-', runner.os, hashFiles('enve.lock', 'funnel-udf/rust-toolchain.toml', 'funnel-udf/rust-toolchain', 'funnel-udf/enve.lock'), matrix.cargo_cache, hashFiles('funnel-udf/Cargo.lock', 'funnel-udf/**/Cargo.toml'))))) && steps.rust_l1_cache_funnel_udf_target.outputs.cache-hit != 'true') && !steps.skip.outputs.hit }}
         continue-on-error: true
         uses: actions/cache/save@v6
         with:
@@ -578,8 +643,25 @@ jobs:
             ~/.cargo/registry/cache
             ~/.cargo/git/db
             funnel-udf/target
+      - name: Save Rust target & cargo cache [funnel-udf/target] to the Host Cache
+        if: ${{ (env.ENACT_SAVE_EVENT == 'true' && hashFiles('funnel-udf/Cargo.lock', 'funnel-udf/**/Cargo.toml') != '' && contains(format(',{0},', matrix.cargo_targets), ',funnel-udf/target,') && (matrix.shard_index == '' || matrix.shard_index == 1 || matrix.shard_index == '1') && steps.runner_caches.outputs.host != '') && !steps.skip.outputs.hit }}
+        continue-on-error: true
+        run: |-
+          [ -d "$ENACT_RUST_TARGET" ] || exit 0
+          dst="$ENACT_HOST_CACHE/repo/cargo-target/$ENACT_RUST_HOST_KEY"
+          tmp="$dst.new.$$"
+          mkdir -p "$(dirname "$dst")"
+          rm -rf "$tmp"
+          cp -a --reflink=auto "$ENACT_RUST_TARGET/." "$tmp/"
+          if [ -d "$dst" ]; then mv "$dst" "$dst.old.$$"; fi
+          mv "$tmp" "$dst"
+          rm -rf "$dst.old.$$"
+          echo "Saved $ENACT_RUST_TARGET to the host cache ($(du -sh "$dst" | cut -f1))"
+        env:
+          ENACT_RUST_HOST_KEY: ${{ runner.os }}-rust-funnel_udf_target-${{ hashFiles('enve.lock', 'funnel-udf/rust-toolchain.toml', 'funnel-udf/rust-toolchain', 'funnel-udf/enve.lock') }}-${{ matrix.cargo_cache }}
+          ENACT_RUST_TARGET: funnel-udf/target
       - name: Save Rust target & cargo cache [rust/target]
-        if: ${{ (((env.ENACT_SAVE_EVENT == 'true' && hashFiles('rust/Cargo.lock', 'rust/**/Cargo.toml') != '' && contains(format(',{0},', matrix.cargo_targets), ',rust/target,') && (matrix.shard_index == '' || matrix.shard_index == 1 || matrix.shard_index == '1')) && (github.event_name == 'schedule' || github.event_name != 'pull_request' && github.ref_name == github.event.repository.default_branch || !startsWith(steps.rust_l1_cache_rust_target.outputs.cache-matched-key, format('{0}-rust-rust_target-{1}-{2}-{3}-', runner.os, hashFiles('enve.lock', 'rust/rust-toolchain.toml', 'rust/rust-toolchain', 'rust/enve.lock'), matrix.cargo_cache, hashFiles('rust/Cargo.lock', 'rust/**/Cargo.toml'))))) && steps.rust_l1_cache_rust_target.outputs.cache-hit != 'true') && !steps.skip.outputs.hit }}
+        if: ${{ (((env.ENACT_SAVE_EVENT == 'true' && hashFiles('rust/Cargo.lock', 'rust/**/Cargo.toml') != '' && contains(format(',{0},', matrix.cargo_targets), ',rust/target,') && (matrix.shard_index == '' || matrix.shard_index == 1 || matrix.shard_index == '1') && steps.runner_caches.outputs.host == '') && (github.event_name == 'schedule' || github.event_name != 'pull_request' && github.ref_name == github.event.repository.default_branch || !startsWith(steps.rust_l1_cache_rust_target.outputs.cache-matched-key, format('{0}-rust-rust_target-{1}-{2}-{3}-', runner.os, hashFiles('enve.lock', 'rust/rust-toolchain.toml', 'rust/rust-toolchain', 'rust/enve.lock'), matrix.cargo_cache, hashFiles('rust/Cargo.lock', 'rust/**/Cargo.toml'))))) && steps.rust_l1_cache_rust_target.outputs.cache-hit != 'true') && !steps.skip.outputs.hit }}
         continue-on-error: true
         uses: actions/cache/save@v6
         with:
@@ -589,6 +671,23 @@ jobs:
             ~/.cargo/registry/cache
             ~/.cargo/git/db
             rust/target
+      - name: Save Rust target & cargo cache [rust/target] to the Host Cache
+        if: ${{ (env.ENACT_SAVE_EVENT == 'true' && hashFiles('rust/Cargo.lock', 'rust/**/Cargo.toml') != '' && contains(format(',{0},', matrix.cargo_targets), ',rust/target,') && (matrix.shard_index == '' || matrix.shard_index == 1 || matrix.shard_index == '1') && steps.runner_caches.outputs.host != '') && !steps.skip.outputs.hit }}
+        continue-on-error: true
+        run: |-
+          [ -d "$ENACT_RUST_TARGET" ] || exit 0
+          dst="$ENACT_HOST_CACHE/repo/cargo-target/$ENACT_RUST_HOST_KEY"
+          tmp="$dst.new.$$"
+          mkdir -p "$(dirname "$dst")"
+          rm -rf "$tmp"
+          cp -a --reflink=auto "$ENACT_RUST_TARGET/." "$tmp/"
+          if [ -d "$dst" ]; then mv "$dst" "$dst.old.$$"; fi
+          mv "$tmp" "$dst"
+          rm -rf "$dst.old.$$"
+          echo "Saved $ENACT_RUST_TARGET to the host cache ($(du -sh "$dst" | cut -f1))"
+        env:
+          ENACT_RUST_HOST_KEY: ${{ runner.os }}-rust-rust_target-${{ hashFiles('enve.lock', 'rust/rust-toolchain.toml', 'rust/rust-toolchain', 'rust/enve.lock') }}-${{ matrix.cargo_cache }}
+          ENACT_RUST_TARGET: rust/target
       - name: Save Cache [Backend database templates]
         if: ${{ ((!cancelled() && env.ENACT_SAVE_EVENT == 'true' && contains(format(',{0},', matrix.caches), ',backend-templates,') && (github.event_name == 'schedule' || github.event_name != 'pull_request' && github.ref_name == github.event.repository.default_branch || !startsWith(steps.cache_backend_templates.outputs.cache-matched-key, format('backend-templates-4-{0}-', runner.os)) || steps.cache_delta.outputs.cache_backend_templates == 'true') && steps.cache_backend_templates_publication.outputs.eligible == 'true' && steps.cache_backend_templates_publication.outcome == 'success') && steps.cache_backend_templates.outputs.cache-hit != 'true') && !steps.skip.outputs.hit }}
         continue-on-error: true

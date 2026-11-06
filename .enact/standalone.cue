@@ -93,7 +93,8 @@ pipeline: components: {
 		technology:      "typescript"
 		root:            "products/desktop"
 		depends_on:      ["root", "build_once"]
-		workspace_scope: include: ["packages/agent"]
+		// Contract tests read backend files they mirror (model costs, task kinds, canvas SDK).
+		workspace_scope: include: ["packages/agent", "services/llm-gateway/src/llm_gateway/rate_limiting/model_cost_overrides.py", "products/tasks/backend/models.py", "products/canvas/packages/canvas_builder/manifest.json", "products/canvas/packages/canvas_builder/canvas-sdk.mjs"]
 		watch_paths:     ["products/desktop/**", "packages/agent/**"]
 		jobs: {
 			lint: {

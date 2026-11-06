@@ -514,6 +514,7 @@ jobs:
     - Linux
     - X64
     - tonky-ci
+    - ibp8
     - tonky-ci-l
     timeout-minutes: 90
     steps:
@@ -638,6 +639,7 @@ jobs:
           playwright
           services/mcp
           .github/scripts/jest-retries.cjs
+          posthog/hogql_queries/utils/breakdowns.py
           products/games
           products/canvas/packages
           products/visual_review/cli
@@ -711,6 +713,7 @@ jobs:
           playwright
           services/mcp
           .github/scripts/jest-retries.cjs
+          posthog/hogql_queries/utils/breakdowns.py
           products/games
           products/canvas/packages
           products/visual_review/cli
@@ -885,6 +888,7 @@ jobs:
     - Linux
     - X64
     - tonky-ci
+    - ibp8
     - tonky-ci-l
     timeout-minutes: 90
     steps:
@@ -1021,6 +1025,7 @@ jobs:
           docker-compose.profiles.yml
           frontend/src/lib/agentScopes.generated.ts
           frontend/src/lib/components/AgentObjectTags/objectKinds.generated.ts
+          frontend/src/lib/components/DomainConnect/templates
           frontend/src/products.json
           frontend/src/queries/schema.json
           frontend/src/taxonomy/core-filter-definitions-by-group.json
@@ -1028,6 +1033,7 @@ jobs:
           livestream/bot
           packages/agent/packages/agent-contracts/src/model-catalog.generated.ts
           packages/agent/packages/agent-contracts/src/objectTagKinds.generated.ts
+          packages/agent/packages/agent/src/utils/gateway-routing-cases.json
           rust/common/ingestion_warnings/warning_types.generated.json
           rust/feature-flags/src/properties
           rust/feature-flags/tests/fixtures
@@ -1114,6 +1120,7 @@ jobs:
           docker-compose.profiles.yml
           frontend/src/lib/agentScopes.generated.ts
           frontend/src/lib/components/AgentObjectTags/objectKinds.generated.ts
+          frontend/src/lib/components/DomainConnect/templates
           frontend/src/products.json
           frontend/src/queries/schema.json
           frontend/src/taxonomy/core-filter-definitions-by-group.json
@@ -1121,6 +1128,7 @@ jobs:
           livestream/bot
           packages/agent/packages/agent-contracts/src/model-catalog.generated.ts
           packages/agent/packages/agent-contracts/src/objectTagKinds.generated.ts
+          packages/agent/packages/agent/src/utils/gateway-routing-cases.json
           rust/common/ingestion_warnings/warning_types.generated.json
           rust/feature-flags/src/properties
           rust/feature-flags/tests/fixtures

@@ -299,6 +299,9 @@ profiles: dev: schema.#Profile & {
 			lifecycle: postStart:    "redis-cli -p $PORT cluster addslots $(seq 0 16383) >/dev/null && until redis-cli -p $PORT cluster info | rg -q '^cluster_state:ok'; do sleep 0.1; done"
 		}
 		clickhouse: {
+			// Its S3 client signs with environment credentials: the job's cache keys would
+			// sign requests the fixture store (anonymous Admin) rejects (test_backups 403).
+			environment: {AWS_ACCESS_KEY_ID: "", AWS_SECRET_ACCESS_KEY: ""}
 			timeout: "90s"
 			ports: {native: 9000, interserver: 9009, keeper: 9181, raft: 9234}
 			files: "config.template.xml": source: "infra/clickhouse/config.xml"
