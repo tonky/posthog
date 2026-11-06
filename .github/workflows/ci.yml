@@ -1537,6 +1537,7 @@ jobs:
           proto
           docker
           infra
+          .github/rust-images.yml
     - name: Checkout Repository (sparse)
       if: ${{ steps.runner_caches.outputs.host == '' || steps.host_checkout.outcome == 'failure' }}
       uses: actions/checkout@v7
@@ -1595,6 +1596,7 @@ jobs:
           proto
           docker
           infra
+          .github/rust-images.yml
         sparse-checkout-cone-mode: "true"
         submodules: "false"
     - name: Restore enact Task CAS Cache
@@ -1851,6 +1853,7 @@ jobs:
           services/mcp/src/lib/trace-property-allowlist.generated.ts
           services/mcp/src/resources/ui-apps.generated.ts
           services/stripe-mock/tests/conftest.py
+          frontend/src/scenes/settings/SettingsMap.tsx
           common/__init__.py
           common/hogql_parser
           common/migration_utils
@@ -1938,11 +1941,13 @@ jobs:
           products/isolation_baseline.txt
           products/model_crossing_uses_baseline.txt
           .importlinter
+          frontend/public/message-preferences.css
           products/ruff.toml
           products/stamphog/packages
           packages/agent/agent-shadow
           bin/generate_personhog_proto.sh
           showcase/scripts/build_quill.sh
+          .github/rust-images.yml
           posthog/api/feature_flag.py
           posthog/models/feature_flag/flags_cache.py
           posthog/models/feature_flag/feature_flag.py
@@ -2178,6 +2183,7 @@ jobs:
           services/mcp/src/lib/trace-property-allowlist.generated.ts
           services/mcp/src/resources/ui-apps.generated.ts
           services/stripe-mock/tests/conftest.py
+          frontend/src/scenes/settings/SettingsMap.tsx
           common/__init__.py
           common/hogql_parser
           common/migration_utils
@@ -2265,11 +2271,13 @@ jobs:
           products/isolation_baseline.txt
           products/model_crossing_uses_baseline.txt
           .importlinter
+          frontend/public/message-preferences.css
           products/ruff.toml
           products/stamphog/packages
           packages/agent/agent-shadow
           bin/generate_personhog_proto.sh
           showcase/scripts/build_quill.sh
+          .github/rust-images.yml
           posthog/api/feature_flag.py
           posthog/models/feature_flag/flags_cache.py
           posthog/models/feature_flag/feature_flag.py
@@ -3418,6 +3426,7 @@ jobs:
           services/mcp/src/resources/ui-apps.generated.ts
           services/mcp/src/templates
           services/stripe-mock/tests/conftest.py
+          frontend/public/message-preferences.css
           products/ruff.toml
           products/stamphog/packages
           packages/agent/agent-shadow
@@ -3510,6 +3519,7 @@ jobs:
           services/mcp/src/resources/ui-apps.generated.ts
           services/mcp/src/templates
           services/stripe-mock/tests/conftest.py
+          frontend/public/message-preferences.css
           products/ruff.toml
           products/stamphog/packages
           packages/agent/agent-shadow

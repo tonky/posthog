@@ -154,6 +154,9 @@ _mcpUiAppsFiles: [
 
 _pytestFiles:  ["test_*.py", "*_test.py"]
 _pytestErrors: [2, 3, 4]
+// The services test_databases.sh's per-worker setup uses before any test (psql,
+// clickhouse-client, create_test_kafka_topics.py's librdkafka): no test footprint names them.
+_pytestSetupServices: ["postgres", "clickhouse", "kafka"]
 
 pipeline: schema.#Pipeline & {
 	name:        "posthog-platform"
@@ -277,7 +280,8 @@ pipeline: schema.#Pipeline & {
 			root:        "."
 			depends_on:  ["py-root", "pytest_plugins", "pytest_runner", "test_env", "build_once"]
 			tags:        ["backend", "django", "api"]
-			workspace_scope: {include_dependencies: false, include: _python_monolith_include}
+			// ee/hogai/test/test_llm.py reads the settings scene's ids (SETTINGS_MAP_PATH).
+			workspace_scope: {include_dependencies: false, include: list.Concat([_python_monolith_include, ["frontend/src/scenes/settings/SettingsMap.tsx"]])}
 			watch_paths: list.Concat([[
 				"posthog/[!d]*/**", "posthog/d[!a]*/**", "posthog/*", "ee/**", "manage.py", "common/__init__.py",
 				"common/hogql_parser/**", "common/migration_utils/**",
@@ -323,10 +327,12 @@ pipeline: schema.#Pipeline & {
 					max_shards: 12
 					shards:     4
 					recorder:   "own"
-					resources:  {cpus: 0.75, memory_mb: 2800}
+					// Nightly peaks per shard: 1.8-3.8 GB (a 10.9 GB shard was the warehouse-URL hook's
+					// absence: test_groups_revenue_analytics' s3() reads retried at upstream's bucket).
+					resources: {cpus: 0.75, memory_mb: 4096}
 					tasks: [
 						{name: "Build plugin transpiler", command: "showcase/scripts/build_plugin_transpiler.sh", timeout: "15m"},
-						{name: "Run Tests", command: "bash showcase/scripts/run_sharded_pytest.sh {targets}", timeout: "90m", error_exit_codes: _pytestErrors},
+						{name: "Run Tests", command: "bash showcase/scripts/run_sharded_pytest.sh {targets}", timeout: "90m", error_exit_codes: _pytestErrors, services: _pytestSetupServices},
 					]
 				}
 			}
@@ -363,7 +369,8 @@ pipeline: schema.#Pipeline & {
 			technology:      "python"
 			root:            "."
 			depends_on:      ["base", "py-root", "test_env"]
-			workspace_scope: {include_dependencies: false, include: _python_monolith_include}
+			// messaging's test_message_preference_styles reads the compiled stylesheet (STYLESHEET).
+			workspace_scope: {include_dependencies: false, include: list.Concat([_python_monolith_include, ["frontend/public/message-preferences.css"]])}
 			tags:            ["backend", "django", "products"]
 			watch_paths: [
 				"products/*.py", "products/ruff.toml", "products/*/*.py", "products/*/backend/**",
@@ -395,7 +402,8 @@ pipeline: schema.#Pipeline & {
 			max_shards:   12
 			shards:       4
 			shard_groups: {by: "products/*/", overhead_s: 17}
-			resources:    {cpus: 0.75, memory_mb: 2800}
+			// The nightly's measured shard peak: 7.1 GB (warehouse_sources' shard).
+			resources: {cpus: 0.75, memory_mb: 7680}
 			scoping: {
 				domain_roots:    ["posthog", "ee", "products"]
 				service_markers: ["django_db", "BaseTest", "APITestCase", "ClickhouseTestMixin", "NonDeterministicDatabaseTestMixin", "posthog.test"]
@@ -425,6 +433,7 @@ pipeline: schema.#Pipeline & {
 				command:          "showcase/scripts/build_once.sh canvas-builder-deps products/canvas/packages/canvas_builder/node_modules/.enact-build-key products/canvas/packages/canvas_builder/package.json products/canvas/packages/canvas_builder/package-lock.json -- npm ci --ignore-scripts --omit=dev --no-audit --no-fund --prefix products/canvas/packages/canvas_builder && bash showcase/scripts/run_sharded_pytest.sh {targets}"
 				timeout:          "90m"
 				error_exit_codes: _pytestErrors
+				services:         _pytestSetupServices
 			}
 			uses: _backendServices
 		}
@@ -480,6 +489,7 @@ pipeline: schema.#Pipeline & {
 				command:          "bash showcase/scripts/run_sharded_pytest.sh {targets}"
 				timeout:          "90m"
 				error_exit_codes: _pytestErrors
+				services:         _pytestSetupServices
 			}
 			uses: [
 				{protocol: schema.#Protocol.Sql, target: pipeline.services.postgres, title: "Reads & writes app metadata"},
@@ -722,7 +732,8 @@ pipeline: schema.#Pipeline & {
 			technology:      ["rust", "python"]
 			root:            "rust"
 			depends_on:      ["test_env", "proto", "geoip"]
-			workspace_scope: include: list.Concat([_djangoTree, ["rust", "proto", "docker", "infra"]])
+			// affected-services' integration tests parse the image list (load_test_fixtures).
+			workspace_scope: include: list.Concat([_djangoTree, ["rust", "proto", "docker", "infra", ".github/rust-images.yml"]])
 			watch_paths: list.Concat([[
 				"rust/**", "posthog/api/feature_flag.py",
 				"posthog/models/feature_flag/flags_cache.py", "posthog/models/feature_flag/feature_flag.py",
@@ -1054,7 +1065,24 @@ pipeline: schema.#Pipeline & {
 			technology:      "python"
 			root:            "tools/hogli-commands"
 			depends_on:      ["py-root", "geoip"]
-			workspace_scope: include: ["devenv", ".github/actions", ".github/scripts/migration-deletion-allowlist.txt", "frontend/package.json", "services/mcp/tsconfig.json"]
+			// The repository files hogli's tests read or probe (their reach footprints): ci-preflight's
+			// API ratchet, triggers and workspace lockfiles; test_runner's detection of each
+			// ecosystem's tests (a directory it walks whole is listed whole).
+			workspace_scope: include: [
+				"devenv", ".github/actions", ".github/scripts/migration-deletion-allowlist.txt", "frontend/package.json", "services/mcp/tsconfig.json",
+				"frontend/src/generated/core/api.ts", "frontend/src/lib/api.ts", "frontend/src/lib/api-ratchet-baseline.txt", "frontend/src/lib/constants.tsx",
+				"frontend/src/lib/components/AgentObjectTags/objectKinds.generated.ts", "frontend/src/scenes/sceneTypes.ts",
+				"frontend/src/scenes/dashboard/DashboardHeader.test.tsx",
+				"packages/agent/package.json", "packages/agent/biome.jsonc", "packages/agent/pnpm-workspace.yaml", "packages/agent/pnpm-lock.yaml",
+				"packages/agent/packages/agent/package.json", "packages/agent/packages/agent/src/utils/gateway.test.ts",
+				"packages/agent/packages/agent-contracts/src/model-catalog.generated.ts", "packages/agent/packages/agent-contracts/src/objectTagKinds.generated.ts",
+				"services/mcp/src/lib/oauth-scopes.generated.ts", "services/mcp/src/lib/trace-property-allowlist.generated.ts",
+				"tools/hedgebox-dummy/package.json", "tools/hedgebox-dummy/pnpm-workspace.yaml",
+				"cli/Cargo.toml", "cli/src/main.rs", "cli/src/utils/throttler.rs", "funnel-udf/Cargo.toml", "funnel-udf/src/lib.rs",
+				"rust/capture/Cargo.toml", "rust/capture/src", "rust/capture/tests/events.rs",
+				"livestream/events/filter_test.go", "tools/phrocs/go.mod", "tools/phrocs/internal/tui/app_test.go",
+				"nodejs/package.json", "nodejs/tests/cdp/cdp-api.test.ts", "playwright/e2e",
+			]
 			watch_paths: [
 				"tools/hogli-commands/**", "tools/hogli/**", "hogli.yaml", "devenv/**",
 				"bin/[!cde]*", "bin/e[!n]*", "bin/en[!av]*", "bin/c[!e]*", "bin/d[!o]*", "bin/do[!w]*",

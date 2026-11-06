@@ -31,11 +31,16 @@ def declared_services(root: Path) -> list[tuple[str, str, int]]:
     return rows
 
 
+# The recorders' library, not the job's context: live_footprint.py imports it from here when no
+# enact checkout sits above the scripts (a fork's checkout in CI).
+KEPT = {"ENACT_FOOTPRINT_CORE"}
+
+
 def helper_env(services: Sequence[tuple[str, str, int]] = ()) -> dict[str, str]:
-    """os.environ less every ENACT_* variable and, given the declared services, every variable
+    """os.environ less every ENACT_* variable but ENACT_FOOTPRINT_CORE and, given the declared services, every variable
     that reaches one of them: ENVE_SERVICE_*, and any whose value is one of their ports or a
     loopback endpoint on one."""
-    env = {k: v for k, v in os.environ.items() if not k.startswith("ENACT_")}
+    env = {k: v for k, v in os.environ.items() if not k.startswith("ENACT_") or k in KEPT}
     if not services:
         return env
     ports = "|".join(sorted({str(port) for _, _, port in services}))

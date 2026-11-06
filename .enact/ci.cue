@@ -164,7 +164,6 @@ pipeline: schema.#Pipeline & {
 			scope:    "all"
 			services: "on_demand"
 			triggers: {
-				schedule: ["0 3 * * *"]
 				workflow_dispatch: true
 			}
 			stages: [_testStage]

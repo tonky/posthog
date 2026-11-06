@@ -86,8 +86,13 @@ class ShardProvisioningTest(unittest.TestCase):
         path.write_text(text)
         path.chmod(0o755)
 
+    def env(self) -> dict[str, str]:
+        # Without the job's UV_CACHE_DIR: setup.sh would prune the caller's real venv cache, and
+        # its cache key hashes a uv.lock this scratch repo lacks (the nightly's helper_tests).
+        return {k: v for k, v in helper_env().items() if k != "UV_CACHE_DIR"}
+
     def shards(self, count: int, **env: str) -> list[subprocess.CompletedProcess]:
-        base = {**helper_env(), "STUB_LOG": str(self.log), "ENACT_SERVICES_ACTIVE": "0", **env}
+        base = {**self.env(), "STUB_LOG": str(self.log), "ENACT_SERVICES_ACTIVE": "0", **env}
         running = [
             subprocess.Popen(
                 ["bash", "showcase/scripts/run_sharded_pytest.sh", f"posthog/test/test_{i}.py"],
@@ -115,7 +120,7 @@ class ShardProvisioningTest(unittest.TestCase):
     def test_a_failed_setup_leaves_no_stamp(self) -> None:
         # The prepare phase's install: its sync works, its grpc check fails, so the runtime
         # is broken, unstamped, and the install fails (no fallback `uv sync` + record).
-        env = {**helper_env(), "STUB_LOG": str(self.log), "FAIL_IMPORT": "1", "PATH": f"{self.repo / 'bin'}:{os.environ['PATH']}"}
+        env = {**self.env(), "STUB_LOG": str(self.log), "FAIL_IMPORT": "1", "PATH": f"{self.repo / 'bin'}:{os.environ['PATH']}"}
         done = subprocess.run(
             ["bash", "showcase/scripts/setup.sh", "backend"], cwd=self.repo, env=env, capture_output=True, text=True
         )

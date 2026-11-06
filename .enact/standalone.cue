@@ -103,19 +103,25 @@ pipeline: components: {
 					{name: "Lint", command: "pnpm exec biome ci . && pnpm --dir ../../packages/agent exec biome ci . && node scripts/check-host-boundaries.mjs"},
 				]
 			}
+			// Upstream runs both on depot-ubuntu-24.04-4 (4 vCPU) with a 30 min limit. Measured
+			// cold (turbo cache forced off, 18-core Mac): typecheck peaks 8.8 GB (turbo's ten tsc at
+			// once), the tests 7.8 GB over 2,860 CPU-s, which on 2 cores ran past the 600 s default
+			// step limit; under the 1 GB default the resource watcher killed typecheck at 3.5 GB.
 			typecheck: {
-				name: "Typecheck"
+				name:      "Typecheck"
+				resources: {cpus: 4.0, memory_mb: 9216}
 				tasks: [
 					_install,
-					{name: "Typecheck", command: "pnpm run typecheck"},
+					{name: "Typecheck", command: "pnpm run typecheck", timeout: "30m"},
 				]
 			}
 			test: {
-				name:   "Test"
-				shards: 1
+				name:      "Test"
+				shards:    1
+				resources: {cpus: 4.0, memory_mb: 8192}
 				tasks: [
 					_install,
-					{name: "Run Tests", command: "node scripts/rebuild-better-sqlite3-node.mjs && pnpm test"},
+					{name: "Run Tests", command: "node scripts/rebuild-better-sqlite3-node.mjs && pnpm test", timeout: "30m"},
 				]
 			}
 		}

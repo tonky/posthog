@@ -10,6 +10,7 @@ pipeline: components: {
 		root:       "."
 		depends_on: ["js-root", "build_once"]
 		watch_paths: [
+			"common/storybook/.storybook-enact/**",
 			"common/storybook/.storybook/enact-loads.ts",
 			"common/storybook/.storybook/plugins/vite-enact-chunks-plugin.ts",
 			"showcase/scripts/run_storybook_tests.sh",

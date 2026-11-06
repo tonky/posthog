@@ -3,7 +3,6 @@ package replay
 pipeline: analysis: {
 	durations: [".enact/state/pytest/durations-*.json"]
 	recorders: {
-		"enact_footprint.py":      "7"
 		"rust_footprint.py":       "3"
 		"storybook_footprint.mjs": "1"
 		"live_footprint.py":       "3"

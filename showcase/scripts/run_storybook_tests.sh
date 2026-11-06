@@ -47,7 +47,7 @@ showcase/scripts/build_once.sh storybook-build common/storybook/dist/.enact-buil
     posthog/templates/replay_player_frame package.json pnpm-lock.yaml pnpm-workspace.yaml \
     turbo.json tsconfig.json patches -- \
     bash -c 'rm -rf common/storybook/dist && bin/turbo --filter=@posthog/storybook prepare &&
-        NODE_OPTIONS=--max-old-space-size=32768 pnpm --filter=@posthog/storybook build --test'
+        NODE_OPTIONS=--max-old-space-size=32768 pnpm --filter=@posthog/storybook build --test -c .storybook-enact'
 [ "${1:-}" != --build ] || exit 0
 
 shard="${1:?usage: run_storybook_tests.sh [--browser chromium|webkit] <shard> <total> [story files...] | --build}"
@@ -66,7 +66,9 @@ pnpm --filter=@posthog/storybook exec wait-on "http://127.0.0.1:$port" --timeout
 
 # Recording footprints for enact (ENACT_FOOTPRINT_DIR set): the test-runner logs the URLs each
 # story file's browser requested (.storybook/enact-loads.ts), and storybook_footprint.mjs maps
-# them to the repository files the build made them from (dist/enact-chunks.json).
+# them to the repository files the build made them from (dist/enact-chunks.json). Both come in
+# through enact's config dir (`-c .storybook-enact`: upstream's main.ts and test-runner.ts,
+# wrapped, never patched), which the build and the test-runner load.
 loads=""
 if [ -n "${ENACT_FOOTPRINT_DIR:-}" ]; then
     loads="$out/loads"
@@ -82,7 +84,7 @@ OPT_OUT_CAPTURE=1 NODE_OPTIONS="${NODE_OPTIONS:+$NODE_OPTIONS }--max-old-space-s
     STORYBOOK_SKIP_TAGS="test-skip,test-skip-${browser}" \
     STORYBOOK_SNAPSHOTS_DIR="$out/snapshots" JEST_JUNIT_OUTPUT_DIR="$out" ENACT_STORYBOOK_LOADS="$loads" \
     pnpm --filter=@posthog/storybook test:visual:ci:update --browsers "$browser" \
-    --url "http://127.0.0.1:$port" "${args[@]}" || status=$?
+    --url "http://127.0.0.1:$port" -c .storybook-enact "${args[@]}" || status=$?
 if [ -n "$loads" ]; then
     node showcase/scripts/storybook_footprint.mjs common/storybook/dist "$loads" "http://127.0.0.1:$port" || status=$((status ? status : 1))
 fi
