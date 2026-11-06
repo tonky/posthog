@@ -85,7 +85,7 @@ jobs:
         ENACT_OUTPUTS_PATHS: ${{ matrix.output_paths }}
     - name: Look Up Built Outputs
       id: outputs-lookup
-      if: ${{ steps.outputs-host-lookup.outputs.cache-hit != 'true' && matrix.output_key != '' }}
+      if: ${{ matrix.output_key != '' }}
       continue-on-error: true
       uses: actions/cache/restore@v6
       with:
@@ -624,8 +624,91 @@ jobs:
       env:
         ENACT_OUTPUTS_KEY: enact-outputs-${{ matrix.output_slug }}-${{ runner.os }}-${{ runner.arch }}-${{ matrix.output_key }}
         ENACT_OUTPUTS_PATHS: ${{ matrix.output_paths }}
+    - name: Copy Host-Cached Outputs for GitHub's Cache
+      id: outputs-publish
+      if: ${{ success() && steps.outputs-host-lookup.outputs.cache-hit == 'true' && steps.outputs-lookup.outputs.cache-hit != 'true' && matrix.output_key != '' }}
+      continue-on-error: true
+      run: |
+        set -euo pipefail
+        store="${ENACT_OUTPUTS_CACHE:-}"
+        entry="$store/${GITHUB_REPOSITORY:-repo}/$ENACT_OUTPUTS_KEY"
+        clone_item() {
+            rm -rf "$2"
+            mkdir -p "$(dirname "$2")"
+            cp -a --reflink=auto "$1" "$2" 2>/dev/null || { rm -rf "$2"; cp -a "$1" "$2"; }
+        }
+        case "$ENACT_OUTPUTS_MODE" in
+            restore)
+                hit=false
+                if [ -n "$store" ] && [ -f "$entry/.enact-ready" ]; then
+                    hit=true
+                    while IFS= read -r pattern; do
+                        [ -n "$pattern" ] || continue
+                        # shellcheck disable=SC2086 # glob pattern from outputs.paths
+                        for src in "$entry"/$pattern; do
+                            [ -e "$src" ] || [ -L "$src" ] || { hit=false; break 2; }
+                            rel="${src#"$entry"/}"
+                            clone_item "$src" "$rel" || { hit=false; break 2; }
+                        done
+                    done <<<"$ENACT_OUTPUTS_PATHS"
+                fi
+                if [ "$hit" = true ]; then
+                    touch "$entry/.enact-ready" 2>/dev/null || true
+                fi
+                printf 'cache-hit=%s\n' "$hit" >> "$GITHUB_OUTPUT"
+                ;;
+            save)
+                [ -n "$store" ] || exit 0
+                [ ! -f "$entry/.enact-ready" ] || exit 0
+                mkdir -p "$(dirname "$entry")"
+                tmp=$(mktemp -d "$entry.tmp.XXXXXX")
+                trap 'rm -rf "$tmp"' EXIT
+                while IFS= read -r pattern; do
+                    [ -n "$pattern" ] || continue
+                    # shellcheck disable=SC2086 # glob pattern from outputs.paths
+                    for src in $pattern; do
+                        [ -e "$src" ] || [ -L "$src" ] || exit 1
+                        clone_item "$src" "$tmp/$src"
+                    done
+                done <<<"$ENACT_OUTPUTS_PATHS"
+                touch "$tmp/.enact-ready"
+                chmod -R a+rX "$tmp" 2>/dev/null || true
+                if ! mv -n "$tmp" "$entry" 2>/dev/null && [ ! -d "$entry" ]; then
+                    rm -rf "$entry"
+                    mv "$tmp" "$entry"
+                fi
+                repo_dir="$(dirname "$entry")"
+                max_entries="${ENACT_OUTPUTS_CACHE_MAX_ENTRIES:-8}"
+                min_free_mb="${ENACT_OUTPUTS_CACHE_MIN_FREE_MB:-5120}"
+                ready_files=()
+                while IFS= read -r ready; do
+                    [ -n "$ready" ] && ready_files+=("$ready")
+                done < <(ls -1dt "$repo_dir"/*/.enact-ready 2>/dev/null || true)
+                total="${#ready_files[@]}"
+                for (( idx = total - 1; idx >= 0; idx-- )); do
+                    cand_dir="$(dirname "${ready_files[$idx]}")"
+                    [ "$cand_dir" != "$entry" ] || continue
+                    evict=false
+                    if [ "$max_entries" -gt 0 ] && [ "$((idx + 1))" -gt "$max_entries" ]; then
+                        evict=true
+                    elif [ "$min_free_mb" -gt 0 ]; then
+                        free_mb="$(df -Pk "$store" 2>/dev/null | awk 'NR==2 {print int($4 / 1024)}')"
+                        if [ -n "$free_mb" ] && [ "$free_mb" -lt "$min_free_mb" ]; then
+                            evict=true
+                        fi
+                    fi
+                    if [ "$evict" = true ]; then
+                        rm -rf "$cand_dir" 2>/dev/null || true
+                    fi
+                done
+                ;;
+        esac
+      env:
+        ENACT_OUTPUTS_KEY: enact-outputs-${{ matrix.output_slug }}-${{ runner.os }}-${{ runner.arch }}-${{ matrix.output_key }}
+        ENACT_OUTPUTS_MODE: restore
+        ENACT_OUTPUTS_PATHS: ${{ matrix.output_paths }}
     - name: Cache Built Outputs
-      if: ${{ success() && !steps.skip.outputs.hit && matrix.output_key != '' }}
+      if: ${{ success() && (!steps.skip.outputs.hit || steps.outputs-publish.outputs.cache-hit == 'true') && matrix.output_key != '' }}
       continue-on-error: true
       uses: actions/cache/save@v6
       with:
