@@ -538,7 +538,8 @@ pipeline: schema.#Pipeline & {
 			depends_on:  ["js-root", "quill", "test_quarantine"]
 			tags:        ["frontend", "vite", "react", "kea"]
 			workspace_scope: {
-				include: ["frontend", "products", "packages", "common", "docs/onboarding", "playwright", "services/mcp"]
+				// jest.config's setupFilesAfterEnv names .github/scripts/jest-retries.cjs.
+				include: ["frontend", "products", "packages", "common", "docs/onboarding", "playwright", "services/mcp", ".github/scripts/jest-retries.cjs"]
 				ignore:  _productsFrontendBin
 			}
 			watch_paths: list.Concat([[

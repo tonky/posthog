@@ -65,8 +65,7 @@ pipeline: components: {
 		technology:      ["rust", "python"]
 		root:            "posthog/api/test/rust_integration"
 		cargo: workspace: "rust"
-		// Its tests are Django's (run_sharded_pytest.sh): the backend venv, py-root's install.
-		depends_on:      ["py-root", "test_env", "proto", "geoip"]
+		depends_on:      ["test_env", "proto", "geoip"]
 		workspace_scope: include: list.Concat([_djangoTree, ["rust", "proto", "docker", "infra"]])
 		watch_paths: list.Concat([[
 			"posthog/api/feature_flag.py",

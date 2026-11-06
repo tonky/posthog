@@ -42,8 +42,10 @@ if (!outDir) {
 const dist = path.resolve(distArg)
 const chunksFile = path.join(dist, 'enact-chunks.json')
 if (!fs.existsSync(chunksFile)) {
-    console.error(`storybook_footprint: ${chunksFile} is missing: the build predates the enact-chunks plugin`)
-    process.exit(1)
+    // No map from outputs to sources: the story files stay untraced (selection runs them as
+    // such), and the tests' own exit decides the shard, not the missing recording.
+    console.error(`storybook_footprint: ${chunksFile} is missing (a build without the enact-chunks plugin): no footprints recorded`)
+    process.exit(0)
 }
 const { outputs } = JSON.parse(fs.readFileSync(chunksFile, 'utf8'))
 const origin = new URL(serverUrl).origin

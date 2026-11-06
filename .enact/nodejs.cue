@@ -5,7 +5,8 @@ import (
 	"enact.dev/schema"
 )
 
-_nodejsCone: list.Concat([_djangoTree, ["nodejs", "rust", "proto", "frontend/public/services", "docker", "infra"]])
+// jest.config.shared.js names frontend/jest.quarantine.ts and .github/scripts/jest-retries.cjs.
+_nodejsCone: list.Concat([_djangoTree, ["nodejs", "rust", "proto", "frontend/public/services", "frontend/jest.quarantine.ts", ".github/scripts/jest-retries.cjs", "docker", "infra"]])
 
 _nodejsServices: [
 	{protocol: schema.#Protocol.Sql, target: pipeline.services.postgres},

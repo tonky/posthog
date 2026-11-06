@@ -31,6 +31,13 @@ for file in "$@"; do
 done
 cd "$root"
 status=0
+# The helpers read the Actions run they serve (GITHUB_REPOSITORY, GITHUB_REF_NAME, ...): this
+# job's own run (the fork's repository and branch) is not one their tests fake, and the
+# fixtures assume upstream's. The tests run without it, as on a developer's machine.
+for var in GITHUB_REPOSITORY GITHUB_REF_NAME GITHUB_REF GITHUB_HEAD_REF GITHUB_BASE_REF \
+    GITHUB_SHA GITHUB_RUN_ID GITHUB_WORKFLOW_REF GITHUB_SERVER_URL GITHUB_STEP_SUMMARY GITHUB_EVENT_NAME; do
+    unset "$var"
+done
 py_plugins=(-p no:cacheprovider)
 if [ -n "${ENACT_FOOTPRINT_DIR:-}" ]; then
     export PYTHONPATH="$root/showcase/pytest_plugins${PYTHONPATH:+:$PYTHONPATH}"

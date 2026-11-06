@@ -1956,6 +1956,7 @@ jobs:
           docs/onboarding
           playwright
           services/mcp
+          .github/scripts/jest-retries.cjs
           products/games
           products/canvas/packages
           products/visual_review/cli
@@ -2028,6 +2029,7 @@ jobs:
           docs/onboarding
           playwright
           services/mcp
+          .github/scripts/jest-retries.cjs
           products/games
           products/canvas/packages
           products/visual_review/cli
