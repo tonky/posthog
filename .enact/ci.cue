@@ -153,6 +153,19 @@ pipeline: schema.#Pipeline & {
 					}
 				}
 			}
+			l7: {
+				// A second X64 host (8c/14G): s and m only; a gate lane holding l7 drains it to zero.
+				// A size costs the rate times its share of the largest size: 0.006 prices its m as
+				// the 13 GB pools price theirs.
+				labels: ["self-hosted", "Linux", "X64", "tonky-ci"], tier: "dedicated", available: 1, cost_per_min: 0.006, timeout_minutes: 90
+				pool: {
+					cpus: 8, memory_mb: 12288
+					sizes: {
+						"tonky-ci-s": {cpus: 2, memory_mb: 4096}
+						"tonky-ci-m": {cpus: 4, memory_mb: 8192}
+					}
+				}
+			}
 		}
 	}
 

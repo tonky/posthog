@@ -357,6 +357,11 @@ pipeline: schema.#Pipeline & {
 				]
 				tests:   [for root in ["posthog", "ee"] for f in _pytestFiles {"\(root)/**/\(f)"}]
 				exclude: ["posthog/user_scripts/**", "posthog/dags/**", "posthog/api/test/rust_integration/**"]
+				arch_exclusions: [{
+					arch:   "x86_64"
+					tests:  ["posthog/cdp/templates/reddit/**"]
+					reason: "STPyV8 has no linux aarch64 wheel (usecases/posthog/LEARNINGS.md, platform row): the reddit pixel templates need x86_64"
+				}]
 			}
 			uses: _backendServices
 		}
