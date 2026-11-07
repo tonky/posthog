@@ -471,9 +471,8 @@ pipeline: schema.#Pipeline & {
 					timeout: "15m"
 				}]
 			}
-			shards:            3
-			service_instances: "per_shard"
-			resources:         {cpus: 2.0, memory_mb: 5120}
+			shards:    3
+			resources: {cpus: 2.0, memory_mb: 5120}
 			scoping: {
 				domain_roots:    ["posthog", "products"]
 				service_markers: ["django_db", "BaseTest", "ClickhouseTestMixin", "posthog.test"]
