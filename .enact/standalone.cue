@@ -119,7 +119,7 @@ pipeline: components: {
 		root:            "products/desktop"
 		depends_on:      ["root", "build_once"]
 		// Contract tests read backend files they mirror (model costs, task kinds, canvas SDK).
-		workspace_scope: include: ["packages/agent", "services/llm-gateway/src/llm_gateway/rate_limiting/model_cost_overrides.py", "products/tasks/backend/models.py", "products/canvas/packages/canvas_builder/manifest.json", "products/canvas/packages/canvas_builder/canvas-sdk.mjs"]
+		workspace_scope: include: ["packages/agent", "services/llm-gateway/src/llm_gateway/rate_limiting/model_cost_overrides.py", "products/tasks/backend/models.py", "products/canvas/packages/canvas_builder/manifest.json", "products/canvas/packages/canvas_builder/canvas-sdk.mjs", "products/canvas/backend/sandbox"]
 		watch_paths:     ["products/desktop/**", "packages/agent/**"]
 		jobs: {
 			lint: {
@@ -345,7 +345,7 @@ pipeline: components: {
 			"showcase/scripts/rust_footprint.py", "showcase/scripts/node_reads.mjs",
 		], _liveFlagsRust])
 		jobs: test: {
-			worker: "standard", recorder: "own", resources: {cpus: 4, memory_mb: 11264}, record_resources: resources, needs: _mcpUiAppsNeeds
+			recorder: "own", resources: {cpus: 4, memory_mb: 11264}, record_resources: resources, needs: _mcpUiAppsNeeds
 			tasks: [
 				{name: "Build UI apps", command: "../../../showcase/scripts/build_mcp_ui_apps.sh"},
 				{name: "Run Tests", command: "../../../showcase/scripts/run_mcp_integration.sh {relative_targets}", timeout: "60m"},

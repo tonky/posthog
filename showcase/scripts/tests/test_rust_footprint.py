@@ -281,11 +281,11 @@ class RustFootprintTest(unittest.TestCase):
             # The map's recorder stays each spec's: a new live_footprint.py version re-records it.
             self.assertEqual(targets[spec]["recorders"], ["live_footprint.py/2", "rust_footprint.py/3"])
             self.assertEqual(targets[spec]["loaded_through"], 0)
-            files = set(targets[spec]["files"])
-            self.assertLessEqual({*read, "rust/app/src/main.rs", "rust/common/core/src/lib.rs", "rust/Cargo.lock"}, files)
-            self.assertNotIn("rust/testkit/src/lib.rs", files)
+            self.assertEqual(set(targets[spec]["files"]), set(read))
         reach = json.loads((self.repo / "out/live-shard1-1.json").read_text())
-        self.assertEqual(reach["shared"], {"files": ["uv.lock"]})
+        shared_files = set(reach["shared"]["files"])
+        self.assertLessEqual({"uv.lock", "rust/app/src/main.rs", "rust/common/core/src/lib.rs", "rust/Cargo.lock"}, shared_files)
+        self.assertNotIn("rust/testkit/src/lib.rs", shared_files)
 
     def test_a_server_the_build_made_no_binary_of_leaves_its_passing_tests_partial(self):
         test = "posthog/api/test/rust_integration/test_flags.py"

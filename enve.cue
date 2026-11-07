@@ -217,6 +217,7 @@ profiles: dev: schema.#Profile & {
 		{pname: "ripgrep"},
 		{pname: "bash"},
 		{pname: "coreutils"},
+		{pname: "diffutils"},
 		{pname: "gnused"},
 	]
 

@@ -134,6 +134,32 @@ _rustCrateRules: [
 
 _productsFrontendBin: ["products/*/frontend/bin/**"]
 _djangoTree: ["posthog", "ee", "products", "common", "bin", "tools/hogli-commands", "tools/hogli", "packages/owners-yaml", "packages/personhog-proto"]
+_productBackendDirs: [
+	"access_control", "actions", "aeo", "ai_gateway", "ai_observability", "ai_training",
+	"alerts", "alerts_platform", "analytics_platform", "annotations", "apm", "approvals",
+	"autoresearch", "batch_exports", "billing_alerts", "business_knowledge", "canvas", "cdp",
+	"cohorts", "context_layer", "conversations", "customer_analytics", "dashboards",
+	"data_catalog", "data_modeling", "data_quality", "data_tools", "data_warehouse", "demo",
+	"early_access_features", "endpoints", "engineering_analytics", "error_tracking",
+	"event_definitions", "experiments", "exports", "feature_flags", "field_notes", "growth",
+	"legal_documents", "links", "live_debugger", "llm_analytics", "logs", "managed_migrations",
+	"managed_warehouse", "marketing_analytics", "mcp_analytics", "mcp_registry", "mcp_store",
+	"messaging", "metrics", "ml_inference", "notebooks", "notifications", "platform_features",
+	"posthog_ai", "product_analytics", "product_tours", "pulse", "reminders", "replay",
+	"replay_vision", "revenue_analytics", "review_hog", "security", "signals", "skills",
+	"slack_app", "stamphog", "streamlit_apps", "surveys", "tasks", "today", "tracing",
+	"user_interviews", "visual_review", "warehouse_sources", "warehouse_sources_queue",
+	"web_analytics", "webmcp", "wizard", "workflows",
+]
+_djangoRustTree: list.Concat([
+	[
+		"posthog", "ee", "common", "bin", "tools/hogli-commands", "tools/hogli",
+		"packages/owners-yaml", "packages/personhog-proto",
+		"products/__init__.py", "products/db_routing.yaml",
+		"products/experiments/stats", "products/data_warehouse/dags",
+	],
+	[for p in _productBackendDirs {"products/\(p)/backend"}],
+])
 _mcpPrebuild: "../../showcase/scripts/build_mcp_ui_apps.sh && pnpm exec tsx scripts/copy-instructions.ts"
 _frontendBuild: "showcase/scripts/build_once.sh frontend-build frontend/dist/.enact-build-key frontend products common packages ee/frontend services/mcp/src/ui-apps package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json tsconfig.json patches -- bash -c 'showcase/scripts/build_quill.sh && showcase/scripts/build_hogvm.sh && bin/turbo --filter=@posthog/frontend prepare && showcase/scripts/build_products.sh && pnpm --filter=@posthog/frontend build'"
 
@@ -401,7 +427,7 @@ pipeline: schema.#Pipeline & {
 			description:     "Each product's Django app, Dagster assets and evaluation harnesses"
 			depends_on:      ["base", "py-root", "test_env"]
 			// messaging's test_message_preference_styles reads the compiled stylesheet (STYLESHEET).
-			workspace_scope: {include_dependencies: false, include: list.Concat([_python_monolith_include, ["frontend/public/message-preferences.css"]])}
+			workspace_scope: {include_dependencies: false, include: list.Concat([_python_monolith_include, ["frontend/public/message-preferences.css", "services/stripe-app", "frontend/public/services", "packages/agent/packages/harness"]])}
 			tags:            ["backend", "django", "products"]
 			watch_paths: [
 				"products/*.py", "products/ruff.toml", "products/*/*.py", "products/*/backend/**",
@@ -413,7 +439,6 @@ pipeline: schema.#Pipeline & {
 			jobs: typecheck: {
 				direct:    true
 				services:  false
-				worker:    "standard"
 				resources: {cpus: 2.0, memory_mb: 11264}
 				tasks: [{
 					command: "uv run --no-sync ty check posthog ee common products && uv run --no-sync mypy --cache-fine-grained posthog ee common products services/stripe-mock/tests/conftest.py"
@@ -424,7 +449,7 @@ pipeline: schema.#Pipeline & {
 			}
 			max_shards:   12
 			shards:       10
-			shard_groups: {by: "products/*/", overhead_s: 17}
+			shard_groups: {by: "products/*/", overhead_s: 1}
 			// The nightly's measured shard peak: 7.1 GB (warehouse_sources' shard).
 			resources:        {cpus: 0.75, memory_mb: 7680}
 			record_resources: resources
@@ -474,7 +499,7 @@ pipeline: schema.#Pipeline & {
 				}]
 			}
 			shards:    3
-			resources: {cpus: 0.75, memory_mb: 1360}
+			resources: {cpus: 0.75, memory_mb: 3584}
 			resource_forecast: {
 				mode: "bounded"
 				min: {cpus: 0.75, memory_mb: 1024}
@@ -568,7 +593,7 @@ pipeline: schema.#Pipeline & {
 				"common/hogvm/typescript/package.json", "packages/llm-normalizer/src/**",
 				"packages/llm-normalizer/package.json", "products/ai_observability/shared/**",
 				".kearc", "posthog.json", "postcss.config.js",
-				"showcase/scripts/build_products.sh", "bin/validate-setup-tasks.mjs",
+				"showcase/scripts/build_products.sh", "showcase/scripts/run_frontend_tests.sh", "bin/validate-setup-tasks.mjs",
 			], _storybookConfig])
 			fmt:       "pnpm exec oxfmt --check --no-error-on-unmatched-pattern {changed_files}"
 			lint:      "pnpm exec oxlint --no-error-on-unmatched-pattern {changed_files} --quiet"
@@ -578,9 +603,9 @@ pipeline: schema.#Pipeline & {
 				build: {
 					services:  false
 					builds:    true
-					worker:    "standard"
 					resources: {cpus: 4.0, memory_mb: 10240}
 					outputs: {
+						arch_independent: true
 						paths: ["frontend/dist"]
 						key: list.Concat([[
 							"frontend/**", "products/**", "common/**", "packages/**",
@@ -593,7 +618,6 @@ pipeline: schema.#Pipeline & {
 				}
 				typecheck: {
 					direct:    true
-					worker:    "standard"
 					resources: {cpus: 2.0, memory_mb: 11264}
 					needs:     ["quill:build"]
 					tasks: [
@@ -644,16 +668,16 @@ pipeline: schema.#Pipeline & {
 					name:             "Test"
 					shards:           12
 					max_shards:       12
-					worker:           "standard"
-					resources:        {cpus: 4.0, memory_mb: 7168}
+					resources:        {cpus: 3, memory_mb: 4096}
 					record_resources: resources
-					recorder:         "trace"
+					recorder:         "own_linux"
 					recorded_by:      ["enact-node"]
+					needs:            ["quill:build"]
 					tasks: [
 						{name: "Build products", command: "showcase/scripts/build_products.sh"},
 						{name: "Warm jest", command: "CI=true pnpm --filter=@posthog/frontend exec jest --listTests >/dev/null"},
 						// ENACT_TEST_VERBOSE: each test's line (`✓`/`✕`), which enact reads into per-test outcomes.
-						{name: "Run Tests", command: "CI=true pnpm --filter=@posthog/frontend exec jest --maxWorkers=2 --forceExit --testNamePattern='^(?!evaluationBackfillsLogic anchors a relative preset on the project timezone$)' ${ENACT_TEST_VERBOSE:+--verbose} {targets}", timeout: "48m"},
+						{name: "Run Tests", command: "showcase/scripts/run_frontend_tests.sh {targets}", timeout: "48m"},
 					]
 				}
 			}
@@ -707,6 +731,7 @@ pipeline: schema.#Pipeline & {
 				services: false
 				builds:   true
 				outputs: {
+					arch_independent: true
 					paths: [
 						"packages/quill/packages/quill/dist", "packages/quill/packages/tokens/dist",
 						"packages/quill/packages/primitives/dist", "packages/quill/packages/components/dist",
@@ -771,7 +796,7 @@ pipeline: schema.#Pipeline & {
 			root:            "rust"
 			depends_on:      ["test_env", "proto", "geoip"]
 			// affected-services' integration tests parse the image list (load_test_fixtures).
-			workspace_scope: include: list.Concat([_djangoTree, ["rust", "proto", "docker", "infra", ".github/rust-images.yml"]])
+			workspace_scope: include: list.Concat([_djangoRustTree, ["rust", "proto", "docker", "infra", ".github/rust-images.yml"]])
 			watch_paths: list.Concat([[
 				"rust/**", "posthog/api/feature_flag.py",
 				"posthog/models/feature_flag/flags_cache.py", "posthog/models/feature_flag/feature_flag.py",
@@ -911,6 +936,7 @@ pipeline: schema.#Pipeline & {
 			workspace_scope: include: ["bin", "nodejs"]
 			watch_paths:     ["proto/**", "packages/personhog-proto/**", "bin/generate_personhog_proto.sh"]
 			lint: {
+				timeout:         "20m"
 				command:         "buf lint proto/ && buf breaking proto/ --against '../.git#ref=HEAD,subdir=proto' && UV_PROJECT_ENVIRONMENT=.enact/state/proto-venv uv sync --frozen --no-install-project --only-group proto-codegen && PATH=\"$(realpath ../.enact/state/proto-venv)/bin:$PATH\" bash ../bin/generate_personhog_proto.sh && git add -N ../packages/personhog-proto/ && git diff --exit-code -- ../packages/personhog-proto/ && pnpm --dir ../nodejs run generate:personhog-proto && pnpm --dir ../nodejs run generate:ingestion-worker-proto && git add -N ../nodejs/src/common/generated/personhog/ ../nodejs/src/common/generated/ingestion-worker/ && git diff --exit-code -- ../nodejs/src/common/generated/personhog/ ../nodejs/src/common/generated/ingestion-worker/"
 				expect_no_drift: ["packages/personhog-proto/**", "nodejs/src/common/generated/personhog/**", "nodejs/src/common/generated/ingestion-worker/**"]
 			}
@@ -992,6 +1018,7 @@ pipeline: schema.#Pipeline & {
 					needs:     ["quill:build"]
 					resources: {cpus: 2.0, memory_mb: 3072}
 					outputs: {
+						arch_independent: true
 						paths: ["services/mcp/public/ui-apps"]
 						key: list.Concat([[
 							"services/mcp/**", "products/**", "packages/quill/**",
@@ -1051,7 +1078,6 @@ pipeline: schema.#Pipeline & {
 				"showcase/scripts/node_reads.mjs",
 			], _liveCaptureRust, _liveIngestionNode])
 			jobs: test: {
-				worker:           "standard"
 				recorder:         "own"
 				shards:           1
 				resources:        {cpus: 6, memory_mb: 11264}

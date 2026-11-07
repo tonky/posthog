@@ -120,6 +120,20 @@ if [ "$SERVICES_ACTIVE" = "1" ]; then
     # once, so the worker is named for the component and job too (ENACT_COMPONENT, ENACT_JOB).
     WORKER_ID="$(test_worker_name "${ENACT_COMPONENT:-}" "${ENACT_JOB:-}" "$SHARD")"
     prepare_worker_databases "$WORKER_ID"
+    # Worker DB routing for warehouse_sources (settings/data_warehouse.py reads WAREHOUSE_SOURCES_DATABASE_URL
+    # before PRODUCT_DB_WRITER_URLS, which points at the un-prefixed posthog_<worker>_warehouse_sources_queue).
+    export WAREHOUSE_SOURCES_DATABASE_URL="postgres://${PGUSER}:${PGPASSWORD:-posthog}@${PGHOST}:${PGPORT}/test_posthog_${WORKER_ID}"
+    # Generate ephemeral RSA keys once per shard for OIDC and tasks sandbox JWT signing tests.
+    if { [ -z "${OIDC_RSA_PRIVATE_KEY:-}" ] || [ -z "${SANDBOX_JWT_PRIVATE_KEY:-}" ]; } && [ -x .venv/bin/python ]; then
+        _shard_rsa_key="$(.venv/bin/python -c 'from cryptography.hazmat.primitives import serialization as s
+from cryptography.hazmat.primitives.asymmetric import rsa
+key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+print(key.private_bytes(s.Encoding.PEM, s.PrivateFormat.TraditionalOpenSSL, s.NoEncryption()).decode())' 2>/dev/null || true)"
+        if [ -n "$_shard_rsa_key" ]; then
+            export OIDC_RSA_PRIVATE_KEY="${OIDC_RSA_PRIVATE_KEY:-$_shard_rsa_key}"
+            export SANDBOX_JWT_PRIVATE_KEY="${SANDBOX_JWT_PRIVATE_KEY:-$_shard_rsa_key}"
+        fi
+    fi
 fi
 
 # Memory & Python Runtime Optimizations
@@ -134,6 +148,7 @@ export PYTHON_GC_THRESHOLD_1="${PYTHON_GC_THRESHOLD_1:-10}"
 export PYTHON_GC_THRESHOLD_2="${PYTHON_GC_THRESHOLD_2:-10}"
 export AWS_DEFAULT_REGION="${AWS_DEFAULT_REGION:-us-east-1}"
 export AWS_REGION="${AWS_REGION:-us-east-1}"
+export AWS_S3_ADDRESSING_STYLE="${AWS_S3_ADDRESSING_STYLE:-path}"
 
 # Resolve test targets (supports @argfile, raw file path, positional args, or $ENACT_TARGETS_FILE)
 TARGETS=()

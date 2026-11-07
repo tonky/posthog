@@ -21,7 +21,6 @@ _nodejsSuites: [
 _nodejsArea: {
 	technology: ["typescript", "python"]
 	root:       "."
-	cargo: workspace: "rust"
 	shards:      int | *1
 	recorder:         "own_linux"
 	recorded_by:      ["enact-node"]
@@ -163,6 +162,7 @@ pipeline: components: {
 	"nodejs_replay": _nodejsArea & {
 		name:       "nodejs_replay"
 		title:      "PostHog Node.js session replay"
+		cargo: workspace: "rust"
 		depends_on: ["nodejs_ingestion_core"]
 		watch_paths: [
 			"nodejs/src/session-replay/**",
@@ -219,6 +219,7 @@ pipeline: components: {
 	"nodejs_servers": _nodejsArea & {
 		name:        "nodejs_servers"
 		title:       "PostHog Node.js servers & ingestion e2e"
+		cargo: workspace: "rust"
 		depends_on:  ["nodejs_cdp", "nodejs_logs", "nodejs_ingestion", "nodejs_replay"]
 		watch_paths: ["nodejs/src/servers/**", "nodejs/src/{index,server}.ts", "nodejs/tests/*.serial.test.ts"]
 		target_scope: tests: ["nodejs/src/servers/**/*.test.ts", "nodejs/tests/*.serial.test.ts"]
@@ -230,7 +231,7 @@ pipeline: components: {
 		root:            "nodejs"
 		cargo: workspace: "rust"
 		depends_on:      ["nodejs_servers", "proto"]
-		workspace_scope: include: _nodejsCone
+		workspace_scope: include: list.Concat([_nodejsCone, [".github/workflows/update-ai-costs.yml"]])
 		watch_paths: [
 			"rust/ingestion-consumer/**",
 			"rust/ingestion-worker-proto/**",

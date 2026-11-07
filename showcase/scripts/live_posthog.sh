@@ -119,6 +119,7 @@ PY
 # dump, lacks the routed product apps' tables, whose migration records go so `migrate` creates
 # them on the default database. Then ClickHouse's (it reads posthog_instancesetting).
 live_migrate() {
+    showcase/scripts/exclusive.sh geoip bin/download-mmdb
     local apps
     apps=$(python3 -c 'import re,sys; print(",".join(sorted({"%s%s%s" % (chr(39), m, chr(39)) for m in re.findall(r"app_label:\s*(\w+)", open("products/db_routing.yaml").read())})))')
     [ -z "$apps" ] || pg -d "$live_db" -c "DELETE FROM django_migrations WHERE app IN ($apps);" >/dev/null
@@ -129,7 +130,6 @@ live_migrate() {
     mkdir -p frontend/dist
     local page
     for page in index layout exporter; do [ -e "frontend/dist/$page.html" ] || touch "frontend/dist/$page.html"; done
-    showcase/scripts/exclusive.sh geoip bin/download-mmdb
 }
 
 # Debug builds without debug assertions in the workspace's crates, as upstream's images (the
@@ -237,9 +237,18 @@ live_record() {
     [ -n "${ENACT_FOOTPRINT_DIR:-}" ] || return 0
     live_recording="$(mktemp -d "${TMPDIR:-/tmp}/live-footprint.XXXXXX")"
     uv run --no-sync python showcase/scripts/live_footprint.py prepare "$live_recording"
+    printf '%s\n' '<shared>' > "$live_recording/target"
     live_run+=(ENACT_FOOTPRINT_ROOT="$PWD" ENACT_FOOTPRINT_CHILDREN="$live_recording"
-        ENACT_FOOTPRINT_CORE="${ENACT_FOOTPRINT_CORE:-$PWD/showcase/pytest_plugins/enact_footprint.py}" ENACT_FOOTPRINT_TARGET='<shared>'
+        ENACT_FOOTPRINT_CORE="${ENACT_FOOTPRINT_CORE:-$PWD/showcase/pytest_plugins/enact_footprint.py}"
+        ENACT_FOOTPRINT_TARGET='<shared>'
+        ENACT_FOOTPRINT_TARGET_FILE="$live_recording/target"
         PYTHONPATH="$live_recording/boot${PYTHONPATH:+:$PYTHONPATH}")
+}
+
+live_set_target() { # <target>
+    printf '%s\n' "$1" > "$live_recording/target.tmp"
+    mv -f "$live_recording/target.tmp" "$live_recording/target"
+    sleep 0.2
 }
 
 # Stops the processes started since live_pids held <count>, SIGTERM first (a recording process
@@ -264,10 +273,8 @@ live_clear_caches() {
     [ -z "$keys" ] || printf '%s\n' "$keys" | tr '\n' '\0' | xargs -0 -n 500 redis-cli -u "$live_redis" del >/dev/null
 }
 
-# Runs <run> with the specs against the app <start> starts. Recording, each spec alone against
-# an app started afresh for it, its Redis caches cleared, then the map of them all. Its locals
-# are prefixed: <start> and <run> see them (bash scopes dynamically), and a job's own `results`
-# went unbound under one.
+# Runs <run> with the specs against a warm app <start> starts once, switching target
+# windows around each spec (and clearing Redis caches between them), then builds the map.
 live_each_spec() { # <start> <run> <spec...>
     local each_start="$1" each_run="$2" each_spec each_n=0 each_status each_mark each_result each_results=()
     shift 2
@@ -276,22 +283,22 @@ live_each_spec() { # <start> <run> <spec...>
         "$each_run" "$@"
         return
     fi
-    local each_run_base=("${live_run[@]}")
+    each_mark=${#live_pids[@]}
+    "$each_start"
     for each_spec in "$@"; do
         each_n=$((each_n + 1))
-        each_mark=${#live_pids[@]}
         live_clear_caches
-        live_run=("${each_run_base[@]}" ENACT_FOOTPRINT_TARGET="$each_spec")
-        "$each_start"
+        live_set_target "$each_spec"
         each_status=0
         ENACT_NODE_READS="$live_recording/node/$each_n" ENACT_FOOTPRINT_ROOT="$PWD" \
             ENACT_SKIPS_FILE="$live_recording/skips/$each_n.jsonl" \
+            ENACT_FOOTPRINT_TARGET="$each_spec" \
             NODE_OPTIONS="--import $PWD/showcase/scripts/node_reads.mjs${NODE_OPTIONS:+ $NODE_OPTIONS}" \
             "$each_run" "$each_spec" || each_status=$?
-        live_stop_from "$each_mark"
+        live_set_target '<shared>'
         each_results+=("$each_spec=$each_status")
     done
-    live_run=("${each_run_base[@]}")
+    live_stop_from "$each_mark"
     ENACT_FOOTPRINT_DIR="$live_recording/maps" LIVE_JOB="${0##*/}" \
         uv run --no-sync python showcase/scripts/live_footprint.py write "$live_recording" "${each_results[@]}"
     each_status=0

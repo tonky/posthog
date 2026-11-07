@@ -301,6 +301,22 @@ class ProductRunsTest(unittest.TestCase):
         self.assertEqual(0, code)
         self.assertEqual(40, len(runs))
 
+    def test_tasks_temporal_splits_into_its_own_pytest_group(self) -> None:
+        self.write(
+            "products/tasks/package.json",
+            json.dumps({"scripts": {"backend:test": "pytest -c ../../pytest.ini --rootdir ../.. backend/ -v"}}),
+        )
+        code, runs = self.run_shard(
+            "products/tasks/backend/temporal/workflows/tests/test_wf.py",
+            "products/tasks/backend/tests/test_api.py",
+        )
+        self.assertEqual(0, code)
+        self.assertEqual([str(self.repo / "products/tasks")] * 2, [cwd for cwd, _, _ in runs])
+        self.assertEqual(["tasks_temporal", "tasks"], [group for _, group, _ in runs])
+        temporal_args, api_args = (args for _, _, args in runs)
+        self.assertTrue(temporal_args.endswith("backend/temporal/workflows/tests/test_wf.py"), temporal_args)
+        self.assertTrue(api_args.endswith("backend/tests/test_api.py"), api_args)
+
 
 if __name__ == "__main__":
     unittest.main()

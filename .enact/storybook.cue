@@ -76,7 +76,6 @@ pipeline: components: {
 			"playwright.config.ts",
 			"patches/jest-junit@16.0.0.patch",
 		], _storybookConfig])
-		worker: "standard"
 		jobs: {
 			build: {
 				name:      "Build"
@@ -84,6 +83,7 @@ pipeline: components: {
 				needs:     ["quill:build"]
 				resources: {cpus: 4.0, memory_mb: 8192}
 				outputs: {
+					arch_independent: true
 					paths: [
 						"common/storybook/dist",
 						"common/hogvm/typescript/dist", "frontend/.cache/products.hash",

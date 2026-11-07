@@ -45,7 +45,7 @@ _hogvmNativeInputs: [
 	"rust/common/hogvm/node/turbo.json", "turbo.json", ".enact/*.cue", "showcase/scripts/run_nodejs_tests.sh",
 	"showcase/scripts/build_hogvm.sh", "showcase/scripts/rust_ci_env.sh",
 ]
-_hogvmNativeKey: "hogvm-native-v1-${{ runner.os }}-${{ runner.arch }}-${{ matrix.task_id }}-${{ hashFiles(" + strings.Join([for file in _hogvmNativeInputs {"'\(file)'"}], ", ") + ") }}"
+_hogvmNativeKey: "hogvm-native-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles(" + strings.Join([for file in _hogvmNativeInputs {"'\(file)'"}], ", ") + ") }}"
 
 pipeline: schema.#Pipeline & {
 	services: {
@@ -65,7 +65,7 @@ pipeline: schema.#Pipeline & {
 		"hogvm-native": {
 			name:         "Standalone HogVM native target"
 			paths:        ["rust/common/hogvm/node/target"]
-			scope:        "task"
+			scope:        "shared"
 			key:          [_hogvmNativeKey]
 			restore_keys: [_hogvmNativeKey]
 			used_by: {
@@ -103,7 +103,6 @@ pipeline: schema.#Pipeline & {
 	}
 
 	ci: {
-		control_worker:   "standard"
 		soft_placement:   {fallback_seconds: 15}
 		history:          {workflow: ".github/workflows/ci.yml"}
 		diagnostic_paths: [".enact/state/nodejs/*.services.log"]
@@ -111,7 +110,6 @@ pipeline: schema.#Pipeline & {
 			labels:          ["rerun", "showcase"]
 			branch_prefixes: ["showcase/"]
 		}
-		concurrency: max_parallel_jobs: 24
 		scheduler: max_matrix_size: 128
 		kept_workflows: [
 			".github/workflows/cd-sandbox-base-image.yml", ".github/workflows/ci-backend.yml",
@@ -128,29 +126,37 @@ pipeline: schema.#Pipeline & {
 		budget: {enforce: true, untraced_tests: 10, wall_minutes: 30}
 		workers: {
 			github: {
-				// Standard public capacity; one declared image shares the account quota.
-				preset: "github-public", labels: ["ubuntu-24.04"]
+				// Standard public capacity; X64 + ARM64 public images share the 20-VM quota_group.
+				preset: "github-public", labels: ["ubuntu-24.04"], quota_group: "github-public"
 				tier: "on_demand", available: 20, cost_per_min: 0
 				// Calibrated from measured ~80s cold preparation on ubuntu-24.04.
 				setup_overhead_sec: 80
-				timeout_minutes: 120
+				throughput:         0.75
+				timeout_minutes:    120
+			}
+			github_arm: {
+				preset: "github-public", labels: ["ubuntu-24.04-arm"], arch: "aarch64", quota_group: "github-public"
+				tier: "on_demand", available: 20, cost_per_min: 0
+				setup_overhead_sec: 80
+				throughput:         0.75
+				timeout_minutes:    120
 			}
 			"mac1": {
-				labels:          ["self-hosted", "Linux", "ARM64", "tonky-ci", "mac1"]
+				labels:          ["self-hosted", "Linux", "ARM64", "tonky-ci"]
 				host_id:         "mac1"
 				tier:            "dedicated"
 				available:       1
 				cost_per_min:    0.010
+				throughput:      1.35
 				timeout_minutes: 120
 				pool: {
 					cpus:      16
 					memory_mb: 36864
-					floor: {cpus: 4, memory_mb: 8192} // mac1 under its lane clamp (KNOWLEDGE `tonky-ci` load clamp)
 					quantization: {
 						label_prefix:       "tonky-ci"
 						cpu_step:           1
 						memory_step_mb:     1024
-						runtime_reserve_mb: 2048
+						runtime_reserve_mb: 1024
 						min: {cpus: 1, memory_mb: 4096}
 						max: {cpus: 6, memory_mb: 13312}
 						control: {cpus: 2, memory_mb: 4096}
@@ -171,7 +177,7 @@ pipeline: schema.#Pipeline & {
 						label_prefix:       "tonky-ci"
 						cpu_step:           1
 						memory_step_mb:     1024
-						runtime_reserve_mb: 2048
+						runtime_reserve_mb: 1024
 						min: {cpus: 1, memory_mb: 4096}
 						max: {cpus: 6, memory_mb: 13312}
 						control: {cpus: 2, memory_mb: 4096}
@@ -179,18 +185,18 @@ pipeline: schema.#Pipeline & {
 				}
 			}
 			l7: {
-				// A second X64 host (16t, ~13 GiB free), up to 6c/13G allocations when idle.
+				// A second X64 host (16t, ~13 GiB free), up to 8c/8G allocations when idle.
 				// A gate lane holding l7 drains its dispatcher to zero.
-				labels: ["self-hosted", "Linux", "X64", "tonky-ci"], host_id: "l7", tier: "dedicated", available: 1, cost_per_min: 0.006, timeout_minutes: 120
+				labels: ["self-hosted", "Linux", "X64", "tonky-ci"], host_id: "l7", tier: "dedicated", available: 1, cost_per_min: 0.006, throughput: 0.95, timeout_minutes: 120
 				pool: {
 					cpus: 16, memory_mb: 13312
 					quantization: {
 						label_prefix:       "tonky-ci"
 						cpu_step:           1
 						memory_step_mb:     1024
-						runtime_reserve_mb: 2048
+						runtime_reserve_mb: 1024
 						min: {cpus: 1, memory_mb: 4096}
-						max: {cpus: 6, memory_mb: 13312}
+						max: {cpus: 8, memory_mb: 8192}
 						control: {cpus: 2, memory_mb: 4096}
 					}
 				}

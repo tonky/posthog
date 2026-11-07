@@ -140,7 +140,6 @@ jobs:
     runs-on:
     - self-hosted
     - Linux
-    - X64
     - tonky-ci
     - tonky-ci-c2m4g
     timeout-minutes: 5
@@ -223,8 +222,28 @@ jobs:
         git config --local gc.auto 0
         git fetch -q --no-tags "$mirror" "+refs/heads/*:refs/remotes/origin/*"
         if [ -n "${ENACT_SPARSE_CONE:-}" ]; then
-            mapfile -t cone < <(printf '%s\n' "$ENACT_SPARSE_CONE" | sed '/^[[:space:]]*$/d')
-            git sparse-checkout set --cone "${cone[@]}"
+            mapfile -t raw_cone < <(printf '%s\n' "$ENACT_SPARSE_CONE" | sed '/^[[:space:]]*$/d')
+            cone=()
+            for entry in "${raw_cone[@]}"; do
+                case "$entry" in
+                    */.enact-direct-files)
+                        cone+=("$entry")
+                        ;;
+                    *)
+                        kind=$(git cat-file -t "$GITHUB_SHA:$entry" 2>/dev/null || true)
+                        if [ "$kind" = "blob" ]; then
+                            case "$entry" in
+                                */*) cone+=("${entry%/*}/.enact-direct-files") ;;
+                            esac
+                        else
+                            cone+=("$entry")
+                        fi
+                        ;;
+                esac
+            done
+            if [ "${#cone[@]}" -gt 0 ]; then
+                git sparse-checkout set --cone "${cone[@]}"
+            fi
         fi
         case "$GITHUB_REF" in
             refs/heads/*) git checkout -q --force -B "${GITHUB_REF#refs/heads/}" "$GITHUB_SHA" ;;
@@ -277,22 +296,164 @@ jobs:
           rust
           posthog
           ee
-          products
           common
           tools/hogli-commands
+          products/__init__.py
+          products/db_routing.yaml
+          products/experiments/stats
+          products/data_warehouse/dags
+          products/access_control/backend
+          products/actions/backend
+          products/aeo/backend
+          products/ai_gateway/backend
+          products/ai_observability/backend
+          products/ai_training/backend
+          products/alerts/backend
+          products/alerts_platform/backend
+          products/analytics_platform/backend
+          products/annotations/backend
+          products/apm/backend
+          products/approvals/backend
+          products/autoresearch/backend
+          products/batch_exports/backend
+          products/billing_alerts/backend
+          products/business_knowledge/backend
+          products/canvas/backend
+          products/cdp/backend
+          products/cohorts/backend
+          products/context_layer/backend
+          products/conversations/backend
+          products/customer_analytics/backend
+          products/dashboards/backend
+          products/data_catalog/backend
+          products/data_modeling/backend
+          products/data_quality/backend
+          products/data_tools/backend
+          products/data_warehouse/backend
+          products/demo/backend
+          products/early_access_features/backend
+          products/endpoints/backend
+          products/engineering_analytics/backend
+          products/error_tracking/backend
+          products/event_definitions/backend
+          products/experiments/backend
+          products/exports/backend
+          products/feature_flags/backend
+          products/field_notes/backend
+          products/growth/backend
+          products/legal_documents/backend
+          products/links/backend
+          products/live_debugger/backend
+          products/llm_analytics/backend
+          products/logs/backend
+          products/managed_migrations/backend
+          products/managed_warehouse/backend
+          products/marketing_analytics/backend
+          products/mcp_analytics/backend
+          products/mcp_registry/backend
+          products/mcp_store/backend
+          products/messaging/backend
+          products/metrics/backend
+          products/ml_inference/backend
+          products/notebooks/backend
+          products/notifications/backend
+          products/platform_features/backend
+          products/posthog_ai/backend
+          products/product_analytics/backend
+          products/product_tours/backend
+          products/pulse/backend
+          products/reminders/backend
+          products/replay/backend
+          products/replay_vision/backend
+          products/revenue_analytics/backend
+          products/review_hog/backend
+          products/security/backend
+          products/signals/backend
+          products/skills/backend
+          products/slack_app/backend
+          products/stamphog/backend
+          products/streamlit_apps/backend
+          products/surveys/backend
+          products/tasks/backend
+          products/today/backend
+          products/tracing/backend
+          products/user_interviews/backend
+          products/visual_review/backend
+          products/warehouse_sources/backend
+          products/warehouse_sources_queue/backend
+          products/web_analytics/backend
+          products/webmcp/backend
+          products/wizard/backend
+          products/workflows/backend
           proto
           docker
           infra
           .github/rust-images.yml
     - name: Checkout Repository (sparse)
+      id: sparse_checkout
       if: ${{ steps.runner_caches.outputs.host == '' || steps.host_checkout.outcome == 'failure' }}
-      uses: actions/checkout@v7
-      with:
-        fetch-depth: "1"
-        fetch-tags: "false"
-        lfs: "false"
-        show-progress: "false"
-        sparse-checkout: |-
+      run: |
+        set -euo pipefail
+        url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY"
+        export GIT_CONFIG_COUNT=1
+        export GIT_CONFIG_KEY_0=safe.directory
+        export GIT_CONFIG_VALUE_0="$GITHUB_WORKSPACE"
+        header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$ENACT_GIT_TOKEN" | base64 | tr -d '\n')"
+        cd "$GITHUB_WORKSPACE"
+        # shellcheck disable=SC2015
+        find . -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+        git init -q .
+        git remote add origin "$url"
+        git config --local "http.$GITHUB_SERVER_URL/.extraheader" "$header"
+        git config --local gc.auto 0
+        cone=()
+        while IFS= read -r entry; do
+            entry="${entry#"${entry%%[![:space:]]*}"}"
+            entry="${entry%"${entry##*[![:space:]]}"}"
+            [ -n "$entry" ] && cone+=("$entry")
+        done <<<"${ENACT_SPARSE_CONE:-}"
+        depth="${ENACT_FETCH_DEPTH:-1}"
+        fetch_args=(--no-tags)
+        if [ "$depth" != "0" ]; then
+            fetch_args+=("--depth=$depth")
+        fi
+        if [ "${#cone[@]}" -gt 0 ] && [ "${#cone[@]}" -le 2 ]; then
+            fetch_args+=(--filter=blob:none)
+        fi
+        git fetch -q "${fetch_args[@]}" origin "$GITHUB_SHA" 2>/dev/null \
+            || git fetch -q "${fetch_args[@]}" origin "$GITHUB_REF"
+        if [ "${#cone[@]}" -gt 0 ]; then
+            normalized=()
+            for entry in "${cone[@]}"; do
+                case "$entry" in
+                    */.enact-direct-files)
+                        normalized+=("$entry")
+                        ;;
+                    *)
+                        kind=$(git cat-file -t "$GITHUB_SHA:$entry" 2>/dev/null || true)
+                        if [ "$kind" = "blob" ]; then
+                            case "$entry" in
+                                */*) normalized+=("${entry%/*}/.enact-direct-files") ;;
+                            esac
+                        else
+                            normalized+=("$entry")
+                        fi
+                        ;;
+                esac
+            done
+            if [ "${#normalized[@]}" -gt 0 ]; then
+                git sparse-checkout set --cone "${normalized[@]}"
+            fi
+        fi
+        case "$GITHUB_REF" in
+            refs/heads/*) git checkout -q --force -B "${GITHUB_REF#refs/heads/}" "$GITHUB_SHA" ;;
+            *) git checkout -q --force --detach "$GITHUB_SHA" ;;
+        esac
+        git log -1 --format='Checked out %H (shallow sparse)'
+      env:
+        ENACT_FETCH_DEPTH: "1"
+        ENACT_GIT_TOKEN: ${{ github.token }}
+        ENACT_SPARSE_CONE: |-
           .enact
           cue.mod
           .github
@@ -336,15 +497,99 @@ jobs:
           rust
           posthog
           ee
-          products
           common
           tools/hogli-commands
+          products/__init__.py
+          products/db_routing.yaml
+          products/experiments/stats
+          products/data_warehouse/dags
+          products/access_control/backend
+          products/actions/backend
+          products/aeo/backend
+          products/ai_gateway/backend
+          products/ai_observability/backend
+          products/ai_training/backend
+          products/alerts/backend
+          products/alerts_platform/backend
+          products/analytics_platform/backend
+          products/annotations/backend
+          products/apm/backend
+          products/approvals/backend
+          products/autoresearch/backend
+          products/batch_exports/backend
+          products/billing_alerts/backend
+          products/business_knowledge/backend
+          products/canvas/backend
+          products/cdp/backend
+          products/cohorts/backend
+          products/context_layer/backend
+          products/conversations/backend
+          products/customer_analytics/backend
+          products/dashboards/backend
+          products/data_catalog/backend
+          products/data_modeling/backend
+          products/data_quality/backend
+          products/data_tools/backend
+          products/data_warehouse/backend
+          products/demo/backend
+          products/early_access_features/backend
+          products/endpoints/backend
+          products/engineering_analytics/backend
+          products/error_tracking/backend
+          products/event_definitions/backend
+          products/experiments/backend
+          products/exports/backend
+          products/feature_flags/backend
+          products/field_notes/backend
+          products/growth/backend
+          products/legal_documents/backend
+          products/links/backend
+          products/live_debugger/backend
+          products/llm_analytics/backend
+          products/logs/backend
+          products/managed_migrations/backend
+          products/managed_warehouse/backend
+          products/marketing_analytics/backend
+          products/mcp_analytics/backend
+          products/mcp_registry/backend
+          products/mcp_store/backend
+          products/messaging/backend
+          products/metrics/backend
+          products/ml_inference/backend
+          products/notebooks/backend
+          products/notifications/backend
+          products/platform_features/backend
+          products/posthog_ai/backend
+          products/product_analytics/backend
+          products/product_tours/backend
+          products/pulse/backend
+          products/reminders/backend
+          products/replay/backend
+          products/replay_vision/backend
+          products/revenue_analytics/backend
+          products/review_hog/backend
+          products/security/backend
+          products/signals/backend
+          products/skills/backend
+          products/slack_app/backend
+          products/stamphog/backend
+          products/streamlit_apps/backend
+          products/surveys/backend
+          products/tasks/backend
+          products/today/backend
+          products/tracing/backend
+          products/user_interviews/backend
+          products/visual_review/backend
+          products/warehouse_sources/backend
+          products/warehouse_sources_queue/backend
+          products/web_analytics/backend
+          products/webmcp/backend
+          products/wizard/backend
+          products/workflows/backend
           proto
           docker
           infra
           .github/rust-images.yml
-        sparse-checkout-cone-mode: "true"
-        submodules: "false"
     - name: Restore Reach Store
       id: reach-store
       continue-on-error: true
@@ -471,9 +716,8 @@ jobs:
     runs-on:
     - self-hosted
     - Linux
-    - X64
     - tonky-ci
-    - tonky-ci-c2m8g
+    - tonky-ci-c6m7g
     timeout-minutes: 120
     steps:
     - name: Probe Runner Caches
@@ -542,8 +786,28 @@ jobs:
         git config --local gc.auto 0
         git fetch -q --no-tags "$mirror" "+refs/heads/*:refs/remotes/origin/*"
         if [ -n "${ENACT_SPARSE_CONE:-}" ]; then
-            mapfile -t cone < <(printf '%s\n' "$ENACT_SPARSE_CONE" | sed '/^[[:space:]]*$/d')
-            git sparse-checkout set --cone "${cone[@]}"
+            mapfile -t raw_cone < <(printf '%s\n' "$ENACT_SPARSE_CONE" | sed '/^[[:space:]]*$/d')
+            cone=()
+            for entry in "${raw_cone[@]}"; do
+                case "$entry" in
+                    */.enact-direct-files)
+                        cone+=("$entry")
+                        ;;
+                    *)
+                        kind=$(git cat-file -t "$GITHUB_SHA:$entry" 2>/dev/null || true)
+                        if [ "$kind" = "blob" ]; then
+                            case "$entry" in
+                                */*) cone+=("${entry%/*}/.enact-direct-files") ;;
+                            esac
+                        else
+                            cone+=("$entry")
+                        fi
+                        ;;
+                esac
+            done
+            if [ "${#cone[@]}" -gt 0 ]; then
+                git sparse-checkout set --cone "${cone[@]}"
+            fi
         fi
         case "$GITHUB_REF" in
             refs/heads/*) git checkout -q --force -B "${GITHUB_REF#refs/heads/}" "$GITHUB_SHA" ;;
@@ -674,6 +938,7 @@ jobs:
           services/llm-gateway/src/llm_gateway/rate_limiting/model_cost_overrides.py
           products/tasks/backend/models.py
           products/canvas/packages/canvas_builder/canvas-sdk.mjs
+          products/canvas/backend/sandbox
           Dockerfile
           showcase/scripts/hadolint.sh
           frontend
@@ -694,6 +959,7 @@ jobs:
           packages/llm-normalizer/src
           packages/llm-normalizer/package.json
           showcase/scripts/build_products.sh
+          showcase/scripts/run_frontend_tests.sh
           bin/validate-setup-tasks.mjs
           common/storybook/.storybook
           frontend/src
@@ -722,6 +988,7 @@ jobs:
           proto
           frontend/public/services
           frontend/jest.quarantine.ts
+          .github/workflows/update-ai-costs.yml
           services/oauth-proxy
           tools/openapi-codegen
           frontend/src/generated
@@ -734,11 +1001,99 @@ jobs:
           products/model_crossing_uses_baseline.txt
           .importlinter
           frontend/public/message-preferences.css
+          services/stripe-app
+          packages/agent/packages/harness
           products/ruff.toml
           products/stamphog/packages
           packages/agent/agent-shadow
           bin/generate_personhog_proto.sh
           showcase/scripts/build_quill.sh
+          products/__init__.py
+          products/experiments/stats
+          products/data_warehouse/dags
+          products/access_control/backend
+          products/actions/backend
+          products/aeo/backend
+          products/ai_gateway/backend
+          products/ai_observability/backend
+          products/ai_training/backend
+          products/alerts/backend
+          products/alerts_platform/backend
+          products/analytics_platform/backend
+          products/annotations/backend
+          products/apm/backend
+          products/approvals/backend
+          products/autoresearch/backend
+          products/batch_exports/backend
+          products/billing_alerts/backend
+          products/business_knowledge/backend
+          products/canvas/backend
+          products/cdp/backend
+          products/cohorts/backend
+          products/context_layer/backend
+          products/conversations/backend
+          products/customer_analytics/backend
+          products/dashboards/backend
+          products/data_catalog/backend
+          products/data_modeling/backend
+          products/data_quality/backend
+          products/data_tools/backend
+          products/data_warehouse/backend
+          products/demo/backend
+          products/early_access_features/backend
+          products/endpoints/backend
+          products/engineering_analytics/backend
+          products/error_tracking/backend
+          products/event_definitions/backend
+          products/experiments/backend
+          products/exports/backend
+          products/feature_flags/backend
+          products/field_notes/backend
+          products/growth/backend
+          products/legal_documents/backend
+          products/links/backend
+          products/live_debugger/backend
+          products/llm_analytics/backend
+          products/logs/backend
+          products/managed_migrations/backend
+          products/managed_warehouse/backend
+          products/marketing_analytics/backend
+          products/mcp_analytics/backend
+          products/mcp_registry/backend
+          products/mcp_store/backend
+          products/messaging/backend
+          products/metrics/backend
+          products/ml_inference/backend
+          products/notebooks/backend
+          products/notifications/backend
+          products/platform_features/backend
+          products/posthog_ai/backend
+          products/product_analytics/backend
+          products/product_tours/backend
+          products/pulse/backend
+          products/reminders/backend
+          products/replay/backend
+          products/replay_vision/backend
+          products/revenue_analytics/backend
+          products/review_hog/backend
+          products/security/backend
+          products/signals/backend
+          products/skills/backend
+          products/slack_app/backend
+          products/stamphog/backend
+          products/streamlit_apps/backend
+          products/surveys/backend
+          products/tasks/backend
+          products/today/backend
+          products/tracing/backend
+          products/user_interviews/backend
+          products/visual_review/backend
+          products/warehouse_sources/backend
+          products/warehouse_sources_queue/backend
+          products/web_analytics/backend
+          products/webmcp/backend
+          products/wizard/backend
+          products/workflows/backend
           .github/rust-images.yml
           posthog/api/feature_flag.py
           posthog/models/feature_flag/flags_cache.py
@@ -881,14 +1236,70 @@ jobs:
           .github/scripts/flatten-parallel-steps-for-actionlint.awk
           showcase/scripts/actionlint.sh
     - name: Checkout Repository (sparse)
+      id: sparse_checkout
       if: ${{ steps.runner_caches.outputs.host == '' || steps.host_checkout.outcome == 'failure' }}
-      uses: actions/checkout@v7
-      with:
-        fetch-depth: "1"
-        fetch-tags: "false"
-        lfs: "false"
-        show-progress: "false"
-        sparse-checkout: |-
+      run: |
+        set -euo pipefail
+        url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY"
+        export GIT_CONFIG_COUNT=1
+        export GIT_CONFIG_KEY_0=safe.directory
+        export GIT_CONFIG_VALUE_0="$GITHUB_WORKSPACE"
+        header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$ENACT_GIT_TOKEN" | base64 | tr -d '\n')"
+        cd "$GITHUB_WORKSPACE"
+        # shellcheck disable=SC2015
+        find . -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+        git init -q .
+        git remote add origin "$url"
+        git config --local "http.$GITHUB_SERVER_URL/.extraheader" "$header"
+        git config --local gc.auto 0
+        cone=()
+        while IFS= read -r entry; do
+            entry="${entry#"${entry%%[![:space:]]*}"}"
+            entry="${entry%"${entry##*[![:space:]]}"}"
+            [ -n "$entry" ] && cone+=("$entry")
+        done <<<"${ENACT_SPARSE_CONE:-}"
+        depth="${ENACT_FETCH_DEPTH:-1}"
+        fetch_args=(--no-tags)
+        if [ "$depth" != "0" ]; then
+            fetch_args+=("--depth=$depth")
+        fi
+        if [ "${#cone[@]}" -gt 0 ] && [ "${#cone[@]}" -le 2 ]; then
+            fetch_args+=(--filter=blob:none)
+        fi
+        git fetch -q "${fetch_args[@]}" origin "$GITHUB_SHA" 2>/dev/null \
+            || git fetch -q "${fetch_args[@]}" origin "$GITHUB_REF"
+        if [ "${#cone[@]}" -gt 0 ]; then
+            normalized=()
+            for entry in "${cone[@]}"; do
+                case "$entry" in
+                    */.enact-direct-files)
+                        normalized+=("$entry")
+                        ;;
+                    *)
+                        kind=$(git cat-file -t "$GITHUB_SHA:$entry" 2>/dev/null || true)
+                        if [ "$kind" = "blob" ]; then
+                            case "$entry" in
+                                */*) normalized+=("${entry%/*}/.enact-direct-files") ;;
+                            esac
+                        else
+                            normalized+=("$entry")
+                        fi
+                        ;;
+                esac
+            done
+            if [ "${#normalized[@]}" -gt 0 ]; then
+                git sparse-checkout set --cone "${normalized[@]}"
+            fi
+        fi
+        case "$GITHUB_REF" in
+            refs/heads/*) git checkout -q --force -B "${GITHUB_REF#refs/heads/}" "$GITHUB_SHA" ;;
+            *) git checkout -q --force --detach "$GITHUB_SHA" ;;
+        esac
+        git log -1 --format='Checked out %H (shallow sparse)'
+      env:
+        ENACT_FETCH_DEPTH: "1"
+        ENACT_GIT_TOKEN: ${{ github.token }}
+        ENACT_SPARSE_CONE: |-
           .enact
           cue.mod
           .github
@@ -1010,6 +1421,7 @@ jobs:
           services/llm-gateway/src/llm_gateway/rate_limiting/model_cost_overrides.py
           products/tasks/backend/models.py
           products/canvas/packages/canvas_builder/canvas-sdk.mjs
+          products/canvas/backend/sandbox
           Dockerfile
           showcase/scripts/hadolint.sh
           frontend
@@ -1030,6 +1442,7 @@ jobs:
           packages/llm-normalizer/src
           packages/llm-normalizer/package.json
           showcase/scripts/build_products.sh
+          showcase/scripts/run_frontend_tests.sh
           bin/validate-setup-tasks.mjs
           common/storybook/.storybook
           frontend/src
@@ -1058,6 +1471,7 @@ jobs:
           proto
           frontend/public/services
           frontend/jest.quarantine.ts
+          .github/workflows/update-ai-costs.yml
           services/oauth-proxy
           tools/openapi-codegen
           frontend/src/generated
@@ -1070,11 +1484,99 @@ jobs:
           products/model_crossing_uses_baseline.txt
           .importlinter
           frontend/public/message-preferences.css
+          services/stripe-app
+          packages/agent/packages/harness
           products/ruff.toml
           products/stamphog/packages
           packages/agent/agent-shadow
           bin/generate_personhog_proto.sh
           showcase/scripts/build_quill.sh
+          products/__init__.py
+          products/experiments/stats
+          products/data_warehouse/dags
+          products/access_control/backend
+          products/actions/backend
+          products/aeo/backend
+          products/ai_gateway/backend
+          products/ai_observability/backend
+          products/ai_training/backend
+          products/alerts/backend
+          products/alerts_platform/backend
+          products/analytics_platform/backend
+          products/annotations/backend
+          products/apm/backend
+          products/approvals/backend
+          products/autoresearch/backend
+          products/batch_exports/backend
+          products/billing_alerts/backend
+          products/business_knowledge/backend
+          products/canvas/backend
+          products/cdp/backend
+          products/cohorts/backend
+          products/context_layer/backend
+          products/conversations/backend
+          products/customer_analytics/backend
+          products/dashboards/backend
+          products/data_catalog/backend
+          products/data_modeling/backend
+          products/data_quality/backend
+          products/data_tools/backend
+          products/data_warehouse/backend
+          products/demo/backend
+          products/early_access_features/backend
+          products/endpoints/backend
+          products/engineering_analytics/backend
+          products/error_tracking/backend
+          products/event_definitions/backend
+          products/experiments/backend
+          products/exports/backend
+          products/feature_flags/backend
+          products/field_notes/backend
+          products/growth/backend
+          products/legal_documents/backend
+          products/links/backend
+          products/live_debugger/backend
+          products/llm_analytics/backend
+          products/logs/backend
+          products/managed_migrations/backend
+          products/managed_warehouse/backend
+          products/marketing_analytics/backend
+          products/mcp_analytics/backend
+          products/mcp_registry/backend
+          products/mcp_store/backend
+          products/messaging/backend
+          products/metrics/backend
+          products/ml_inference/backend
+          products/notebooks/backend
+          products/notifications/backend
+          products/platform_features/backend
+          products/posthog_ai/backend
+          products/product_analytics/backend
+          products/product_tours/backend
+          products/pulse/backend
+          products/reminders/backend
+          products/replay/backend
+          products/replay_vision/backend
+          products/revenue_analytics/backend
+          products/review_hog/backend
+          products/security/backend
+          products/signals/backend
+          products/skills/backend
+          products/slack_app/backend
+          products/stamphog/backend
+          products/streamlit_apps/backend
+          products/surveys/backend
+          products/tasks/backend
+          products/today/backend
+          products/tracing/backend
+          products/user_interviews/backend
+          products/visual_review/backend
+          products/warehouse_sources/backend
+          products/warehouse_sources_queue/backend
+          products/web_analytics/backend
+          products/webmcp/backend
+          products/wizard/backend
+          products/workflows/backend
           .github/rust-images.yml
           posthog/api/feature_flag.py
           posthog/models/feature_flag/flags_cache.py
@@ -1216,8 +1718,6 @@ jobs:
           tools/workflow-plan
           .github/scripts/flatten-parallel-steps-for-actionlint.awk
           showcase/scripts/actionlint.sh
-        sparse-checkout-cone-mode: "true"
-        submodules: "false"
     - name: Install committed enact & enve builds
       run: |
         P="$(uname -s | tr '[:upper:]' '[:lower:]' | sed 's/^darwin$/macos/')-$(uname -m | sed 's/^arm64$/aarch64/')"
@@ -1312,7 +1812,7 @@ jobs:
         ENACT_INPUT_WARM_REACH: ${{ inputs.warm_reach }}
         ENACT_INTEGRATION_BRANCH: ${{ vars.ENACT_INTEGRATION_BRANCH }}
         ENACT_R2_BUCKET: ${{ secrets.R2_BUCKET || env.R2_BUCKET }}
-        ENACT_RUNNER_ALLOCATION: "{\"cpus\":2.0,\"memory_mb\":8192,\"runtime_reserve_mb\":2048}"
+        ENACT_RUNNER_ALLOCATION: "{\"cpus\":6.0,\"memory_mb\":7168,\"runtime_reserve_mb\":1024}"
         ENACT_SAME_REPO_PR: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
         GITHUB_HEAD_REF: ${{ github.head_ref }}
         GITHUB_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
@@ -1473,7 +1973,7 @@ jobs:
         ENACT_INPUT_WARM_REACH: ${{ inputs.warm_reach }}
         ENACT_INTEGRATION_BRANCH: ${{ vars.ENACT_INTEGRATION_BRANCH }}
         ENACT_R2_BUCKET: ${{ secrets.R2_BUCKET || env.R2_BUCKET }}
-        ENACT_RUNNER_ALLOCATION: "{\"cpus\":2.0,\"memory_mb\":8192,\"runtime_reserve_mb\":2048}"
+        ENACT_RUNNER_ALLOCATION: "{\"cpus\":6.0,\"memory_mb\":7168,\"runtime_reserve_mb\":1024}"
         ENACT_SAME_REPO_PR: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
         GITHUB_HEAD_REF: ${{ github.head_ref }}
         GITHUB_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
@@ -1502,6 +2002,38 @@ jobs:
       if: ${{ (env.ENACT_SAVE_EVENT == 'true' && fromJson(needs.detect.outputs.stage_cargo)['preflight'].cargo_targets != '') && steps.stage_plan.outputs.stage_has_work == 'true' }}
       continue-on-error: true
       run: enact cache prune-cargo --pipeline .enact
+    - name: Check Rust target & cargo cache [cli/target] size limit (<= 1.5 GiB)
+      id: rust_l1_cache_cli_target_size_guard
+      if: ${{ (env.ENACT_SAVE_EVENT == 'true' && hashFiles('cli/Cargo.lock', 'cli/**/Cargo.toml') != '' && contains(format(',{0},', fromJson(needs.detect.outputs.stage_cargo)['preflight'].cargo_targets), ',cli/target,') && steps.runner_caches.outputs.host == '') && steps.stage_plan.outputs.stage_has_work == 'true' }}
+      continue-on-error: true
+      run: |-
+        total_kb=$(du -sk "$ENACT_RUST_TARGET" 2>/dev/null | awk '{print $1}')
+        total_kb="${total_kb:-0}"
+        if [ "$total_kb" -le 1572864 ]; then
+          echo "ok=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "::warning::Skipping GitHub cache save for $ENACT_RUST_TARGET (${total_kb} KiB > 1572864 KiB / 1.5 GiB limit)"
+          echo "ok=false" >> "$GITHUB_OUTPUT"
+        fi
+      env:
+        ENACT_RUST_HOST_KEY: ${{ runner.os }}-rust-cli_target-${{ hashFiles('enve.lock', 'cli/rust-toolchain.toml', 'cli/rust-toolchain', 'cli/enve.lock') }}-${{ fromJson(needs.detect.outputs.stage_cargo)['preflight'].cargo_cache }}
+        ENACT_RUST_TARGET: cli/target
+    - name: Check Rust target & cargo cache [rust/target] size limit (<= 1.5 GiB)
+      id: rust_l1_cache_rust_target_size_guard
+      if: ${{ (env.ENACT_SAVE_EVENT == 'true' && hashFiles('rust/Cargo.lock', 'rust/**/Cargo.toml') != '' && contains(format(',{0},', fromJson(needs.detect.outputs.stage_cargo)['preflight'].cargo_targets), ',rust/target,') && steps.runner_caches.outputs.host == '') && steps.stage_plan.outputs.stage_has_work == 'true' }}
+      continue-on-error: true
+      run: |-
+        total_kb=$(du -sk "$ENACT_RUST_TARGET" 2>/dev/null | awk '{print $1}')
+        total_kb="${total_kb:-0}"
+        if [ "$total_kb" -le 1572864 ]; then
+          echo "ok=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "::warning::Skipping GitHub cache save for $ENACT_RUST_TARGET (${total_kb} KiB > 1572864 KiB / 1.5 GiB limit)"
+          echo "ok=false" >> "$GITHUB_OUTPUT"
+        fi
+      env:
+        ENACT_RUST_HOST_KEY: ${{ runner.os }}-rust-rust_target-${{ hashFiles('enve.lock', 'rust/rust-toolchain.toml', 'rust/rust-toolchain', 'rust/enve.lock') }}-${{ fromJson(needs.detect.outputs.stage_cargo)['preflight'].cargo_cache }}
+        ENACT_RUST_TARGET: rust/target
     - parallel:
       - name: Save Node dependency cache
         if: ${{ ((env.ENACT_SAVE_EVENT == 'true' && steps.stage_plan.outputs.stage_needs_node == 'true' && steps.cache_delta.outputs.node_l1_cache == 'true' && steps.runner_caches.outputs.host == '') && github.event_name != 'pull_request' && steps.node_l1_cache.outputs.cache-hit != 'true') && steps.stage_plan.outputs.stage_has_work == 'true' }}
@@ -1513,7 +2045,7 @@ jobs:
             .enact/state/pnpm-store
             node_modules/.cache
       - name: Save Rust target & cargo cache [cli/target]
-        if: ${{ (((env.ENACT_SAVE_EVENT == 'true' && hashFiles('cli/Cargo.lock', 'cli/**/Cargo.toml') != '' && contains(format(',{0},', fromJson(needs.detect.outputs.stage_cargo)['preflight'].cargo_targets), ',cli/target,') && steps.runner_caches.outputs.host == '') && (github.event_name == 'schedule' || github.event_name != 'pull_request' && github.ref_name == github.event.repository.default_branch || !startsWith(steps.rust_l1_cache_cli_target.outputs.cache-matched-key, format('{0}-rust-cli_target-{1}-{2}-{3}-', runner.os, hashFiles('enve.lock', 'cli/rust-toolchain.toml', 'cli/rust-toolchain', 'cli/enve.lock'), fromJson(needs.detect.outputs.stage_cargo)['preflight'].cargo_cache, hashFiles('cli/Cargo.lock', 'cli/**/Cargo.toml'))))) && github.event_name != 'pull_request' && steps.rust_l1_cache_cli_target.outputs.cache-hit != 'true') && steps.stage_plan.outputs.stage_has_work == 'true' }}
+        if: ${{ (((env.ENACT_SAVE_EVENT == 'true' && hashFiles('cli/Cargo.lock', 'cli/**/Cargo.toml') != '' && contains(format(',{0},', fromJson(needs.detect.outputs.stage_cargo)['preflight'].cargo_targets), ',cli/target,') && steps.runner_caches.outputs.host == '' && steps.rust_l1_cache_cli_target_size_guard.outputs.ok == 'true') && (github.event_name == 'schedule' || github.event_name != 'pull_request' && github.ref_name == github.event.repository.default_branch || !startsWith(steps.rust_l1_cache_cli_target.outputs.cache-matched-key, format('{0}-rust-cli_target-{1}-{2}-{3}-', runner.os, hashFiles('enve.lock', 'cli/rust-toolchain.toml', 'cli/rust-toolchain', 'cli/enve.lock'), fromJson(needs.detect.outputs.stage_cargo)['preflight'].cargo_cache, hashFiles('cli/Cargo.lock', 'cli/**/Cargo.toml'))))) && github.event_name != 'pull_request' && steps.rust_l1_cache_cli_target.outputs.cache-hit != 'true') && steps.stage_plan.outputs.stage_has_work == 'true' }}
         continue-on-error: true
         uses: actions/cache/save@v6
         with:
@@ -1541,7 +2073,7 @@ jobs:
           ENACT_RUST_HOST_KEY: ${{ runner.os }}-rust-cli_target-${{ hashFiles('enve.lock', 'cli/rust-toolchain.toml', 'cli/rust-toolchain', 'cli/enve.lock') }}-${{ fromJson(needs.detect.outputs.stage_cargo)['preflight'].cargo_cache }}
           ENACT_RUST_TARGET: cli/target
       - name: Save Rust target & cargo cache [rust/target]
-        if: ${{ (((env.ENACT_SAVE_EVENT == 'true' && hashFiles('rust/Cargo.lock', 'rust/**/Cargo.toml') != '' && contains(format(',{0},', fromJson(needs.detect.outputs.stage_cargo)['preflight'].cargo_targets), ',rust/target,') && steps.runner_caches.outputs.host == '') && (github.event_name == 'schedule' || github.event_name != 'pull_request' && github.ref_name == github.event.repository.default_branch || !startsWith(steps.rust_l1_cache_rust_target.outputs.cache-matched-key, format('{0}-rust-rust_target-{1}-{2}-{3}-', runner.os, hashFiles('enve.lock', 'rust/rust-toolchain.toml', 'rust/rust-toolchain', 'rust/enve.lock'), fromJson(needs.detect.outputs.stage_cargo)['preflight'].cargo_cache, hashFiles('rust/Cargo.lock', 'rust/**/Cargo.toml'))))) && github.event_name != 'pull_request' && steps.rust_l1_cache_rust_target.outputs.cache-hit != 'true') && steps.stage_plan.outputs.stage_has_work == 'true' }}
+        if: ${{ (((env.ENACT_SAVE_EVENT == 'true' && hashFiles('rust/Cargo.lock', 'rust/**/Cargo.toml') != '' && contains(format(',{0},', fromJson(needs.detect.outputs.stage_cargo)['preflight'].cargo_targets), ',rust/target,') && steps.runner_caches.outputs.host == '' && steps.rust_l1_cache_rust_target_size_guard.outputs.ok == 'true') && (github.event_name == 'schedule' || github.event_name != 'pull_request' && github.ref_name == github.event.repository.default_branch || !startsWith(steps.rust_l1_cache_rust_target.outputs.cache-matched-key, format('{0}-rust-rust_target-{1}-{2}-{3}-', runner.os, hashFiles('enve.lock', 'rust/rust-toolchain.toml', 'rust/rust-toolchain', 'rust/enve.lock'), fromJson(needs.detect.outputs.stage_cargo)['preflight'].cargo_cache, hashFiles('rust/Cargo.lock', 'rust/**/Cargo.toml'))))) && github.event_name != 'pull_request' && steps.rust_l1_cache_rust_target.outputs.cache-hit != 'true') && steps.stage_plan.outputs.stage_has_work == 'true' }}
         continue-on-error: true
         uses: actions/cache/save@v6
         with:
@@ -1596,9 +2128,8 @@ jobs:
     runs-on:
     - self-hosted
     - Linux
-    - X64
     - tonky-ci
-    - tonky-ci-c2m13g
+    - tonky-ci-c3m12g
     timeout-minutes: 120
     steps:
     - name: Probe Runner Caches
@@ -1667,8 +2198,28 @@ jobs:
         git config --local gc.auto 0
         git fetch -q --no-tags "$mirror" "+refs/heads/*:refs/remotes/origin/*"
         if [ -n "${ENACT_SPARSE_CONE:-}" ]; then
-            mapfile -t cone < <(printf '%s\n' "$ENACT_SPARSE_CONE" | sed '/^[[:space:]]*$/d')
-            git sparse-checkout set --cone "${cone[@]}"
+            mapfile -t raw_cone < <(printf '%s\n' "$ENACT_SPARSE_CONE" | sed '/^[[:space:]]*$/d')
+            cone=()
+            for entry in "${raw_cone[@]}"; do
+                case "$entry" in
+                    */.enact-direct-files)
+                        cone+=("$entry")
+                        ;;
+                    *)
+                        kind=$(git cat-file -t "$GITHUB_SHA:$entry" 2>/dev/null || true)
+                        if [ "$kind" = "blob" ]; then
+                            case "$entry" in
+                                */*) cone+=("${entry%/*}/.enact-direct-files") ;;
+                            esac
+                        else
+                            cone+=("$entry")
+                        fi
+                        ;;
+                esac
+            done
+            if [ "${#cone[@]}" -gt 0 ]; then
+                git sparse-checkout set --cone "${cone[@]}"
+            fi
         fi
         case "$GITHUB_REF" in
             refs/heads/*) git checkout -q --force -B "${GITHUB_REF#refs/heads/}" "$GITHUB_SHA" ;;
@@ -1739,19 +2290,76 @@ jobs:
           packages/llm-normalizer/package.json
           products/ai_observability/shared
           showcase/scripts/build_products.sh
+          showcase/scripts/run_frontend_tests.sh
           bin/validate-setup-tasks.mjs
           common/storybook/.storybook
           frontend/src
           packages/quill
     - name: Checkout Repository (sparse)
+      id: sparse_checkout
       if: ${{ steps.runner_caches.outputs.host == '' || steps.host_checkout.outcome == 'failure' }}
-      uses: actions/checkout@v7
-      with:
-        fetch-depth: "1"
-        fetch-tags: "false"
-        lfs: "false"
-        show-progress: "false"
-        sparse-checkout: |-
+      run: |
+        set -euo pipefail
+        url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY"
+        export GIT_CONFIG_COUNT=1
+        export GIT_CONFIG_KEY_0=safe.directory
+        export GIT_CONFIG_VALUE_0="$GITHUB_WORKSPACE"
+        header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$ENACT_GIT_TOKEN" | base64 | tr -d '\n')"
+        cd "$GITHUB_WORKSPACE"
+        # shellcheck disable=SC2015
+        find . -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+        git init -q .
+        git remote add origin "$url"
+        git config --local "http.$GITHUB_SERVER_URL/.extraheader" "$header"
+        git config --local gc.auto 0
+        cone=()
+        while IFS= read -r entry; do
+            entry="${entry#"${entry%%[![:space:]]*}"}"
+            entry="${entry%"${entry##*[![:space:]]}"}"
+            [ -n "$entry" ] && cone+=("$entry")
+        done <<<"${ENACT_SPARSE_CONE:-}"
+        depth="${ENACT_FETCH_DEPTH:-1}"
+        fetch_args=(--no-tags)
+        if [ "$depth" != "0" ]; then
+            fetch_args+=("--depth=$depth")
+        fi
+        if [ "${#cone[@]}" -gt 0 ] && [ "${#cone[@]}" -le 2 ]; then
+            fetch_args+=(--filter=blob:none)
+        fi
+        git fetch -q "${fetch_args[@]}" origin "$GITHUB_SHA" 2>/dev/null \
+            || git fetch -q "${fetch_args[@]}" origin "$GITHUB_REF"
+        if [ "${#cone[@]}" -gt 0 ]; then
+            normalized=()
+            for entry in "${cone[@]}"; do
+                case "$entry" in
+                    */.enact-direct-files)
+                        normalized+=("$entry")
+                        ;;
+                    *)
+                        kind=$(git cat-file -t "$GITHUB_SHA:$entry" 2>/dev/null || true)
+                        if [ "$kind" = "blob" ]; then
+                            case "$entry" in
+                                */*) normalized+=("${entry%/*}/.enact-direct-files") ;;
+                            esac
+                        else
+                            normalized+=("$entry")
+                        fi
+                        ;;
+                esac
+            done
+            if [ "${#normalized[@]}" -gt 0 ]; then
+                git sparse-checkout set --cone "${normalized[@]}"
+            fi
+        fi
+        case "$GITHUB_REF" in
+            refs/heads/*) git checkout -q --force -B "${GITHUB_REF#refs/heads/}" "$GITHUB_SHA" ;;
+            *) git checkout -q --force --detach "$GITHUB_SHA" ;;
+        esac
+        git log -1 --format='Checked out %H (shallow sparse)'
+      env:
+        ENACT_FETCH_DEPTH: "1"
+        ENACT_GIT_TOKEN: ${{ github.token }}
+        ENACT_SPARSE_CONE: |-
           .enact
           cue.mod
           .github
@@ -1813,12 +2421,11 @@ jobs:
           packages/llm-normalizer/package.json
           products/ai_observability/shared
           showcase/scripts/build_products.sh
+          showcase/scripts/run_frontend_tests.sh
           bin/validate-setup-tasks.mjs
           common/storybook/.storybook
           frontend/src
           packages/quill
-        sparse-checkout-cone-mode: "true"
-        submodules: "false"
     - name: Install committed enact & enve builds
       run: |
         P="$(uname -s | tr '[:upper:]' '[:lower:]' | sed 's/^darwin$/macos/')-$(uname -m | sed 's/^arm64$/aarch64/')"
@@ -1983,9 +2590,8 @@ jobs:
     runs-on:
     - self-hosted
     - Linux
-    - X64
     - tonky-ci
-    - tonky-ci-c2m13g
+    - tonky-ci-c2m12g
     timeout-minutes: 120
     steps:
     - name: Probe Runner Caches
@@ -2054,8 +2660,28 @@ jobs:
         git config --local gc.auto 0
         git fetch -q --no-tags "$mirror" "+refs/heads/*:refs/remotes/origin/*"
         if [ -n "${ENACT_SPARSE_CONE:-}" ]; then
-            mapfile -t cone < <(printf '%s\n' "$ENACT_SPARSE_CONE" | sed '/^[[:space:]]*$/d')
-            git sparse-checkout set --cone "${cone[@]}"
+            mapfile -t raw_cone < <(printf '%s\n' "$ENACT_SPARSE_CONE" | sed '/^[[:space:]]*$/d')
+            cone=()
+            for entry in "${raw_cone[@]}"; do
+                case "$entry" in
+                    */.enact-direct-files)
+                        cone+=("$entry")
+                        ;;
+                    *)
+                        kind=$(git cat-file -t "$GITHUB_SHA:$entry" 2>/dev/null || true)
+                        if [ "$kind" = "blob" ]; then
+                            case "$entry" in
+                                */*) cone+=("${entry%/*}/.enact-direct-files") ;;
+                            esac
+                        else
+                            cone+=("$entry")
+                        fi
+                        ;;
+                esac
+            done
+            if [ "${#cone[@]}" -gt 0 ]; then
+                git sparse-checkout set --cone "${cone[@]}"
+            fi
         fi
         case "$GITHUB_REF" in
             refs/heads/*) git checkout -q --force -B "${GITHUB_REF#refs/heads/}" "$GITHUB_SHA" ;;
@@ -2148,18 +2774,77 @@ jobs:
           services/mcp/src/templates
           services/stripe-mock/tests/conftest.py
           frontend/public/message-preferences.css
+          services/stripe-app
+          frontend/public/services
+          packages/agent/packages/harness
           products/ruff.toml
           products/stamphog/packages
           packages/agent/agent-shadow
     - name: Checkout Repository (sparse)
+      id: sparse_checkout
       if: ${{ steps.runner_caches.outputs.host == '' || steps.host_checkout.outcome == 'failure' }}
-      uses: actions/checkout@v7
-      with:
-        fetch-depth: "1"
-        fetch-tags: "false"
-        lfs: "false"
-        show-progress: "false"
-        sparse-checkout: |-
+      run: |
+        set -euo pipefail
+        url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY"
+        export GIT_CONFIG_COUNT=1
+        export GIT_CONFIG_KEY_0=safe.directory
+        export GIT_CONFIG_VALUE_0="$GITHUB_WORKSPACE"
+        header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$ENACT_GIT_TOKEN" | base64 | tr -d '\n')"
+        cd "$GITHUB_WORKSPACE"
+        # shellcheck disable=SC2015
+        find . -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+        git init -q .
+        git remote add origin "$url"
+        git config --local "http.$GITHUB_SERVER_URL/.extraheader" "$header"
+        git config --local gc.auto 0
+        cone=()
+        while IFS= read -r entry; do
+            entry="${entry#"${entry%%[![:space:]]*}"}"
+            entry="${entry%"${entry##*[![:space:]]}"}"
+            [ -n "$entry" ] && cone+=("$entry")
+        done <<<"${ENACT_SPARSE_CONE:-}"
+        depth="${ENACT_FETCH_DEPTH:-1}"
+        fetch_args=(--no-tags)
+        if [ "$depth" != "0" ]; then
+            fetch_args+=("--depth=$depth")
+        fi
+        if [ "${#cone[@]}" -gt 0 ] && [ "${#cone[@]}" -le 2 ]; then
+            fetch_args+=(--filter=blob:none)
+        fi
+        git fetch -q "${fetch_args[@]}" origin "$GITHUB_SHA" 2>/dev/null \
+            || git fetch -q "${fetch_args[@]}" origin "$GITHUB_REF"
+        if [ "${#cone[@]}" -gt 0 ]; then
+            normalized=()
+            for entry in "${cone[@]}"; do
+                case "$entry" in
+                    */.enact-direct-files)
+                        normalized+=("$entry")
+                        ;;
+                    *)
+                        kind=$(git cat-file -t "$GITHUB_SHA:$entry" 2>/dev/null || true)
+                        if [ "$kind" = "blob" ]; then
+                            case "$entry" in
+                                */*) normalized+=("${entry%/*}/.enact-direct-files") ;;
+                            esac
+                        else
+                            normalized+=("$entry")
+                        fi
+                        ;;
+                esac
+            done
+            if [ "${#normalized[@]}" -gt 0 ]; then
+                git sparse-checkout set --cone "${normalized[@]}"
+            fi
+        fi
+        case "$GITHUB_REF" in
+            refs/heads/*) git checkout -q --force -B "${GITHUB_REF#refs/heads/}" "$GITHUB_SHA" ;;
+            *) git checkout -q --force --detach "$GITHUB_SHA" ;;
+        esac
+        git log -1 --format='Checked out %H (shallow sparse)'
+      env:
+        ENACT_FETCH_DEPTH: "1"
+        ENACT_GIT_TOKEN: ${{ github.token }}
+        ENACT_SPARSE_CONE: |-
           .enact
           cue.mod
           .github
@@ -2243,11 +2928,12 @@ jobs:
           services/mcp/src/templates
           services/stripe-mock/tests/conftest.py
           frontend/public/message-preferences.css
+          services/stripe-app
+          frontend/public/services
+          packages/agent/packages/harness
           products/ruff.toml
           products/stamphog/packages
           packages/agent/agent-shadow
-        sparse-checkout-cone-mode: "true"
-        submodules: "false"
     - name: Install committed enact & enve builds
       run: |
         P="$(uname -s | tr '[:upper:]' '[:lower:]' | sed 's/^darwin$/macos/')-$(uname -m | sed 's/^arm64$/aarch64/')"
@@ -2397,7 +3083,6 @@ jobs:
     runs-on:
     - self-hosted
     - Linux
-    - X64
     - tonky-ci
     - tonky-ci-c2m4g
     timeout-minutes: 15
@@ -2468,8 +3153,28 @@ jobs:
         git config --local gc.auto 0
         git fetch -q --no-tags "$mirror" "+refs/heads/*:refs/remotes/origin/*"
         if [ -n "${ENACT_SPARSE_CONE:-}" ]; then
-            mapfile -t cone < <(printf '%s\n' "$ENACT_SPARSE_CONE" | sed '/^[[:space:]]*$/d')
-            git sparse-checkout set --cone "${cone[@]}"
+            mapfile -t raw_cone < <(printf '%s\n' "$ENACT_SPARSE_CONE" | sed '/^[[:space:]]*$/d')
+            cone=()
+            for entry in "${raw_cone[@]}"; do
+                case "$entry" in
+                    */.enact-direct-files)
+                        cone+=("$entry")
+                        ;;
+                    *)
+                        kind=$(git cat-file -t "$GITHUB_SHA:$entry" 2>/dev/null || true)
+                        if [ "$kind" = "blob" ]; then
+                            case "$entry" in
+                                */*) cone+=("${entry%/*}/.enact-direct-files") ;;
+                            esac
+                        else
+                            cone+=("$entry")
+                        fi
+                        ;;
+                esac
+            done
+            if [ "${#cone[@]}" -gt 0 ]; then
+                git sparse-checkout set --cone "${cone[@]}"
+            fi
         fi
         case "$GITHUB_REF" in
             refs/heads/*) git checkout -q --force -B "${GITHUB_REF#refs/heads/}" "$GITHUB_SHA" ;;
@@ -2484,20 +3189,74 @@ jobs:
           .github
           bin
     - name: Checkout Repository (sparse)
+      id: sparse_checkout
       if: ${{ steps.runner_caches.outputs.host == '' || steps.host_checkout.outcome == 'failure' }}
-      uses: actions/checkout@v7
-      with:
-        fetch-depth: "1"
-        fetch-tags: "false"
-        lfs: "false"
-        show-progress: "false"
-        sparse-checkout: |-
+      run: |
+        set -euo pipefail
+        url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY"
+        export GIT_CONFIG_COUNT=1
+        export GIT_CONFIG_KEY_0=safe.directory
+        export GIT_CONFIG_VALUE_0="$GITHUB_WORKSPACE"
+        header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$ENACT_GIT_TOKEN" | base64 | tr -d '\n')"
+        cd "$GITHUB_WORKSPACE"
+        # shellcheck disable=SC2015
+        find . -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+        git init -q .
+        git remote add origin "$url"
+        git config --local "http.$GITHUB_SERVER_URL/.extraheader" "$header"
+        git config --local gc.auto 0
+        cone=()
+        while IFS= read -r entry; do
+            entry="${entry#"${entry%%[![:space:]]*}"}"
+            entry="${entry%"${entry##*[![:space:]]}"}"
+            [ -n "$entry" ] && cone+=("$entry")
+        done <<<"${ENACT_SPARSE_CONE:-}"
+        depth="${ENACT_FETCH_DEPTH:-1}"
+        fetch_args=(--no-tags)
+        if [ "$depth" != "0" ]; then
+            fetch_args+=("--depth=$depth")
+        fi
+        if [ "${#cone[@]}" -gt 0 ] && [ "${#cone[@]}" -le 2 ]; then
+            fetch_args+=(--filter=blob:none)
+        fi
+        git fetch -q "${fetch_args[@]}" origin "$GITHUB_SHA" 2>/dev/null \
+            || git fetch -q "${fetch_args[@]}" origin "$GITHUB_REF"
+        if [ "${#cone[@]}" -gt 0 ]; then
+            normalized=()
+            for entry in "${cone[@]}"; do
+                case "$entry" in
+                    */.enact-direct-files)
+                        normalized+=("$entry")
+                        ;;
+                    *)
+                        kind=$(git cat-file -t "$GITHUB_SHA:$entry" 2>/dev/null || true)
+                        if [ "$kind" = "blob" ]; then
+                            case "$entry" in
+                                */*) normalized+=("${entry%/*}/.enact-direct-files") ;;
+                            esac
+                        else
+                            normalized+=("$entry")
+                        fi
+                        ;;
+                esac
+            done
+            if [ "${#normalized[@]}" -gt 0 ]; then
+                git sparse-checkout set --cone "${normalized[@]}"
+            fi
+        fi
+        case "$GITHUB_REF" in
+            refs/heads/*) git checkout -q --force -B "${GITHUB_REF#refs/heads/}" "$GITHUB_SHA" ;;
+            *) git checkout -q --force --detach "$GITHUB_SHA" ;;
+        esac
+        git log -1 --format='Checked out %H (shallow sparse)'
+      env:
+        ENACT_FETCH_DEPTH: "1"
+        ENACT_GIT_TOKEN: ${{ github.token }}
+        ENACT_SPARSE_CONE: |-
           .enact
           cue.mod
           .github
           bin
-        sparse-checkout-cone-mode: "true"
-        submodules: "false"
     - name: Install committed enact & enve builds
       run: |
         P="$(uname -s | tr '[:upper:]' '[:lower:]' | sed 's/^darwin$/macos/')-$(uname -m | sed 's/^arm64$/aarch64/')"
@@ -2749,8 +3508,28 @@ jobs:
         git config --local gc.auto 0
         git fetch -q --no-tags "$mirror" "+refs/heads/*:refs/remotes/origin/*"
         if [ -n "${ENACT_SPARSE_CONE:-}" ]; then
-            mapfile -t cone < <(printf '%s\n' "$ENACT_SPARSE_CONE" | sed '/^[[:space:]]*$/d')
-            git sparse-checkout set --cone "${cone[@]}"
+            mapfile -t raw_cone < <(printf '%s\n' "$ENACT_SPARSE_CONE" | sed '/^[[:space:]]*$/d')
+            cone=()
+            for entry in "${raw_cone[@]}"; do
+                case "$entry" in
+                    */.enact-direct-files)
+                        cone+=("$entry")
+                        ;;
+                    *)
+                        kind=$(git cat-file -t "$GITHUB_SHA:$entry" 2>/dev/null || true)
+                        if [ "$kind" = "blob" ]; then
+                            case "$entry" in
+                                */*) cone+=("${entry%/*}/.enact-direct-files") ;;
+                            esac
+                        else
+                            cone+=("$entry")
+                        fi
+                        ;;
+                esac
+            done
+            if [ "${#cone[@]}" -gt 0 ]; then
+                git sparse-checkout set --cone "${cone[@]}"
+            fi
         fi
         case "$GITHUB_REF" in
             refs/heads/*) git checkout -q --force -B "${GITHUB_REF#refs/heads/}" "$GITHUB_SHA" ;;
@@ -2884,6 +3663,7 @@ jobs:
           services/llm-gateway/src/llm_gateway/rate_limiting/model_cost_overrides.py
           products/tasks/backend/models.py
           products/canvas/packages/canvas_builder/canvas-sdk.mjs
+          products/canvas/backend/sandbox
           Dockerfile
           showcase/scripts/hadolint.sh
           docs
@@ -2903,10 +3683,99 @@ jobs:
           .github/scripts/jest-retries.cjs
           docs/onboarding
           frontend/public/message-preferences.css
+          frontend/public/services
+          packages/agent/packages/harness
           packages/quill
           posthog/hogql_queries/utils/breakdowns.py
           services/mcp
+          services/stripe-app
           posthog/api/test/rust_integration
+          products/__init__.py
+          products/experiments/stats
+          products/data_warehouse/dags
+          products/access_control/backend
+          products/actions/backend
+          products/aeo/backend
+          products/ai_gateway/backend
+          products/ai_observability/backend
+          products/ai_training/backend
+          products/alerts/backend
+          products/alerts_platform/backend
+          products/analytics_platform/backend
+          products/annotations/backend
+          products/apm/backend
+          products/approvals/backend
+          products/autoresearch/backend
+          products/batch_exports/backend
+          products/billing_alerts/backend
+          products/business_knowledge/backend
+          products/canvas/backend
+          products/cdp/backend
+          products/cohorts/backend
+          products/context_layer/backend
+          products/conversations/backend
+          products/customer_analytics/backend
+          products/dashboards/backend
+          products/data_catalog/backend
+          products/data_modeling/backend
+          products/data_quality/backend
+          products/data_tools/backend
+          products/data_warehouse/backend
+          products/demo/backend
+          products/early_access_features/backend
+          products/endpoints/backend
+          products/engineering_analytics/backend
+          products/error_tracking/backend
+          products/event_definitions/backend
+          products/experiments/backend
+          products/exports/backend
+          products/feature_flags/backend
+          products/field_notes/backend
+          products/growth/backend
+          products/legal_documents/backend
+          products/links/backend
+          products/live_debugger/backend
+          products/llm_analytics/backend
+          products/logs/backend
+          products/managed_migrations/backend
+          products/managed_warehouse/backend
+          products/marketing_analytics/backend
+          products/mcp_analytics/backend
+          products/mcp_registry/backend
+          products/mcp_store/backend
+          products/messaging/backend
+          products/metrics/backend
+          products/ml_inference/backend
+          products/notebooks/backend
+          products/notifications/backend
+          products/platform_features/backend
+          products/posthog_ai/backend
+          products/product_analytics/backend
+          products/product_tours/backend
+          products/pulse/backend
+          products/reminders/backend
+          products/replay/backend
+          products/replay_vision/backend
+          products/revenue_analytics/backend
+          products/review_hog/backend
+          products/security/backend
+          products/signals/backend
+          products/skills/backend
+          products/slack_app/backend
+          products/stamphog/backend
+          products/streamlit_apps/backend
+          products/surveys/backend
+          products/tasks/backend
+          products/today/backend
+          products/tracing/backend
+          products/user_interviews/backend
+          products/visual_review/backend
+          products/warehouse_sources/backend
+          products/warehouse_sources_queue/backend
+          products/web_analytics/backend
+          products/webmcp/backend
+          products/wizard/backend
+          products/workflows/backend
           products/games
           products/canvas/packages
           products/visual_review/cli
@@ -2918,6 +3787,7 @@ jobs:
           packages/llm-normalizer/src
           packages/llm-normalizer/package.json
           showcase/scripts/build_products.sh
+          showcase/scripts/run_frontend_tests.sh
           bin/validate-setup-tasks.mjs
           common/storybook/.storybook
           frontend/src
@@ -2976,8 +3846,8 @@ jobs:
           showcase/scripts/build_mcp_ui_apps.sh
           services/mcp/tests
           frontend/src/queries
-          frontend/public/services
           frontend/jest.quarantine.ts
+          .github/workflows/update-ai-costs.yml
           services/oauth-proxy
           frontend/src/generated
           frontend/src/lib/api-orval-mutator.ts
@@ -3171,14 +4041,70 @@ jobs:
           .github/scripts/flatten-parallel-steps-for-actionlint.awk
           showcase/scripts/actionlint.sh
     - name: Checkout Repository (sparse)
+      id: sparse_checkout
       if: ${{ steps.runner_caches.outputs.host == '' || steps.host_checkout.outcome == 'failure' }}
-      uses: actions/checkout@v7
-      with:
-        fetch-depth: "1"
-        fetch-tags: "false"
-        lfs: "false"
-        show-progress: "false"
-        sparse-checkout: |-
+      run: |
+        set -euo pipefail
+        url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY"
+        export GIT_CONFIG_COUNT=1
+        export GIT_CONFIG_KEY_0=safe.directory
+        export GIT_CONFIG_VALUE_0="$GITHUB_WORKSPACE"
+        header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$ENACT_GIT_TOKEN" | base64 | tr -d '\n')"
+        cd "$GITHUB_WORKSPACE"
+        # shellcheck disable=SC2015
+        find . -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+        git init -q .
+        git remote add origin "$url"
+        git config --local "http.$GITHUB_SERVER_URL/.extraheader" "$header"
+        git config --local gc.auto 0
+        cone=()
+        while IFS= read -r entry; do
+            entry="${entry#"${entry%%[![:space:]]*}"}"
+            entry="${entry%"${entry##*[![:space:]]}"}"
+            [ -n "$entry" ] && cone+=("$entry")
+        done <<<"${ENACT_SPARSE_CONE:-}"
+        depth="${ENACT_FETCH_DEPTH:-1}"
+        fetch_args=(--no-tags)
+        if [ "$depth" != "0" ]; then
+            fetch_args+=("--depth=$depth")
+        fi
+        if [ "${#cone[@]}" -gt 0 ] && [ "${#cone[@]}" -le 2 ]; then
+            fetch_args+=(--filter=blob:none)
+        fi
+        git fetch -q "${fetch_args[@]}" origin "$GITHUB_SHA" 2>/dev/null \
+            || git fetch -q "${fetch_args[@]}" origin "$GITHUB_REF"
+        if [ "${#cone[@]}" -gt 0 ]; then
+            normalized=()
+            for entry in "${cone[@]}"; do
+                case "$entry" in
+                    */.enact-direct-files)
+                        normalized+=("$entry")
+                        ;;
+                    *)
+                        kind=$(git cat-file -t "$GITHUB_SHA:$entry" 2>/dev/null || true)
+                        if [ "$kind" = "blob" ]; then
+                            case "$entry" in
+                                */*) normalized+=("${entry%/*}/.enact-direct-files") ;;
+                            esac
+                        else
+                            normalized+=("$entry")
+                        fi
+                        ;;
+                esac
+            done
+            if [ "${#normalized[@]}" -gt 0 ]; then
+                git sparse-checkout set --cone "${normalized[@]}"
+            fi
+        fi
+        case "$GITHUB_REF" in
+            refs/heads/*) git checkout -q --force -B "${GITHUB_REF#refs/heads/}" "$GITHUB_SHA" ;;
+            *) git checkout -q --force --detach "$GITHUB_SHA" ;;
+        esac
+        git log -1 --format='Checked out %H (shallow sparse)'
+      env:
+        ENACT_FETCH_DEPTH: "1"
+        ENACT_GIT_TOKEN: ${{ github.token }}
+        ENACT_SPARSE_CONE: |-
           .enact
           cue.mod
           .github
@@ -3303,6 +4229,7 @@ jobs:
           services/llm-gateway/src/llm_gateway/rate_limiting/model_cost_overrides.py
           products/tasks/backend/models.py
           products/canvas/packages/canvas_builder/canvas-sdk.mjs
+          products/canvas/backend/sandbox
           Dockerfile
           showcase/scripts/hadolint.sh
           docs
@@ -3322,10 +4249,99 @@ jobs:
           .github/scripts/jest-retries.cjs
           docs/onboarding
           frontend/public/message-preferences.css
+          frontend/public/services
+          packages/agent/packages/harness
           packages/quill
           posthog/hogql_queries/utils/breakdowns.py
           services/mcp
+          services/stripe-app
           posthog/api/test/rust_integration
+          products/__init__.py
+          products/experiments/stats
+          products/data_warehouse/dags
+          products/access_control/backend
+          products/actions/backend
+          products/aeo/backend
+          products/ai_gateway/backend
+          products/ai_observability/backend
+          products/ai_training/backend
+          products/alerts/backend
+          products/alerts_platform/backend
+          products/analytics_platform/backend
+          products/annotations/backend
+          products/apm/backend
+          products/approvals/backend
+          products/autoresearch/backend
+          products/batch_exports/backend
+          products/billing_alerts/backend
+          products/business_knowledge/backend
+          products/canvas/backend
+          products/cdp/backend
+          products/cohorts/backend
+          products/context_layer/backend
+          products/conversations/backend
+          products/customer_analytics/backend
+          products/dashboards/backend
+          products/data_catalog/backend
+          products/data_modeling/backend
+          products/data_quality/backend
+          products/data_tools/backend
+          products/data_warehouse/backend
+          products/demo/backend
+          products/early_access_features/backend
+          products/endpoints/backend
+          products/engineering_analytics/backend
+          products/error_tracking/backend
+          products/event_definitions/backend
+          products/experiments/backend
+          products/exports/backend
+          products/feature_flags/backend
+          products/field_notes/backend
+          products/growth/backend
+          products/legal_documents/backend
+          products/links/backend
+          products/live_debugger/backend
+          products/llm_analytics/backend
+          products/logs/backend
+          products/managed_migrations/backend
+          products/managed_warehouse/backend
+          products/marketing_analytics/backend
+          products/mcp_analytics/backend
+          products/mcp_registry/backend
+          products/mcp_store/backend
+          products/messaging/backend
+          products/metrics/backend
+          products/ml_inference/backend
+          products/notebooks/backend
+          products/notifications/backend
+          products/platform_features/backend
+          products/posthog_ai/backend
+          products/product_analytics/backend
+          products/product_tours/backend
+          products/pulse/backend
+          products/reminders/backend
+          products/replay/backend
+          products/replay_vision/backend
+          products/revenue_analytics/backend
+          products/review_hog/backend
+          products/security/backend
+          products/signals/backend
+          products/skills/backend
+          products/slack_app/backend
+          products/stamphog/backend
+          products/streamlit_apps/backend
+          products/surveys/backend
+          products/tasks/backend
+          products/today/backend
+          products/tracing/backend
+          products/user_interviews/backend
+          products/visual_review/backend
+          products/warehouse_sources/backend
+          products/warehouse_sources_queue/backend
+          products/web_analytics/backend
+          products/webmcp/backend
+          products/wizard/backend
+          products/workflows/backend
           products/games
           products/canvas/packages
           products/visual_review/cli
@@ -3337,6 +4353,7 @@ jobs:
           packages/llm-normalizer/src
           packages/llm-normalizer/package.json
           showcase/scripts/build_products.sh
+          showcase/scripts/run_frontend_tests.sh
           bin/validate-setup-tasks.mjs
           common/storybook/.storybook
           frontend/src
@@ -3395,8 +4412,8 @@ jobs:
           showcase/scripts/build_mcp_ui_apps.sh
           services/mcp/tests
           frontend/src/queries
-          frontend/public/services
           frontend/jest.quarantine.ts
+          .github/workflows/update-ai-costs.yml
           services/oauth-proxy
           frontend/src/generated
           frontend/src/lib/api-orval-mutator.ts
@@ -3589,8 +4606,6 @@ jobs:
           tools/workflow-plan
           .github/scripts/flatten-parallel-steps-for-actionlint.awk
           showcase/scripts/actionlint.sh
-        sparse-checkout-cone-mode: "true"
-        submodules: "false"
     - name: Install committed enact & enve builds
       run: |
         P="$(uname -s | tr '[:upper:]' '[:lower:]' | sed 's/^darwin$/macos/')-$(uname -m | sed 's/^arm64$/aarch64/')"

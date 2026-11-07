@@ -84,7 +84,6 @@ pipeline: components: {
 		jobs: jscpd: {
 			direct:    true
 			services:  false
-			worker: "standard"
 			// jscpd peaks at ~7.5 GB: an 8 GB runner's host guard stops it (upstream's
 			// depot-ubuntu-24.04 has 8 GB to itself); 11 GB lands it on a size with headroom.
 			resources: {cpus: 2.0, memory_mb: 11264}

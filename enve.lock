@@ -2,8 +2,8 @@
   "platforms": {
     "aarch64-darwin": {
       "binding": {
-        "environment_sha256": "b69d31873b1117f6bb473a5e53b2521c8eb091a0d36b0cc9bd5dade453cc3659",
-        "inventory_sha256": "f17a65a3eaa583a84aef5e7a218d6aecf7c06a91d67dbf53d27cf695e5fc8687",
+        "environment_sha256": "101d98d4936d29fc361a3ee4e812a4b04a251c6ce0c982d2e46550d3ad91a510",
+        "inventory_sha256": "83e69ed5d2703e1164ea6d2ce9862181c4a271efd4e438a9f37f5945542f8d01",
         "profile": null,
         "version": 2
       },
@@ -1050,6 +1050,14 @@
           "references": [
             "1yzj41i043xv3i3k7ic350h869cwyd8i-perl5.42.3-HTTP-Date-6.08",
             "i1c7wm2mmwpywkwjnfy40vd4ii9bjdsm-perl5.42.3-File-Listing-6.16"
+          ]
+        },
+        {
+          "hash_name": "i5gfxrhmkxqjdk4r8ar1gq80sg180z9d-diffutils-3.12",
+          "nar_hash": "sha256:0cd1sllmss2fw7f6s1fr0m7hay8b7dm2yl5mwhn329zwcwv5mmcz",
+          "nar_size": 548296,
+          "references": [
+            "82fb09q2gbhbhpc8ykkqwkcdj6h9c7f1-coreutils-9.11"
           ]
         },
         {
@@ -2530,6 +2538,35 @@
             },
             {
               "constraint": {
+                "attr": "diffutils",
+                "context": "profiles.dev",
+                "output": null,
+                "system": "aarch64-darwin",
+                "version": null
+              },
+              "package": {
+                "attr_path": "diffutils",
+                "name": "diffutils",
+                "origin": {
+                  "Channel": {
+                    "build": 347099219,
+                    "evaluation": 1829922,
+                    "release": "nixpkgs/nixpkgs-26.11pre1086972.7dd199b0e299/"
+                  }
+                },
+                "outputs": {
+                  "info": "/nix/store/16plsg2g71qywwsakysmcyhnwxxqn81y-diffutils-3.12-info",
+                  "out": "/nix/store/i5gfxrhmkxqjdk4r8ar1gq80sg180z9d-diffutils-3.12"
+                },
+                "rev": "7dd199b0e2993e37b4775ed66b1c291699608c9f",
+                "store_paths": [
+                  "/nix/store/i5gfxrhmkxqjdk4r8ar1gq80sg180z9d-diffutils-3.12"
+                ],
+                "version": "3.12"
+              }
+            },
+            {
+              "constraint": {
                 "attr": "etcd",
                 "context": "profiles.dev",
                 "output": null,
@@ -3508,7 +3545,7 @@
           }
         },
         "lockSourcePath": "enve.lock",
-        "projectSha256": "a4301588973ec114352c337dd43a4e1daea54f8eb915d6691d2cb82ad7602ef4"
+        "projectSha256": "940945c3fd94ee10647574135d23da7ca13ed413ddb256ea4051f73f093a4a1d"
       },
       "environment": {
         "AWS_ENDPOINT_URL": "http://127.0.0.1:${ENVE_SERVICE_SEAWEEDFS_PORT}",
@@ -3881,6 +3918,21 @@
             "rev": "7dd199b0e2993e37b4775ed66b1c291699608c9f"
           },
           "version": "8.22.0"
+        },
+        "diffutils": {
+          "closure": "i5gfxrhmkxqjdk4r8ar1gq80sg180z9d-diffutils-3.12",
+          "outputs": [
+            "i5gfxrhmkxqjdk4r8ar1gq80sg180z9d-diffutils-3.12"
+          ],
+          "source": {
+            "attr": "diffutils",
+            "build": 347099219,
+            "evaluation": 1829922,
+            "kind": "channel",
+            "release": "nixpkgs/nixpkgs-26.11pre1086972.7dd199b0e299/",
+            "rev": "7dd199b0e2993e37b4775ed66b1c291699608c9f"
+          },
+          "version": "3.12"
         },
         "dynamodb-local": {
           "buildIdentity": [
@@ -4463,8 +4515,8 @@
     },
     "aarch64-linux": {
       "binding": {
-        "environment_sha256": "b69d31873b1117f6bb473a5e53b2521c8eb091a0d36b0cc9bd5dade453cc3659",
-        "inventory_sha256": "f7e6916ee62557454afbb02990ac4b516535190690db06b91285b62eceeb700b",
+        "environment_sha256": "101d98d4936d29fc361a3ee4e812a4b04a251c6ce0c982d2e46550d3ad91a510",
+        "inventory_sha256": "b5a47d34ea8ca9923b3e77454facfe06e3f4d6a593d4069d9ce275c355181c27",
         "profile": null,
         "version": 2
       },
@@ -4716,6 +4768,16 @@
             "17sps7s2fhi2nyy4cghik1701fl8hqcd-xz-5.8.4-dev",
             "csrwf31hprwghnbyiglxa3p787lgrl67-xz-5.8.4-bin",
             "d8aaaq83sdrzsqyxx19qfc14slcrdjix-xz-5.8.4"
+          ]
+        },
+        {
+          "hash_name": "19m79n6f7c3ay59121jqgacf8bw4wcq2-diffutils-3.12",
+          "nar_hash": "sha256:0msfb1dq88r14mqfqp9jwampl7r38q7h50h053g83hnncdd7aqd3",
+          "nar_size": 1717416,
+          "references": [
+            "19m79n6f7c3ay59121jqgacf8bw4wcq2-diffutils-3.12",
+            "dq1apsyiah48nmc4n45dpwc33k887hdn-coreutils-9.11",
+            "hx9wvdx2l59iahwf9nmrx7rwkm6cymgs-glibc-2.44-25"
           ]
         },
         {
@@ -11672,6 +11734,35 @@
             },
             {
               "constraint": {
+                "attr": "diffutils",
+                "context": "profiles.dev",
+                "output": null,
+                "system": "aarch64-linux",
+                "version": null
+              },
+              "package": {
+                "attr_path": "diffutils",
+                "name": "diffutils",
+                "origin": {
+                  "Channel": {
+                    "build": 347099221,
+                    "evaluation": 1829922,
+                    "release": "nixpkgs/nixpkgs-26.11pre1086972.7dd199b0e299/"
+                  }
+                },
+                "outputs": {
+                  "info": "/nix/store/r6da78vrvnqfbrx7jlbmhwnj5kig5zik-diffutils-3.12-info",
+                  "out": "/nix/store/19m79n6f7c3ay59121jqgacf8bw4wcq2-diffutils-3.12"
+                },
+                "rev": "7dd199b0e2993e37b4775ed66b1c291699608c9f",
+                "store_paths": [
+                  "/nix/store/19m79n6f7c3ay59121jqgacf8bw4wcq2-diffutils-3.12"
+                ],
+                "version": "3.12"
+              }
+            },
+            {
+              "constraint": {
                 "attr": "enchant",
                 "context": "profiles.dev",
                 "output": null,
@@ -14385,7 +14476,7 @@
           }
         },
         "lockSourcePath": "enve.lock",
-        "projectSha256": "a4301588973ec114352c337dd43a4e1daea54f8eb915d6691d2cb82ad7602ef4"
+        "projectSha256": "940945c3fd94ee10647574135d23da7ca13ed413ddb256ea4051f73f093a4a1d"
       },
       "environment": {
         "AWS_ENDPOINT_URL": "http://127.0.0.1:${ENVE_SERVICE_SEAWEEDFS_PORT}",
@@ -14774,6 +14865,21 @@
             "rev": "7dd199b0e2993e37b4775ed66b1c291699608c9f"
           },
           "version": "8.22.0"
+        },
+        "diffutils": {
+          "closure": "19m79n6f7c3ay59121jqgacf8bw4wcq2-diffutils-3.12",
+          "outputs": [
+            "19m79n6f7c3ay59121jqgacf8bw4wcq2-diffutils-3.12"
+          ],
+          "source": {
+            "attr": "diffutils",
+            "build": 347099221,
+            "evaluation": 1829922,
+            "kind": "channel",
+            "release": "nixpkgs/nixpkgs-26.11pre1086972.7dd199b0e299/",
+            "rev": "7dd199b0e2993e37b4775ed66b1c291699608c9f"
+          },
+          "version": "3.12"
         },
         "dynamodb-local": {
           "buildIdentity": [
@@ -15488,8 +15594,8 @@
     },
     "x86_64-linux": {
       "binding": {
-        "environment_sha256": "b69d31873b1117f6bb473a5e53b2521c8eb091a0d36b0cc9bd5dade453cc3659",
-        "inventory_sha256": "985a6537dd5c1a21f141aa4d1239af76f2678bb7ef67930113a424d928e8b905",
+        "environment_sha256": "101d98d4936d29fc361a3ee4e812a4b04a251c6ce0c982d2e46550d3ad91a510",
+        "inventory_sha256": "aaa5a0e19df6181014f4c7784c7c511ec13b8103599421c50dda2abd69424a6c",
         "profile": null,
         "version": 2
       },
@@ -15892,6 +15998,16 @@
           "references": [
             "1iv3sbdb1mj3m5nznpx7gqgwk7dwypcd-libdvdread-7.0.1",
             "87g87g1f1fys7bin2747s8l8c28gwwzw-libdvdcss-1.5.0",
+            "h4wfwic161kxrr74jlzla5lsm28hgary-glibc-2.44-25"
+          ]
+        },
+        {
+          "hash_name": "1jhkxfbnx35m08gv5fyamp6ai5qhbjdh-diffutils-3.12",
+          "nar_hash": "sha256:0wdyfk726lzshd69f3zgikbybic0yq7rrglqv2jpj3pmdiliykv1",
+          "nar_size": 1631280,
+          "references": [
+            "1jhkxfbnx35m08gv5fyamp6ai5qhbjdh-diffutils-3.12",
+            "2gfxiwls9hbgwdwcy43mprchwsq36mg6-coreutils-9.11",
             "h4wfwic161kxrr74jlzla5lsm28hgary-glibc-2.44-25"
           ]
         },
@@ -22673,6 +22789,35 @@
             },
             {
               "constraint": {
+                "attr": "diffutils",
+                "context": "profiles.dev",
+                "output": null,
+                "system": "x86_64-linux",
+                "version": null
+              },
+              "package": {
+                "attr_path": "diffutils",
+                "name": "diffutils",
+                "origin": {
+                  "Channel": {
+                    "build": 347099220,
+                    "evaluation": 1829922,
+                    "release": "nixpkgs/nixpkgs-26.11pre1086972.7dd199b0e299/"
+                  }
+                },
+                "outputs": {
+                  "info": "/nix/store/lzbs18ypdiv6b4zvryfwr3sdy2n7f81l-diffutils-3.12-info",
+                  "out": "/nix/store/1jhkxfbnx35m08gv5fyamp6ai5qhbjdh-diffutils-3.12"
+                },
+                "rev": "7dd199b0e2993e37b4775ed66b1c291699608c9f",
+                "store_paths": [
+                  "/nix/store/1jhkxfbnx35m08gv5fyamp6ai5qhbjdh-diffutils-3.12"
+                ],
+                "version": "3.12"
+              }
+            },
+            {
+              "constraint": {
                 "attr": "enchant",
                 "context": "profiles.dev",
                 "output": null,
@@ -25386,7 +25531,7 @@
           }
         },
         "lockSourcePath": "enve.lock",
-        "projectSha256": "a4301588973ec114352c337dd43a4e1daea54f8eb915d6691d2cb82ad7602ef4"
+        "projectSha256": "940945c3fd94ee10647574135d23da7ca13ed413ddb256ea4051f73f093a4a1d"
       },
       "environment": {
         "AWS_ENDPOINT_URL": "http://127.0.0.1:${ENVE_SERVICE_SEAWEEDFS_PORT}",
@@ -25775,6 +25920,21 @@
             "rev": "7dd199b0e2993e37b4775ed66b1c291699608c9f"
           },
           "version": "8.22.0"
+        },
+        "diffutils": {
+          "closure": "1jhkxfbnx35m08gv5fyamp6ai5qhbjdh-diffutils-3.12",
+          "outputs": [
+            "1jhkxfbnx35m08gv5fyamp6ai5qhbjdh-diffutils-3.12"
+          ],
+          "source": {
+            "attr": "diffutils",
+            "build": 347099220,
+            "evaluation": 1829922,
+            "kind": "channel",
+            "release": "nixpkgs/nixpkgs-26.11pre1086972.7dd199b0e299/",
+            "rev": "7dd199b0e2993e37b4775ed66b1c291699608c9f"
+          },
+          "version": "3.12"
         },
         "dynamodb-local": {
           "buildIdentity": [

@@ -306,7 +306,15 @@ if [[ ! "${ENACT_PREPARED:-}" =~ (^|,)[[:space:]]*node[[:space:]]*(,|$) ]]; then
         --prefer-offline --store-dir "${ENACT_PNPM_STORE:-$PWD/.enact/state/pnpm-store}"
 fi
 showcase/scripts/build_hogvm.sh
-showcase/scripts/exclusive.sh nodejs-build env -u SHARD_INDEX -u SHARD_COUNT bin/turbo --filter=@posthog/nodejs prepare
+case "${ENACT_COMPONENT:-}" in
+    nodejs_base | nodejs_ingestion_core | nodejs_ingestion | nodejs_cdp | nodejs_logs)
+        # Pure JS/TS lanes don't provision a Cargo cache or build native Rust napi addons.
+        showcase/scripts/exclusive.sh nodejs-build env -u SHARD_INDEX -u SHARD_COUNT bin/turbo --filter=@posthog/replay-headless build
+        ;;
+    *)
+        showcase/scripts/exclusive.sh nodejs-build env -u SHARD_INDEX -u SHARD_COUNT bin/turbo --filter=@posthog/nodejs prepare
+        ;;
+esac
 
 # The lanes that run. Without arguments both, each its shard of the suite: every shard of the
 # three draws files of both. Arguments may match one lane's files only, so a lane runs when

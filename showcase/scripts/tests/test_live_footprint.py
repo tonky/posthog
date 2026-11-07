@@ -229,6 +229,37 @@ class LiveFootprintTest(unittest.TestCase):
         self.assertNotIn("skipped_on", targets["unreported.spec.ts"])
         self.assertEqual(targets["unreported.spec.ts"].get("outcome"), "partial")
 
+    def test_shared_files_dirs_and_loaded_are_deduplicated_from_targets(self):
+        records = self.recording / "records"
+        (records / "1.started").write_text("<shared>\n")
+        (records / "1.json").write_text(
+            json.dumps({"footprint": {"reads": ["app.py"], "dirs": ["posthog"], "loaded": ["mod_shared"]}})
+        )
+        (records / "2.started").write_text("spec.ts\n")
+        (records / "2.json").write_text(
+            json.dumps(
+                {
+                    "footprint": {
+                        "reads": ["app.py", "spec_only.py"],
+                        "dirs": ["posthog", "spec_dir"],
+                        "loaded": ["mod_shared", "mod_spec"],
+                    }
+                }
+            )
+        )
+        node = self.recording / "node/1"
+        (node / "1.started").write_text("node\n")
+        (node / "1.json").write_text(json.dumps({"reads": ["spec.ts"]}))
+        raw = self.written_map("run_mcp_integration.sh")
+        self.assertIn("app.py", raw["shared"]["files"])
+        self.assertIn("posthog", raw["shared"]["dirs"])
+        self.assertIn("mod_shared", raw["shared"]["loaded"])
+        target = raw["targets"]["spec.ts"]
+        self.assertNotIn("app.py", target["files"])
+        self.assertIn("spec_only.py", target["files"])
+        self.assertEqual(target["dirs"], ["spec_dir"])
+        self.assertEqual(target["loaded"], ["mod_spec"])
+
 
 # The spec's runner: reads a.txt, starts a worker that reads b.txt and then never returns (as
 # esbuild's thread), and exits as soon as the worker has read.

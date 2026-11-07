@@ -85,6 +85,9 @@ def group_of(target: str) -> tuple[str, str]:
     if parts[0] == "products" and len(parts) > 3 and parts[2] == "dags":
         return "dags", "."  # ci-dagster.yml: `pytest posthog/dags products/*/dags` from the root
     if parts[0] == "products" and len(parts) > 2:
+        # tasks' temporal tests configure structlog with PrintLoggerFactory, which breaks test_api.py's logger assumptions.
+        if target.startswith("products/tasks/backend/temporal/"):
+            return "tasks_temporal", "products/tasks"
         return parts[1], "/".join(parts[:2])
     for prefix, group in CORE_SEGMENTS:
         if target.startswith(prefix):

@@ -399,20 +399,23 @@ def _collapse_probes(fp: core.Footprint) -> None:
 def entry(fp: core.Footprint, shared: core.Footprint | None = None) -> dict:
     fp.flush_codes()
     _collapse_probes(fp)
-    files = set(fp.code) | fp.reads | fp.present
+    shared_files = (set(shared.code) | shared.reads | shared.present) if shared else set()
+    files = (set(fp.code) | fp.reads | fp.present) - shared_files
     functions = {
         file: sorted(called)
         for file, called in sorted(fp.code.items())
         if file not in fp.reads and (shared is None or file not in shared.reads)
     }
-    probes = fp.probes - files - (set(shared.code) | shared.reads | shared.present if shared else set())
+    probes = fp.probes - files - shared_files
+    dirs = fp.dirs - shared.dirs if shared else fp.dirs
+    loaded = fp.loaded - shared.loaded if shared else fp.loaded
     result = {
         "files": sorted(files),
         "functions": functions,
         "probes": core._grouped(probes),
-        "dirs": sorted(fp.dirs),
+        "dirs": sorted(dirs),
         "loaded_through": 0,
-        "loaded": sorted(fp.loaded),
+        "loaded": sorted(loaded),
         "recorders": sorted(fp.recorders | {core.RECORDER, RECORDER}),
     }
     if shared is not None and fp.duration_sec > 0.0:
