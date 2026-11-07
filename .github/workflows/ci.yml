@@ -67,6 +67,22 @@ env:
   UV_CACHE_DIR: /tmp/.cache/uv
   XDG_CACHE_HOME: /tmp/.cache
 jobs:
+  build-outputs-e2e--build:
+    permissions:
+      actions: read
+      contents: read
+    name: Build Outputs
+    needs:
+    - detect
+    - build-outputs-plugin_transpiler--build
+    if: ${{ !cancelled() && !failure() && needs.detect.outputs.builds_e2e__build != '{"include":[]}' && needs.detect.outputs.builds_e2e__build != '[]' && needs.detect.outputs.builds_e2e__build != '' }}
+    uses: ./.github/workflows/ci-matrix.yml
+    with:
+      history_input_artifact: ${{ needs.detect.outputs.history_input_artifact }}
+      matrix: ${{ needs.detect.outputs.builds_e2e__build }}
+      seed_caches: ${{ inputs.seed_caches }}
+      warm_reach: ${{ inputs.warm_reach }}
+    secrets: inherit
   build-outputs-frontend--build:
     permissions:
       actions: read
@@ -96,6 +112,36 @@ jobs:
     with:
       history_input_artifact: ${{ needs.detect.outputs.history_input_artifact }}
       matrix: ${{ needs.detect.outputs.builds_mcp__ui_apps }}
+      seed_caches: ${{ inputs.seed_caches }}
+      warm_reach: ${{ inputs.warm_reach }}
+    secrets: inherit
+  build-outputs-mcp_integration--build:
+    permissions:
+      actions: read
+      contents: read
+    name: Build Outputs
+    needs:
+    - detect
+    if: ${{ needs.detect.outputs.builds_mcp_integration__build != '{"include":[]}' && needs.detect.outputs.builds_mcp_integration__build != '[]' && needs.detect.outputs.builds_mcp_integration__build != '' }}
+    uses: ./.github/workflows/ci-matrix.yml
+    with:
+      history_input_artifact: ${{ needs.detect.outputs.history_input_artifact }}
+      matrix: ${{ needs.detect.outputs.builds_mcp_integration__build }}
+      seed_caches: ${{ inputs.seed_caches }}
+      warm_reach: ${{ inputs.warm_reach }}
+    secrets: inherit
+  build-outputs-plugin_transpiler--build:
+    permissions:
+      actions: read
+      contents: read
+    name: Build Outputs
+    needs:
+    - detect
+    if: ${{ needs.detect.outputs.builds_plugin_transpiler__build != '{"include":[]}' && needs.detect.outputs.builds_plugin_transpiler__build != '[]' && needs.detect.outputs.builds_plugin_transpiler__build != '' }}
+    uses: ./.github/workflows/ci-matrix.yml
+    with:
+      history_input_artifact: ${{ needs.detect.outputs.history_input_artifact }}
+      matrix: ${{ needs.detect.outputs.builds_plugin_transpiler__build }}
       seed_caches: ${{ inputs.seed_caches }}
       warm_reach: ${{ inputs.warm_reach }}
     secrets: inherit
@@ -144,12 +190,17 @@ jobs:
     - tonky-ci-c2m6g
     timeout-minutes: 5
     outputs:
+      builds_e2e__build: ${{ steps.diff.outputs.builds_e2e__build }}
       builds_frontend__build: ${{ steps.diff.outputs.builds_frontend__build }}
       builds_mcp__ui_apps: ${{ steps.diff.outputs.builds_mcp__ui_apps }}
+      builds_mcp_integration__build: ${{ steps.diff.outputs.builds_mcp_integration__build }}
+      builds_plugin_transpiler__build: ${{ steps.diff.outputs.builds_plugin_transpiler__build }}
       builds_quill__build: ${{ steps.diff.outputs.builds_quill__build }}
       builds_storybook__build: ${{ steps.diff.outputs.builds_storybook__build }}
-      built_frontend__build_quill__build: ${{ steps.diff.outputs.built_frontend__build_quill__build }}
+      built_e2e__build_frontend__build_plugin_transpiler__build_quill__build: ${{ steps.diff.outputs.built_e2e__build_frontend__build_plugin_transpiler__build_quill__build }}
+      built_mcp__ui_apps_mcp_integration__build_quill__build: ${{ steps.diff.outputs.built_mcp__ui_apps_mcp_integration__build_quill__build }}
       built_mcp__ui_apps_quill__build: ${{ steps.diff.outputs.built_mcp__ui_apps_quill__build }}
+      built_plugin_transpiler__build: ${{ steps.diff.outputs.built_plugin_transpiler__build }}
       built_quill__build: ${{ steps.diff.outputs.built_quill__build }}
       built_quill__build_storybook__build: ${{ steps.diff.outputs.built_quill__build_storybook__build }}
       history_input_artifact: ${{ steps.history_restore.outputs.artifact }}
@@ -300,8 +351,11 @@ jobs:
           tools/hogli-commands
           products/__init__.py
           products/db_routing.yaml
+          products/ai_observability/shared
           products/experiments/stats
           products/data_warehouse/dags
+          frontend/src/products.json
+          products/canvas/packages/canvas_builder/manifest.json
           products/access_control/backend
           products/actions/backend
           products/aeo/backend
@@ -405,6 +459,11 @@ jobs:
         git init -q .
         git remote add origin "$url"
         git config --local "http.$GITHUB_SERVER_URL/.extraheader" "$header"
+        git config --local protocol.version 2
+        git config --local fetch.parallel 0
+        git config --local checkout.workers 0
+        git config --local index.threads 0
+        git config --local advice.detachedHead false
         git config --local gc.auto 0
         cone=()
         while IFS= read -r entry; do
@@ -413,11 +472,29 @@ jobs:
             [ -n "$entry" ] && cone+=("$entry")
         done <<<"${ENACT_SPARSE_CONE:-}"
         depth="${ENACT_FETCH_DEPTH:-1}"
-        fetch_args=(--no-tags)
+        fetch_args=(--no-tags --no-recurse-submodules)
         if [ "$depth" != "0" ]; then
             fetch_args+=("--depth=$depth")
         fi
-        if [ "${#cone[@]}" -gt 0 ] && [ "${#cone[@]}" -le 2 ]; then
+        narrow_cone=0
+        if [ "${#cone[@]}" -gt 0 ] && [ "${#cone[@]}" -le 8 ]; then
+            narrow_cone=1
+            for entry in "${cone[@]}"; do
+                case "$entry" in
+                    . | ./ | .. | ../*)
+                        narrow_cone=0
+                        break
+                        ;;
+                    .* | cue.mod | cue.mod/* | bin | bin/* | */*)
+                        ;;
+                    *)
+                        narrow_cone=0
+                        break
+                        ;;
+                esac
+            done
+        fi
+        if [ "$narrow_cone" = 1 ]; then
             fetch_args+=(--filter=blob:none)
         fi
         git fetch -q "${fetch_args[@]}" origin "$GITHUB_SHA" 2>/dev/null \
@@ -501,8 +578,11 @@ jobs:
           tools/hogli-commands
           products/__init__.py
           products/db_routing.yaml
+          products/ai_observability/shared
           products/experiments/stats
           products/data_warehouse/dags
+          frontend/src/products.json
+          products/canvas/packages/canvas_builder/manifest.json
           products/access_control/backend
           products/actions/backend
           products/aeo/backend
@@ -627,6 +707,7 @@ jobs:
         ENACT_HISTORY_WORKFLOW: .github/workflows/ci.yml
         GH_TOKEN: ${{ github.token }}
     - name: Cache history Handoff on the Receiving Host
+      if: env.ENACT_HOST_CACHE != ''
       continue-on-error: true
       run: enact ci handoff history --publish --artifact "$ENACT_HANDOFF_ARTIFACT" --directory "$RUNNER_TEMP/enact-history-input"
       env:
@@ -651,7 +732,11 @@ jobs:
         ADMISSION_REPORT="$RUNNER_TEMP/enact-admission.json"
         MATRIX=$(enact ci matrix --pipeline .enact --workflow ci --github-output "$GITHUB_OUTPUT" --reach-hand-off "$RUNNER_TEMP/enact-reach" --selection-record .enact/state/selection.json --budget --budget-report "$ADMISSION_REPORT" "$@" --format json) || {
           status=$?
-          echo "::error::CI budget admission failed; report: $ADMISSION_REPORT" >&2
+          if [ "$status" -ge 128 ]; then
+            echo "::error::enact ci matrix terminated by signal/OOM (exit $status)" >&2
+          else
+            echo "::error::CI budget admission failed; report: $ADMISSION_REPORT" >&2
+          fi
           exit "$status"
         }
         echo "$MATRIX"
@@ -691,6 +776,7 @@ jobs:
         path: .enact/state/selection.json
         retention-days: "30"
     - name: Cache reach Handoff on the Receiving Host
+      if: env.ENACT_HOST_CACHE != ''
       continue-on-error: true
       run: enact ci handoff reach --publish --artifact "$ENACT_HANDOFF_ARTIFACT" --directory "$RUNNER_TEMP/enact-reach"
       env:
@@ -872,6 +958,8 @@ jobs:
           common
           docker/clickhouse/user_defined_function.xml
           ee
+          frontend/src/lib/constants.tsx
+          frontend/src/queries/schema.json
           frontend/src/taxonomy/core-filter-definitions-by-group.json
           livestream/bot
           posthog
@@ -892,7 +980,6 @@ jobs:
           frontend/src/lib/components/AgentObjectTags/objectKinds.generated.ts
           frontend/src/lib/components/DomainConnect/templates
           frontend/src/products.json
-          frontend/src/queries/schema.json
           infra
           packages/agent/packages/agent-contracts/src/model-catalog.generated.ts
           packages/agent/packages/agent-contracts/src/objectTagKinds.generated.ts
@@ -917,7 +1004,6 @@ jobs:
           packages/owners-yaml/owners_yaml
           tools/hogli-commands/hogli_commands
           .semgrep
-          showcase/scripts/build_plugin_transpiler.sh
           showcase/scripts/fetch_test_durations.sh
           showcase/scripts/repo_invariants.sh
           products/canvas/packages/canvas_builder/manifest.json
@@ -959,7 +1045,6 @@ jobs:
           packages/llm-normalizer/src
           packages/llm-normalizer/package.json
           showcase/scripts/build_products.sh
-          showcase/scripts/run_frontend_tests.sh
           bin/validate-setup-tasks.mjs
           common/storybook/.storybook
           frontend/src
@@ -976,9 +1061,10 @@ jobs:
           frontend/src/mocks
           frontend/src/taxonomy
           frontend/bin
+          frontend/src/scenes/settings/types.ts
           .config/.markdownlint-cli2.jsonc
           products/ai_observability/backend/prompts/parser_recipe_examples.yaml
-          products/notebooks
+          products/notebooks/frontend
           products/product_analytics/frontend/insights
           frontend/src/mocks/fixtures
           showcase/scripts/check_mcp_ui_apps.sh
@@ -1251,6 +1337,11 @@ jobs:
         git init -q .
         git remote add origin "$url"
         git config --local "http.$GITHUB_SERVER_URL/.extraheader" "$header"
+        git config --local protocol.version 2
+        git config --local fetch.parallel 0
+        git config --local checkout.workers 0
+        git config --local index.threads 0
+        git config --local advice.detachedHead false
         git config --local gc.auto 0
         cone=()
         while IFS= read -r entry; do
@@ -1259,11 +1350,29 @@ jobs:
             [ -n "$entry" ] && cone+=("$entry")
         done <<<"${ENACT_SPARSE_CONE:-}"
         depth="${ENACT_FETCH_DEPTH:-1}"
-        fetch_args=(--no-tags)
+        fetch_args=(--no-tags --no-recurse-submodules)
         if [ "$depth" != "0" ]; then
             fetch_args+=("--depth=$depth")
         fi
-        if [ "${#cone[@]}" -gt 0 ] && [ "${#cone[@]}" -le 2 ]; then
+        narrow_cone=0
+        if [ "${#cone[@]}" -gt 0 ] && [ "${#cone[@]}" -le 8 ]; then
+            narrow_cone=1
+            for entry in "${cone[@]}"; do
+                case "$entry" in
+                    . | ./ | .. | ../*)
+                        narrow_cone=0
+                        break
+                        ;;
+                    .* | cue.mod | cue.mod/* | bin | bin/* | */*)
+                        ;;
+                    *)
+                        narrow_cone=0
+                        break
+                        ;;
+                esac
+            done
+        fi
+        if [ "$narrow_cone" = 1 ]; then
             fetch_args+=(--filter=blob:none)
         fi
         git fetch -q "${fetch_args[@]}" origin "$GITHUB_SHA" 2>/dev/null \
@@ -1355,6 +1464,8 @@ jobs:
           common
           docker/clickhouse/user_defined_function.xml
           ee
+          frontend/src/lib/constants.tsx
+          frontend/src/queries/schema.json
           frontend/src/taxonomy/core-filter-definitions-by-group.json
           livestream/bot
           posthog
@@ -1375,7 +1486,6 @@ jobs:
           frontend/src/lib/components/AgentObjectTags/objectKinds.generated.ts
           frontend/src/lib/components/DomainConnect/templates
           frontend/src/products.json
-          frontend/src/queries/schema.json
           infra
           packages/agent/packages/agent-contracts/src/model-catalog.generated.ts
           packages/agent/packages/agent-contracts/src/objectTagKinds.generated.ts
@@ -1400,7 +1510,6 @@ jobs:
           packages/owners-yaml/owners_yaml
           tools/hogli-commands/hogli_commands
           .semgrep
-          showcase/scripts/build_plugin_transpiler.sh
           showcase/scripts/fetch_test_durations.sh
           showcase/scripts/repo_invariants.sh
           products/canvas/packages/canvas_builder/manifest.json
@@ -1442,7 +1551,6 @@ jobs:
           packages/llm-normalizer/src
           packages/llm-normalizer/package.json
           showcase/scripts/build_products.sh
-          showcase/scripts/run_frontend_tests.sh
           bin/validate-setup-tasks.mjs
           common/storybook/.storybook
           frontend/src
@@ -1459,9 +1567,10 @@ jobs:
           frontend/src/mocks
           frontend/src/taxonomy
           frontend/bin
+          frontend/src/scenes/settings/types.ts
           .config/.markdownlint-cli2.jsonc
           products/ai_observability/backend/prompts/parser_recipe_examples.yaml
-          products/notebooks
+          products/notebooks/frontend
           products/product_analytics/frontend/insights
           frontend/src/mocks/fixtures
           showcase/scripts/check_mcp_ui_apps.sh
@@ -1732,6 +1841,7 @@ jobs:
       run: enact ci setup-runner
     - name: Restore history Handoff
       id: history-host
+      if: env.ENACT_HOST_CACHE != ''
       continue-on-error: true
       run: enact ci handoff history --artifact "$ENACT_HANDOFF_ARTIFACT" --directory "$RUNNER_TEMP/enact-history-input"
       env:
@@ -1749,18 +1859,21 @@ jobs:
         printf 'ENACT_HISTORY_DIR=%s\n' "$ENACT_HISTORY_DIR" >> "$GITHUB_ENV"
         enact ci history import --input "$RUNNER_TEMP/enact-history-input/snapshot.json" --manifest "$RUNNER_TEMP/enact-history-input/snapshot.manifest.json" --output "$ENACT_HISTORY_DIR"
     - name: Cache history Handoff on the Receiving Host
+      if: env.ENACT_HOST_CACHE != '' && steps.history-host.outputs.ready != 'true'
       continue-on-error: true
       run: enact ci handoff history --publish --artifact "$ENACT_HANDOFF_ARTIFACT" --directory "$RUNNER_TEMP/enact-history-input"
       env:
         ENACT_HANDOFF_ARTIFACT: ${{ needs.detect.outputs.history_input_artifact }}
     - name: Restore reach Handoff
       id: reach-native
+      if: env.ENACT_HOST_CACHE != ''
       continue-on-error: true
       run: enact ci handoff reach --artifact "$ENACT_HANDOFF_ARTIFACT" --directory "$RUNNER_TEMP/enact-reach"
       env:
         ENACT_HANDOFF_ARTIFACT: enact-reach-map
         GH_TOKEN: ${{ github.token }}
     - name: Download the Reach Map
+      id: reach-download
       if: steps.reach-native.outputs.ready != 'true'
       continue-on-error: true
       uses: actions/download-artifact@v8
@@ -1769,6 +1882,7 @@ jobs:
         path: ${{ runner.temp }}/enact-reach
     - name: Cache reach Handoff on the Receiving Host
       id: reach-verified
+      if: env.ENACT_HOST_CACHE != '' && steps.reach-native.outputs.ready != 'true'
       continue-on-error: true
       run: enact ci handoff reach --publish --artifact "$ENACT_HANDOFF_ARTIFACT" --directory "$RUNNER_TEMP/enact-reach"
       env:
@@ -1779,11 +1893,11 @@ jobs:
         if [ -n "${GITHUB_HEAD_SHA:-}" ] && [ -z "$(git rev-list -n1 --no-walk --ignore-missing --missing=allow-any "$GITHUB_HEAD_SHA" -- 2>/dev/null)" ]; then
           git fetch --no-tags --depth=1 --filter=blob:none origin "$GITHUB_HEAD_SHA" 2>/dev/null
         fi
-        if [ "$ENACT_HANDOFF_READY" = true ] && [ -f "$RUNNER_TEMP/enact-reach/map.bin" ]; then
+        if [ "$ENACT_HANDOFF_READY" = true ] && [ -f "$RUNNER_TEMP/enact-reach/map.bin" ] && [ -f "$RUNNER_TEMP/enact-reach/map.age.json" ]; then
           echo "ENACT_REACH_FILE=$RUNNER_TEMP/enact-reach/map.bin" >> "$GITHUB_ENV"
         fi
       env:
-        ENACT_HANDOFF_READY: ${{ steps.reach-verified.outputs.ready }}
+        ENACT_HANDOFF_READY: ${{ steps.reach-native.outputs.ready == 'true' || steps.reach-verified.outputs.ready == 'true' || (env.ENACT_HOST_CACHE == '' && steps.reach-download.outcome == 'success') }}
         GITHUB_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
     - name: Plan Stage [Preflight]
       id: stage_plan
@@ -1940,7 +2054,7 @@ jobs:
           ENACT_RUST_HOST_PREFIX: ${{ runner.os }}-rust-rust_target-${{ hashFiles('enve.lock', 'rust/rust-toolchain.toml', 'rust/rust-toolchain', 'rust/enve.lock') }}-
           ENACT_RUST_TARGET: rust/target
     - name: Record Restored Package Caches
-      if: ${{ (steps.runner_caches.outputs.host == '' && github.event_name != 'pull_request') && steps.stage_plan.outputs.stage_has_work == 'true' }}
+      if: ${{ ((steps.runner_caches.outputs.host == '' && steps.python_l1_cache.outputs.cache-hit != 'true' || steps.runner_caches.outputs.host == '' && steps.node_l1_cache.outputs.cache-hit != 'true') && github.event_name != 'pull_request') && steps.stage_plan.outputs.stage_has_work == 'true' }}
       continue-on-error: true
       run: enact ci cache-delta record
       env:
@@ -1949,6 +2063,9 @@ jobs:
           python_l1_cache /tmp/.cache/pip
           node_l1_cache .enact/state/pnpm-store
           node_l1_cache node_modules/.cache
+        ENACT_CACHE_HITS: |-
+          python_l1_cache=${{ steps.python_l1_cache.outputs.cache-hit }}
+          node_l1_cache=${{ steps.node_l1_cache.outputs.cache-hit }}
     - name: Pull Dependencies via enve
       if: ${{ steps.stage_plan.outputs.stage_has_work == 'true' }}
       run: enact ci deps pull --remote signed
@@ -2017,7 +2134,7 @@ jobs:
         GITHUB_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
     - name: Check Package Caches for New Entries
       id: cache_delta
-      if: ${{ (!cancelled() && steps.runner_caches.outputs.host == '' && env.ENACT_SAVE_EVENT == 'true' && github.event_name != 'pull_request') && steps.stage_plan.outputs.stage_has_work == 'true' }}
+      if: ${{ (!cancelled() && (steps.runner_caches.outputs.host == '' && steps.python_l1_cache.outputs.cache-hit != 'true' || steps.runner_caches.outputs.host == '' && steps.node_l1_cache.outputs.cache-hit != 'true') && env.ENACT_SAVE_EVENT == 'true' && github.event_name != 'pull_request') && steps.stage_plan.outputs.stage_has_work == 'true' }}
       continue-on-error: true
       run: enact ci cache-delta check
       env:
@@ -2026,7 +2143,10 @@ jobs:
           python_l1_cache /tmp/.cache/pip
           node_l1_cache .enact/state/pnpm-store
           node_l1_cache node_modules/.cache
-        ENACT_UV_PRUNE: ${{ steps.stage_plan.outputs.stage_needs_python == 'true' }}
+        ENACT_CACHE_HITS: |-
+          python_l1_cache=${{ steps.python_l1_cache.outputs.cache-hit }}
+          node_l1_cache=${{ steps.node_l1_cache.outputs.cache-hit }}
+        ENACT_UV_PRUNE: ${{ steps.stage_plan.outputs.stage_needs_python == 'true' && steps.python_l1_cache.outputs.cache-hit != 'true' }}
     - name: Save Python build & venv cache
       if: ${{ ((!cancelled() && (success() || steps.python_install.outcome == 'success') && (env.ENACT_SAVE_EVENT == 'true' && steps.stage_plan.outputs.stage_needs_python == 'true' && hashFiles('pyproject.toml', 'requirements.txt') != '' && steps.runner_caches.outputs.host == '' && steps.cache_delta.outputs.python_l1_cache == 'true')) && github.event_name != 'pull_request' && steps.python_l1_cache.outputs.cache-hit != 'true') && steps.stage_plan.outputs.stage_has_work == 'true' }}
       continue-on-error: true
@@ -2345,7 +2465,6 @@ jobs:
           packages/llm-normalizer/package.json
           products/ai_observability/shared
           showcase/scripts/build_products.sh
-          showcase/scripts/run_frontend_tests.sh
           bin/validate-setup-tasks.mjs
           common/storybook/.storybook
           frontend/src
@@ -2366,6 +2485,11 @@ jobs:
         git init -q .
         git remote add origin "$url"
         git config --local "http.$GITHUB_SERVER_URL/.extraheader" "$header"
+        git config --local protocol.version 2
+        git config --local fetch.parallel 0
+        git config --local checkout.workers 0
+        git config --local index.threads 0
+        git config --local advice.detachedHead false
         git config --local gc.auto 0
         cone=()
         while IFS= read -r entry; do
@@ -2374,11 +2498,29 @@ jobs:
             [ -n "$entry" ] && cone+=("$entry")
         done <<<"${ENACT_SPARSE_CONE:-}"
         depth="${ENACT_FETCH_DEPTH:-1}"
-        fetch_args=(--no-tags)
+        fetch_args=(--no-tags --no-recurse-submodules)
         if [ "$depth" != "0" ]; then
             fetch_args+=("--depth=$depth")
         fi
-        if [ "${#cone[@]}" -gt 0 ] && [ "${#cone[@]}" -le 2 ]; then
+        narrow_cone=0
+        if [ "${#cone[@]}" -gt 0 ] && [ "${#cone[@]}" -le 8 ]; then
+            narrow_cone=1
+            for entry in "${cone[@]}"; do
+                case "$entry" in
+                    . | ./ | .. | ../*)
+                        narrow_cone=0
+                        break
+                        ;;
+                    .* | cue.mod | cue.mod/* | bin | bin/* | */*)
+                        ;;
+                    *)
+                        narrow_cone=0
+                        break
+                        ;;
+                esac
+            done
+        fi
+        if [ "$narrow_cone" = 1 ]; then
             fetch_args+=(--filter=blob:none)
         fi
         git fetch -q "${fetch_args[@]}" origin "$GITHUB_SHA" 2>/dev/null \
@@ -2476,7 +2618,6 @@ jobs:
           packages/llm-normalizer/package.json
           products/ai_observability/shared
           showcase/scripts/build_products.sh
-          showcase/scripts/run_frontend_tests.sh
           bin/validate-setup-tasks.mjs
           common/storybook/.storybook
           frontend/src
@@ -2493,38 +2634,6 @@ jobs:
     - name: Ensure enve & enact CLI on PATH
       id: setup-runner
       run: enact ci setup-runner
-    - name: Restore reach Handoff
-      id: reach-native
-      continue-on-error: true
-      run: enact ci handoff reach --artifact "$ENACT_HANDOFF_ARTIFACT" --directory "$RUNNER_TEMP/enact-reach"
-      env:
-        ENACT_HANDOFF_ARTIFACT: enact-reach-map
-        GH_TOKEN: ${{ github.token }}
-    - name: Download the Reach Map
-      if: steps.reach-native.outputs.ready != 'true'
-      continue-on-error: true
-      uses: actions/download-artifact@v8
-      with:
-        name: enact-reach-map
-        path: ${{ runner.temp }}/enact-reach
-    - name: Cache reach Handoff on the Receiving Host
-      id: reach-verified
-      continue-on-error: true
-      run: enact ci handoff reach --publish --artifact "$ENACT_HANDOFF_ARTIFACT" --directory "$RUNNER_TEMP/enact-reach"
-      env:
-        ENACT_HANDOFF_ARTIFACT: enact-reach-map
-    - name: Plan with the Detected Reach Map
-      id: reach-pin
-      run: |-
-        if [ -n "${GITHUB_HEAD_SHA:-}" ] && [ -z "$(git rev-list -n1 --no-walk --ignore-missing --missing=allow-any "$GITHUB_HEAD_SHA" -- 2>/dev/null)" ]; then
-          git fetch --no-tags --depth=1 --filter=blob:none origin "$GITHUB_HEAD_SHA" 2>/dev/null
-        fi
-        if [ "$ENACT_HANDOFF_READY" = true ] && [ -f "$RUNNER_TEMP/enact-reach/map.bin" ]; then
-          echo "ENACT_REACH_FILE=$RUNNER_TEMP/enact-reach/map.bin" >> "$GITHUB_ENV"
-        fi
-      env:
-        ENACT_HANDOFF_READY: ${{ steps.reach-verified.outputs.ready }}
-        GITHUB_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
     - name: Plan Explicit Cache Seed
       id: stage_plan
       run: |-
@@ -2555,13 +2664,14 @@ jobs:
           path: .enact/state/tsgo
           restore-keys: frontend-tsgo-${{ runner.os }}-
     - name: Record Restored Package Caches
-      if: ${{ (steps.runner_caches.outputs.host == '' && github.event_name != 'pull_request') && steps.stage_plan.outputs.stage_has_work == 'true' }}
+      if: ${{ (steps.runner_caches.outputs.host == '' && steps.node_l1_cache.outputs.cache-hit != 'true' && github.event_name != 'pull_request') && steps.stage_plan.outputs.stage_has_work == 'true' }}
       continue-on-error: true
       run: enact ci cache-delta record
       env:
         ENACT_CACHE_DELTA: |-
           node_l1_cache .enact/state/pnpm-store
           node_l1_cache node_modules/.cache
+        ENACT_CACHE_HITS: node_l1_cache=${{ steps.node_l1_cache.outputs.cache-hit }}
     - name: Pull Dependencies via enve
       if: ${{ steps.stage_plan.outputs.stage_has_work == 'true' }}
       run: enact ci deps pull --remote signed
@@ -2593,13 +2703,14 @@ jobs:
         ENACT_R2_BUCKET: ${{ secrets.R2_BUCKET || env.R2_BUCKET }}
     - name: Check Package Caches for New Entries
       id: cache_delta
-      if: ${{ (!cancelled() && steps.runner_caches.outputs.host == '' && github.event_name == 'workflow_dispatch' && inputs.seed_caches == 'true' && github.event_name != 'pull_request') && steps.stage_plan.outputs.stage_has_work == 'true' }}
+      if: ${{ (!cancelled() && steps.runner_caches.outputs.host == '' && steps.node_l1_cache.outputs.cache-hit != 'true' && github.event_name == 'workflow_dispatch' && inputs.seed_caches == 'true' && github.event_name != 'pull_request') && steps.stage_plan.outputs.stage_has_work == 'true' }}
       continue-on-error: true
       run: enact ci cache-delta check
       env:
         ENACT_CACHE_DELTA: |-
           node_l1_cache .enact/state/pnpm-store
           node_l1_cache node_modules/.cache
+        ENACT_CACHE_HITS: node_l1_cache=${{ steps.node_l1_cache.outputs.cache-hit }}
     - parallel:
       - name: Save Cache [frontend tsgo declaration-emit cache]
         if: ${{ ((github.event_name == 'workflow_dispatch' && inputs.seed_caches == 'true' && (github.event_name == 'schedule' || github.event_name != 'pull_request' && github.ref_name == github.event.repository.default_branch || !startsWith(steps.cache_frontend_tsgo.outputs.cache-matched-key, format('frontend-tsgo-{0}-', runner.os)))) && github.event_name != 'pull_request' && steps.cache_frontend_tsgo.outputs.cache-hit != 'true') && steps.stage_plan.outputs.stage_has_work == 'true' }}
@@ -2629,15 +2740,6 @@ jobs:
           .enact/state/summary.html
           .enact/state/runs/*/services/*.log
           .enact/state/nodejs/*.services.log
-        retention-days: "1"
-    - name: Upload Recorded Footprints
-      if: ${{ always() && (github.event_name == 'push' && github.ref_name == github.event.repository.default_branch || github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref != github.event.repository.default_branch || github.event_name == 'workflow_dispatch' && inputs.warm_reach == 'true' && github.ref_name == github.event.repository.default_branch) }}
-      continue-on-error: true
-      uses: actions/upload-artifact@v7
-      with:
-        if-no-files-found: ignore
-        name: enact-footprints-stage-seed-frontend-typecheck
-        path: .enact/state/cache/trace-reach.d/
         retention-days: "1"
   seed-products-typecheck:
     name: "Seed caches: Products typecheck"
@@ -2851,6 +2953,11 @@ jobs:
         git init -q .
         git remote add origin "$url"
         git config --local "http.$GITHUB_SERVER_URL/.extraheader" "$header"
+        git config --local protocol.version 2
+        git config --local fetch.parallel 0
+        git config --local checkout.workers 0
+        git config --local index.threads 0
+        git config --local advice.detachedHead false
         git config --local gc.auto 0
         cone=()
         while IFS= read -r entry; do
@@ -2859,11 +2966,29 @@ jobs:
             [ -n "$entry" ] && cone+=("$entry")
         done <<<"${ENACT_SPARSE_CONE:-}"
         depth="${ENACT_FETCH_DEPTH:-1}"
-        fetch_args=(--no-tags)
+        fetch_args=(--no-tags --no-recurse-submodules)
         if [ "$depth" != "0" ]; then
             fetch_args+=("--depth=$depth")
         fi
-        if [ "${#cone[@]}" -gt 0 ] && [ "${#cone[@]}" -le 2 ]; then
+        narrow_cone=0
+        if [ "${#cone[@]}" -gt 0 ] && [ "${#cone[@]}" -le 8 ]; then
+            narrow_cone=1
+            for entry in "${cone[@]}"; do
+                case "$entry" in
+                    . | ./ | .. | ../*)
+                        narrow_cone=0
+                        break
+                        ;;
+                    .* | cue.mod | cue.mod/* | bin | bin/* | */*)
+                        ;;
+                    *)
+                        narrow_cone=0
+                        break
+                        ;;
+                esac
+            done
+        fi
+        if [ "$narrow_cone" = 1 ]; then
             fetch_args+=(--filter=blob:none)
         fi
         git fetch -q "${fetch_args[@]}" origin "$GITHUB_SHA" 2>/dev/null \
@@ -3031,13 +3156,14 @@ jobs:
           path: .mypy_cache
           restore-keys: mypy-${{ runner.os }}-
     - name: Record Restored Package Caches
-      if: ${{ (steps.runner_caches.outputs.host == '' && github.event_name != 'pull_request') && steps.stage_plan.outputs.stage_has_work == 'true' }}
+      if: ${{ (steps.runner_caches.outputs.host == '' && steps.python_l1_cache.outputs.cache-hit != 'true' && github.event_name != 'pull_request') && steps.stage_plan.outputs.stage_has_work == 'true' }}
       continue-on-error: true
       run: enact ci cache-delta record
       env:
         ENACT_CACHE_DELTA: |-
           python_l1_cache /tmp/.cache/uv
           python_l1_cache /tmp/.cache/pip
+        ENACT_CACHE_HITS: python_l1_cache=${{ steps.python_l1_cache.outputs.cache-hit }}
     - name: Pull Dependencies via enve
       if: ${{ steps.stage_plan.outputs.stage_has_work == 'true' }}
       run: enact ci deps pull --remote signed
@@ -3071,14 +3197,15 @@ jobs:
         ENACT_R2_BUCKET: ${{ secrets.R2_BUCKET || env.R2_BUCKET }}
     - name: Check Package Caches for New Entries
       id: cache_delta
-      if: ${{ (!cancelled() && steps.runner_caches.outputs.host == '' && github.event_name == 'workflow_dispatch' && inputs.seed_caches == 'true' && github.event_name != 'pull_request') && steps.stage_plan.outputs.stage_has_work == 'true' }}
+      if: ${{ (!cancelled() && steps.runner_caches.outputs.host == '' && steps.python_l1_cache.outputs.cache-hit != 'true' && github.event_name == 'workflow_dispatch' && inputs.seed_caches == 'true' && github.event_name != 'pull_request') && steps.stage_plan.outputs.stage_has_work == 'true' }}
       continue-on-error: true
       run: enact ci cache-delta check
       env:
         ENACT_CACHE_DELTA: |-
           python_l1_cache /tmp/.cache/uv
           python_l1_cache /tmp/.cache/pip
-        ENACT_UV_PRUNE: ${{ steps.stage_plan.outputs.stage_needs_python == 'true' }}
+        ENACT_CACHE_HITS: python_l1_cache=${{ steps.python_l1_cache.outputs.cache-hit }}
+        ENACT_UV_PRUNE: ${{ steps.stage_plan.outputs.stage_needs_python == 'true' && steps.python_l1_cache.outputs.cache-hit != 'true' }}
     - name: Save Python build & venv cache
       if: ${{ ((!cancelled() && (success() || steps.python_install.outcome == 'success') && (github.event_name == 'workflow_dispatch' && inputs.seed_caches == 'true' && steps.stage_plan.outputs.stage_needs_python == 'true' && hashFiles('pyproject.toml', 'requirements.txt') != '' && steps.runner_caches.outputs.host == '' && steps.cache_delta.outputs.python_l1_cache == 'true')) && github.event_name != 'pull_request' && steps.python_l1_cache.outputs.cache-hit != 'true') && steps.stage_plan.outputs.stage_has_work == 'true' }}
       continue-on-error: true
@@ -3109,15 +3236,6 @@ jobs:
           .enact/state/runs/*/services/*.log
           .enact/state/nodejs/*.services.log
         retention-days: "1"
-    - name: Upload Recorded Footprints
-      if: ${{ always() && (github.event_name == 'push' && github.ref_name == github.event.repository.default_branch || github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref != github.event.repository.default_branch || github.event_name == 'workflow_dispatch' && inputs.warm_reach == 'true' && github.ref_name == github.event.repository.default_branch) }}
-      continue-on-error: true
-      uses: actions/upload-artifact@v7
-      with:
-        if-no-files-found: ignore
-        name: enact-footprints-stage-seed-products-typecheck
-        path: .enact/state/cache/trace-reach.d/
-        retention-days: "1"
   summary:
     name: Consolidate Reach Map & Telemetry
     env:
@@ -3126,12 +3244,17 @@ jobs:
     - detect
     - preflight
     - test
+    - build-outputs-mcp_integration--build
+    - build-outputs-plugin_transpiler--build
     - build-outputs-quill--build
+    - build-outputs-e2e--build
     - build-outputs-frontend--build
     - build-outputs-mcp--ui_apps
     - build-outputs-storybook--build
-    - test-built-frontend--build-quill--build
+    - test-built-e2e--build-frontend--build-plugin_transpiler--build-quill--build
+    - test-built-mcp--ui_apps-mcp_integration--build-quill--build
     - test-built-mcp--ui_apps-quill--build
+    - test-built-plugin_transpiler--build
     - test-built-quill--build
     - test-built-quill--build-storybook--build
     if: "!cancelled()"
@@ -3259,6 +3382,11 @@ jobs:
         git init -q .
         git remote add origin "$url"
         git config --local "http.$GITHUB_SERVER_URL/.extraheader" "$header"
+        git config --local protocol.version 2
+        git config --local fetch.parallel 0
+        git config --local checkout.workers 0
+        git config --local index.threads 0
+        git config --local advice.detachedHead false
         git config --local gc.auto 0
         cone=()
         while IFS= read -r entry; do
@@ -3267,11 +3395,29 @@ jobs:
             [ -n "$entry" ] && cone+=("$entry")
         done <<<"${ENACT_SPARSE_CONE:-}"
         depth="${ENACT_FETCH_DEPTH:-1}"
-        fetch_args=(--no-tags)
+        fetch_args=(--no-tags --no-recurse-submodules)
         if [ "$depth" != "0" ]; then
             fetch_args+=("--depth=$depth")
         fi
-        if [ "${#cone[@]}" -gt 0 ] && [ "${#cone[@]}" -le 2 ]; then
+        narrow_cone=0
+        if [ "${#cone[@]}" -gt 0 ] && [ "${#cone[@]}" -le 8 ]; then
+            narrow_cone=1
+            for entry in "${cone[@]}"; do
+                case "$entry" in
+                    . | ./ | .. | ../*)
+                        narrow_cone=0
+                        break
+                        ;;
+                    .* | cue.mod | cue.mod/* | bin | bin/* | */*)
+                        ;;
+                    *)
+                        narrow_cone=0
+                        break
+                        ;;
+                esac
+            done
+        fi
+        if [ "$narrow_cone" = 1 ]; then
             fetch_args+=(--filter=blob:none)
         fi
         git fetch -q "${fetch_args[@]}" origin "$GITHUB_SHA" 2>/dev/null \
@@ -3424,20 +3570,40 @@ jobs:
       seed_caches: ${{ inputs.seed_caches }}
       warm_reach: ${{ inputs.warm_reach }}
     secrets: inherit
-  test-built-frontend--build-quill--build:
+  test-built-e2e--build-frontend--build-plugin_transpiler--build-quill--build:
     permissions:
       actions: read
       contents: read
     name: Run Tests on Built Outputs
     needs:
     - detect
+    - build-outputs-plugin_transpiler--build
     - build-outputs-quill--build
+    - build-outputs-e2e--build
     - build-outputs-frontend--build
-    if: ${{ !cancelled() && !failure() && needs.detect.outputs.built_frontend__build_quill__build != '{"include":[]}' && needs.detect.outputs.built_frontend__build_quill__build != '[]' && needs.detect.outputs.built_frontend__build_quill__build != '' }}
+    if: ${{ !cancelled() && !failure() && needs.detect.outputs.built_e2e__build_frontend__build_plugin_transpiler__build_quill__build != '{"include":[]}' && needs.detect.outputs.built_e2e__build_frontend__build_plugin_transpiler__build_quill__build != '[]' && needs.detect.outputs.built_e2e__build_frontend__build_plugin_transpiler__build_quill__build != '' }}
     uses: ./.github/workflows/ci-matrix.yml
     with:
       history_input_artifact: ${{ needs.detect.outputs.history_input_artifact }}
-      matrix: ${{ needs.detect.outputs.built_frontend__build_quill__build }}
+      matrix: ${{ needs.detect.outputs.built_e2e__build_frontend__build_plugin_transpiler__build_quill__build }}
+      seed_caches: ${{ inputs.seed_caches }}
+      warm_reach: ${{ inputs.warm_reach }}
+    secrets: inherit
+  test-built-mcp--ui_apps-mcp_integration--build-quill--build:
+    permissions:
+      actions: read
+      contents: read
+    name: Run Tests on Built Outputs
+    needs:
+    - detect
+    - build-outputs-mcp_integration--build
+    - build-outputs-quill--build
+    - build-outputs-mcp--ui_apps
+    if: ${{ !cancelled() && !failure() && needs.detect.outputs.built_mcp__ui_apps_mcp_integration__build_quill__build != '{"include":[]}' && needs.detect.outputs.built_mcp__ui_apps_mcp_integration__build_quill__build != '[]' && needs.detect.outputs.built_mcp__ui_apps_mcp_integration__build_quill__build != '' }}
+    uses: ./.github/workflows/ci-matrix.yml
+    with:
+      history_input_artifact: ${{ needs.detect.outputs.history_input_artifact }}
+      matrix: ${{ needs.detect.outputs.built_mcp__ui_apps_mcp_integration__build_quill__build }}
       seed_caches: ${{ inputs.seed_caches }}
       warm_reach: ${{ inputs.warm_reach }}
     secrets: inherit
@@ -3455,6 +3621,22 @@ jobs:
     with:
       history_input_artifact: ${{ needs.detect.outputs.history_input_artifact }}
       matrix: ${{ needs.detect.outputs.built_mcp__ui_apps_quill__build }}
+      seed_caches: ${{ inputs.seed_caches }}
+      warm_reach: ${{ inputs.warm_reach }}
+    secrets: inherit
+  test-built-plugin_transpiler--build:
+    permissions:
+      actions: read
+      contents: read
+    name: Run Tests on Built Outputs
+    needs:
+    - detect
+    - build-outputs-plugin_transpiler--build
+    if: ${{ !cancelled() && !failure() && needs.detect.outputs.built_plugin_transpiler__build != '{"include":[]}' && needs.detect.outputs.built_plugin_transpiler__build != '[]' && needs.detect.outputs.built_plugin_transpiler__build != '' }}
+    uses: ./.github/workflows/ci-matrix.yml
+    with:
+      history_input_artifact: ${{ needs.detect.outputs.history_input_artifact }}
+      matrix: ${{ needs.detect.outputs.built_plugin_transpiler__build }}
       seed_caches: ${{ inputs.seed_caches }}
       warm_reach: ${{ inputs.warm_reach }}
     secrets: inherit
@@ -3650,6 +3832,8 @@ jobs:
           common
           docker/clickhouse/user_defined_function.xml
           ee
+          frontend/src/lib/constants.tsx
+          frontend/src/queries/schema.json
           frontend/src/taxonomy/core-filter-definitions-by-group.json
           livestream/bot
           posthog
@@ -3670,7 +3854,6 @@ jobs:
           frontend/src/lib/components/AgentObjectTags/objectKinds.generated.ts
           frontend/src/lib/components/DomainConnect/templates
           frontend/src/products.json
-          frontend/src/queries/schema.json
           infra
           packages/agent/packages/agent-contracts/src/model-catalog.generated.ts
           packages/agent/packages/agent-contracts/src/objectTagKinds.generated.ts
@@ -3695,7 +3878,6 @@ jobs:
           packages/owners-yaml/owners_yaml
           tools/hogli-commands/hogli_commands
           .semgrep
-          showcase/scripts/build_plugin_transpiler.sh
           showcase/scripts/fetch_test_durations.sh
           showcase/scripts/repo_invariants.sh
           products/canvas/packages/canvas_builder/manifest.json
@@ -3736,6 +3918,8 @@ jobs:
           tools/openapi-codegen
           proto
           .github/scripts/jest-retries.cjs
+          common/esbuilder
+          common/plugin_transpiler
           docs/onboarding
           frontend/public/message-preferences.css
           frontend/public/services
@@ -3835,7 +4019,6 @@ jobs:
           products/games
           products/canvas/packages
           products/visual_review/cli
-          common/esbuilder
           common/tailwind
           common/replay-shared
           common/hogvm/typescript/src
@@ -3843,7 +4026,6 @@ jobs:
           packages/llm-normalizer/src
           packages/llm-normalizer/package.json
           showcase/scripts/build_products.sh
-          showcase/scripts/run_frontend_tests.sh
           bin/validate-setup-tasks.mjs
           common/storybook/.storybook
           frontend/src
@@ -3893,9 +4075,10 @@ jobs:
           frontend/src/mocks
           frontend/src/taxonomy
           frontend/bin
+          frontend/src/scenes/settings/types.ts
           .config/.markdownlint-cli2.jsonc
           products/ai_observability/backend/prompts/parser_recipe_examples.yaml
-          products/notebooks
+          products/notebooks/frontend
           products/product_analytics/frontend/insights
           frontend/src/mocks/fixtures
           showcase/scripts/check_mcp_ui_apps.sh
@@ -4067,7 +4250,6 @@ jobs:
           frontend/src/generated/core/api.ts
           frontend/src/lib/api.ts
           frontend/src/lib/api-ratchet-baseline.txt
-          frontend/src/lib/constants.tsx
           frontend/src/scenes/sceneTypes.ts
           frontend/src/scenes/dashboard/DashboardHeader.test.tsx
           packages/agent/package.json
@@ -4112,6 +4294,11 @@ jobs:
         git init -q .
         git remote add origin "$url"
         git config --local "http.$GITHUB_SERVER_URL/.extraheader" "$header"
+        git config --local protocol.version 2
+        git config --local fetch.parallel 0
+        git config --local checkout.workers 0
+        git config --local index.threads 0
+        git config --local advice.detachedHead false
         git config --local gc.auto 0
         cone=()
         while IFS= read -r entry; do
@@ -4120,11 +4307,29 @@ jobs:
             [ -n "$entry" ] && cone+=("$entry")
         done <<<"${ENACT_SPARSE_CONE:-}"
         depth="${ENACT_FETCH_DEPTH:-1}"
-        fetch_args=(--no-tags)
+        fetch_args=(--no-tags --no-recurse-submodules)
         if [ "$depth" != "0" ]; then
             fetch_args+=("--depth=$depth")
         fi
-        if [ "${#cone[@]}" -gt 0 ] && [ "${#cone[@]}" -le 2 ]; then
+        narrow_cone=0
+        if [ "${#cone[@]}" -gt 0 ] && [ "${#cone[@]}" -le 8 ]; then
+            narrow_cone=1
+            for entry in "${cone[@]}"; do
+                case "$entry" in
+                    . | ./ | .. | ../*)
+                        narrow_cone=0
+                        break
+                        ;;
+                    .* | cue.mod | cue.mod/* | bin | bin/* | */*)
+                        ;;
+                    *)
+                        narrow_cone=0
+                        break
+                        ;;
+                esac
+            done
+        fi
+        if [ "$narrow_cone" = 1 ]; then
             fetch_args+=(--filter=blob:none)
         fi
         git fetch -q "${fetch_args[@]}" origin "$GITHUB_SHA" 2>/dev/null \
@@ -4217,6 +4422,8 @@ jobs:
           common
           docker/clickhouse/user_defined_function.xml
           ee
+          frontend/src/lib/constants.tsx
+          frontend/src/queries/schema.json
           frontend/src/taxonomy/core-filter-definitions-by-group.json
           livestream/bot
           posthog
@@ -4237,7 +4444,6 @@ jobs:
           frontend/src/lib/components/AgentObjectTags/objectKinds.generated.ts
           frontend/src/lib/components/DomainConnect/templates
           frontend/src/products.json
-          frontend/src/queries/schema.json
           infra
           packages/agent/packages/agent-contracts/src/model-catalog.generated.ts
           packages/agent/packages/agent-contracts/src/objectTagKinds.generated.ts
@@ -4262,7 +4468,6 @@ jobs:
           packages/owners-yaml/owners_yaml
           tools/hogli-commands/hogli_commands
           .semgrep
-          showcase/scripts/build_plugin_transpiler.sh
           showcase/scripts/fetch_test_durations.sh
           showcase/scripts/repo_invariants.sh
           products/canvas/packages/canvas_builder/manifest.json
@@ -4303,6 +4508,8 @@ jobs:
           tools/openapi-codegen
           proto
           .github/scripts/jest-retries.cjs
+          common/esbuilder
+          common/plugin_transpiler
           docs/onboarding
           frontend/public/message-preferences.css
           frontend/public/services
@@ -4402,7 +4609,6 @@ jobs:
           products/games
           products/canvas/packages
           products/visual_review/cli
-          common/esbuilder
           common/tailwind
           common/replay-shared
           common/hogvm/typescript/src
@@ -4410,7 +4616,6 @@ jobs:
           packages/llm-normalizer/src
           packages/llm-normalizer/package.json
           showcase/scripts/build_products.sh
-          showcase/scripts/run_frontend_tests.sh
           bin/validate-setup-tasks.mjs
           common/storybook/.storybook
           frontend/src
@@ -4460,9 +4665,10 @@ jobs:
           frontend/src/mocks
           frontend/src/taxonomy
           frontend/bin
+          frontend/src/scenes/settings/types.ts
           .config/.markdownlint-cli2.jsonc
           products/ai_observability/backend/prompts/parser_recipe_examples.yaml
-          products/notebooks
+          products/notebooks/frontend
           products/product_analytics/frontend/insights
           frontend/src/mocks/fixtures
           showcase/scripts/check_mcp_ui_apps.sh
@@ -4634,7 +4840,6 @@ jobs:
           frontend/src/generated/core/api.ts
           frontend/src/lib/api.ts
           frontend/src/lib/api-ratchet-baseline.txt
-          frontend/src/lib/constants.tsx
           frontend/src/scenes/sceneTypes.ts
           frontend/src/scenes/dashboard/DashboardHeader.test.tsx
           packages/agent/package.json
@@ -4699,7 +4904,7 @@ jobs:
             /tmp/.cache/pip
           restore-keys: ${{ runner.os }}-python-
     - name: Record Restored Package Caches
-      if: steps.runner_caches.outputs.host == '' && github.event_name != 'pull_request'
+      if: (steps.runner_caches.outputs.host == '' && steps.node_l1_cache.outputs.cache-hit != 'true' || steps.runner_caches.outputs.host == '' && steps.python_l1_cache.outputs.cache-hit != 'true') && github.event_name != 'pull_request'
       continue-on-error: true
       run: enact ci cache-delta record
       env:
@@ -4708,6 +4913,9 @@ jobs:
           node_l1_cache node_modules/.cache
           python_l1_cache /tmp/.cache/uv
           python_l1_cache /tmp/.cache/pip
+        ENACT_CACHE_HITS: |-
+          node_l1_cache=${{ steps.node_l1_cache.outputs.cache-hit }}
+          python_l1_cache=${{ steps.python_l1_cache.outputs.cache-hit }}
     - name: Pull Dependencies via enve
       if: ${{ steps.node_l1_cache.outputs.cache-hit != 'true' || steps.python_l1_cache.outputs.cache-hit != 'true' && hashFiles('pyproject.toml', 'requirements.txt') != '' }}
       run: enact ci deps pull --remote signed
@@ -4738,7 +4946,7 @@ jobs:
         ENACT_PYTHON_INSTALL: bash showcase/scripts/setup.sh backend
     - name: Check Package Caches for New Entries
       id: cache_delta
-      if: ${{ !cancelled() && steps.runner_caches.outputs.host == '' && github.event_name != 'pull_request' && github.event_name != 'pull_request' }}
+      if: ${{ !cancelled() && (steps.runner_caches.outputs.host == '' && steps.node_l1_cache.outputs.cache-hit != 'true' || steps.runner_caches.outputs.host == '' && steps.python_l1_cache.outputs.cache-hit != 'true') && github.event_name != 'pull_request' && github.event_name != 'pull_request' }}
       continue-on-error: true
       run: enact ci cache-delta check
       env:
@@ -4747,7 +4955,10 @@ jobs:
           node_l1_cache node_modules/.cache
           python_l1_cache /tmp/.cache/uv
           python_l1_cache /tmp/.cache/pip
-        ENACT_UV_PRUNE: "true"
+        ENACT_CACHE_HITS: |-
+          node_l1_cache=${{ steps.node_l1_cache.outputs.cache-hit }}
+          python_l1_cache=${{ steps.python_l1_cache.outputs.cache-hit }}
+        ENACT_UV_PRUNE: ${{ steps.python_l1_cache.outputs.cache-hit != 'true' }}
     - parallel:
       - name: Save Python build & venv cache
         if: (!cancelled() && (success() || steps.python_install.outcome == 'success') && (github.event_name != 'pull_request' && hashFiles('pyproject.toml', 'requirements.txt') != '' && steps.runner_caches.outputs.host == '' && steps.cache_delta.outputs.python_l1_cache == 'true')) && github.event_name != 'pull_request' && steps.python_l1_cache.outputs.cache-hit != 'true'

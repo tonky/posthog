@@ -73,19 +73,26 @@ class ClickHouseConfigTest(unittest.TestCase):
         self.assertIsNone(self.config.find("profiles"))
         self.assertIsNone(self.config.find("users"))
         self.assertEqual("@DATA_DIR@/users.xml", self.config.findtext("user_directories/users_xml/path"))
+        self.assertEqual("4294967296", self.config.findtext("max_server_memory_usage"))
+        self.assertEqual("0.75", self.config.findtext("max_server_memory_usage_to_ram_ratio"))
+        self.assertEqual("0", self.config.findtext("memory_worker_use_cgroup"))
+        self.assertEqual("0", self.config.findtext("memory_worker_dynamic_hard_limit"))
         data, argv = self.start("Linux")
         self.assertEqual([f"--config-file={data}/config.xml"], argv)
         self.assertEqual((data / "users.xml").resolve(), (ROOT / "docker/clickhouse/users-dev.xml").resolve())
         rendered = ET.parse(data / "config.xml").getroot()
         self.assertEqual(f"{data}/users.xml", rendered.findtext("user_directories/users_xml/path"))
-        # Upstream's container runs Linux: nothing laid over its profiles there.
-        self.assertEqual([], sorted(p.name for p in (data / "users.d").iterdir()))
+        # Upstream's users-dev.xml sets 10 GB per query, exceeding 5-8 GiB shard containers; memory.xml bounds it.
+        self.assertEqual(["memory.xml"], sorted(p.name for p in (data / "users.d").iterdir()))
+        mem_overrides = ET.parse(data / "users.d/memory.xml").getroot().find("profiles")
+        for profile in mem_overrides:
+            self.assertEqual("2147483648", profile.findtext("max_memory_usage"), profile.tag)
 
     def test_macos_runs_without_jit_in_every_profile(self) -> None:
         # The macOS build's JIT can't link what it compiles (Code: 263, _bzero): every profile
         # a query can run under turns it off, not only default.
         data, _ = self.start("Darwin")
-        self.assertEqual(["darwin.xml"], sorted(p.name for p in (data / "users.d").iterdir()))
+        self.assertEqual(["darwin.xml", "memory.xml"], sorted(p.name for p in (data / "users.d").iterdir()))
         overrides = ET.parse(data / "users.d/darwin.xml").getroot().find("profiles")
         profiles = ET.parse(ROOT / "docker/clickhouse/users-dev.xml").getroot().find("profiles")
         roots = {p.tag for p in profiles if p.find("profile") is None}

@@ -102,8 +102,12 @@ pipeline: analysis: {
 			inputs:  ["nodejs/package.json", "nodejs/tsconfig.json", "nodejs/src/**"]
 		},
 		{
-			outputs: ["playwright/playwright-report/**"]
+			outputs: ["playwright/playwright-report/**", "playwright/test-results/**", ".playwright-screenshots/**"]
 			inputs:  ["playwright/playwright.config.ts", "playwright/package.json"]
+		},
+		{
+			outputs: ["rust/.enact-live-bin/**"]
+			inputs:  ["rust/Cargo.toml", "rust/Cargo.lock"]
 		},
 		{
 			outputs: [".turbo/**", ".parcel-cache/**"]

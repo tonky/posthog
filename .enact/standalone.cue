@@ -42,12 +42,17 @@ _rustCargoCrate: {
 }
 
 pipeline: components: {
+	"github_scripts_harness": _harness & {
+		name:        "github_scripts_harness"
+		title:       "CI scripts runner"
+		watch_paths: ["showcase/scripts/run_ci_scripts_tests.sh"]
+	}
 	"github_scripts": {
 		name:       "github_scripts"
 		title:      "CI scripts"
 		technology: ["python", "javascript"]
 		root:       "."
-		depends_on: ["py-root", "pytest_plugins"]
+		depends_on: ["py-root", "pytest_plugins", "github_scripts_harness"]
 		workspace_scope: include: [
 			".github/workflows", ".github/actions", ".depot/actions", "proto", "rust", "nodejs",
 			"docs/onboarding/package.json", "frontend/@posthog/lemon-ui/package.json",
@@ -71,13 +76,13 @@ pipeline: components: {
 			".github/scripts/**", "frontend/bin/ci-report/**", "tach.toml",
 			"tools/*.py", "tools/testmon_high_fanout_files.txt", "proto/**",
 			".github/workflows/ci-backend.yml", ".depot/workflows/ci-backend.yml",
-			".github/new-events-schema-targets.txt", "showcase/scripts/run_ci_scripts_tests.sh",
+			".github/new-events-schema-targets.txt",
 		]
 		test: {
 			command: "showcase/scripts/run_ci_scripts_tests.sh {targets}"
 			timeout: "20m"
 		}
-		recorder:         "trace"
+		recorder:         "own_linux"
 		record_resources: _recordPy
 		recorded_by:      ["enact-node"]
 		target_scope: {
@@ -342,35 +347,61 @@ pipeline: components: {
 		depends_on:       ["mcp", "base", "proto", "frontend", "mcp_integration_harness"]
 		workspace_scope:  include: list.Concat([_djangoTree, ["services/mcp", "rust", "proto", "docker", "infra", "frontend/src/queries"]])
 		watch_paths: list.Concat([[
-			"rust/persons_migrations/**", "showcase/scripts/live_footprint.py",
-			"showcase/scripts/rust_footprint.py", "showcase/scripts/node_reads.mjs",
+			"rust/persons_migrations/**",
+			"showcase/scripts/rust_footprint.py",
 		], _liveFlagsRust])
-		jobs: test: {
-			recorder: "own", resources: {cpus: 4, memory_mb: 11264}, record_resources: resources, needs: _mcpUiAppsNeeds
-			tasks: [
-				{name: "Build UI apps", command: "../../../showcase/scripts/build_mcp_ui_apps.sh"},
-				{name: "Run Tests", command: "../../../showcase/scripts/run_mcp_integration.sh {relative_targets}", timeout: "60m"},
-			]
-			target_scope: {
-				fallback: "all"
-				tests:    ["services/mcp/tests/**/*.integration.test.ts"]
-				rules: [
-					{match: ["posthog/dags/**", "products/*/dags/**", "frontend/snapshots.yml", "playwright/snapshots.yml"], action: "ignore"},
-					{
-						match: [
-							"services/mcp/src/**/*.{ts,tsx,js,mjs}", "services/mcp/tests/**/*.ts",
-							"products/*/mcp/**/*.{ts,tsx}", "frontend/src/**/*.{ts,tsx,js,jsx,mjs}",
-							"products/*/frontend/**/*.{ts,tsx,js,jsx,mjs}",
-						]
-						engine:      "typescript"
-						granularity: "file"
-					},
-					{
-						match:       ["posthog/**/*.py", "ee/**/*.py", "common/**/*.py", "products/**/*.py"]
-						engine:      "python"
-						granularity: "file"
-					},
+		jobs: {
+			build: {
+				services:  false
+				builds:    true
+				resources: {cpus: 4, memory_mb: 8192}
+				outputs: {
+					paths: ["rust/.enact-live-bin/mcp_integration"]
+					key: list.Concat([
+						_liveFlagsRust,
+						[
+							"proto/**", "showcase/scripts/live_posthog.sh",
+							"showcase/scripts/rust_ci_env.sh", "showcase/scripts/rust_footprint.py",
+						],
+					])
+				}
+				tasks: [{
+					name:    "Build MCP live Rust services"
+					dir:     "."
+					command: "bash -c 'source showcase/scripts/live_posthog.sh && live_stage_rust rust/.enact-live-bin/mcp_integration feature-flags personhog-replica personhog-router'"
+					timeout: "25m"
+				}]
+			}
+			test: {
+				recorder:         "own"
+				resources:        {cpus: 4, memory_mb: 11264}
+				record_resources: resources
+				needs:            list.Concat([_mcpUiAppsNeeds, ["build"]])
+				tasks: [
+					{name: "Build UI apps", command: "../../../showcase/scripts/build_mcp_ui_apps.sh"},
+					{name: "Run Tests", command: "../../../showcase/scripts/run_mcp_integration.sh {relative_targets}", timeout: "60m"},
 				]
+				target_scope: {
+					fallback: "all"
+					tests:    ["services/mcp/tests/**/*.integration.test.ts"]
+					rules: [
+						{match: ["posthog/dags/**", "products/*/dags/**", "frontend/snapshots.yml", "playwright/snapshots.yml"], action: "ignore"},
+						{
+							match: [
+								"services/mcp/src/**/*.{ts,tsx,js,mjs}", "services/mcp/tests/**/*.ts",
+								"products/*/mcp/**/*.{ts,tsx}", "frontend/src/**/*.{ts,tsx,js,jsx,mjs}",
+								"products/*/frontend/**/*.{ts,tsx,js,jsx,mjs}",
+							]
+							engine:      "typescript"
+							granularity: "file"
+						},
+						{
+							match:       ["posthog/**/*.py", "ee/**/*.py", "common/**/*.py", "products/**/*.py"]
+							engine:      "python"
+							granularity: "file"
+						},
+					]
+				}
 			}
 		}
 		uses: _liveServices

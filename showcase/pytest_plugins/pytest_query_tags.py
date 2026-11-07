@@ -11,6 +11,24 @@ or re-selected shard can put them in one. Resetting before each test makes the o
 import pytest
 
 
+@pytest.fixture(scope="module", autouse=True)
+def _restore_structlog_config_per_module():
+    """Restore process-wide structlog configuration after each module so module-scoped
+    Temporal `configure_logger_auto` fixtures never leak `WrapperLogger` into later modules."""
+    try:
+        import structlog
+    except ImportError:
+        yield
+        return
+    previous_config = structlog.get_config()
+    previously_configured = structlog.is_configured()
+    yield
+    if previously_configured:
+        structlog.configure(**previous_config)
+    else:
+        structlog.reset_defaults()
+
+
 @pytest.fixture(autouse=True)
 def _reset_posthog_query_tags():
     try:

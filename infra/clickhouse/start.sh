@@ -13,8 +13,10 @@ sed -e "s|@DATA_DIR@|$data|g" -e "s|@ROOT@|$root|g" "$data/config.template.xml" 
 ln -sfn "$root/docker/clickhouse/users-dev.xml" "$data/users.xml"
 rm -rf "$data/users.d"
 mkdir -p "$data/users.d"
+cp "infra/clickhouse/users.d/memory.xml" "$data/users.d/"
 platform=$(uname -s | tr '[:upper:]' '[:lower:]')
 if [ -f "infra/clickhouse/users.d/$platform.xml" ]; then
     cp "infra/clickhouse/users.d/$platform.xml" "$data/users.d/"
 fi
+export MALLOC_CONF="${MALLOC_CONF:-dirty_decay_ms:1000,muzzy_decay_ms:1000}"
 exec clickhouse-server --config-file="$data/config.xml"

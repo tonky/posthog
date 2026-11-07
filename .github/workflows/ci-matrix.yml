@@ -38,6 +38,7 @@ jobs:
     name: ${{ matrix.component }}${{ matrix.env.ENACT_SCHEDULING_HINT }}
     env:
       ENACT_ENVIRONMENT_FILE: ${{ matrix.environment_file || '' }}
+      ENACT_HAS_SIGNING_KEY: ${{ (secrets.ENVE_CACHE_SECRET_KEY != '' || secrets.NIX_SECRET_KEY != '') && 'true' || 'false' }}
       ENACT_OBSERVATIONS_ENABLED: "1"
     permissions:
       actions: read
@@ -162,6 +163,11 @@ jobs:
         git init -q .
         git remote add origin "$url"
         git config --local "http.$GITHUB_SERVER_URL/.extraheader" "$header"
+        git config --local protocol.version 2
+        git config --local fetch.parallel 0
+        git config --local checkout.workers 0
+        git config --local index.threads 0
+        git config --local advice.detachedHead false
         git config --local gc.auto 0
         cone=()
         while IFS= read -r entry; do
@@ -170,11 +176,29 @@ jobs:
             [ -n "$entry" ] && cone+=("$entry")
         done <<<"${ENACT_SPARSE_CONE:-}"
         depth="${ENACT_FETCH_DEPTH:-1}"
-        fetch_args=(--no-tags)
+        fetch_args=(--no-tags --no-recurse-submodules)
         if [ "$depth" != "0" ]; then
             fetch_args+=("--depth=$depth")
         fi
-        if [ "${#cone[@]}" -gt 0 ] && [ "${#cone[@]}" -le 2 ]; then
+        narrow_cone=0
+        if [ "${#cone[@]}" -gt 0 ] && [ "${#cone[@]}" -le 8 ]; then
+            narrow_cone=1
+            for entry in "${cone[@]}"; do
+                case "$entry" in
+                    . | ./ | .. | ../*)
+                        narrow_cone=0
+                        break
+                        ;;
+                    .* | cue.mod | cue.mod/* | bin | bin/* | */*)
+                        ;;
+                    *)
+                        narrow_cone=0
+                        break
+                        ;;
+                esac
+            done
+        fi
+        if [ "$narrow_cone" = 1 ]; then
             fetch_args+=(--filter=blob:none)
         fi
         git fetch -q "${fetch_args[@]}" origin "$GITHUB_SHA" 2>/dev/null \
@@ -285,7 +309,7 @@ jobs:
         ENACT_OUTPUTS_PATHS: ${{ matrix.output_paths }}
     - name: Restore history Handoff
       id: history-host
-      if: ${{ !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
+      if: ${{ (env.ENACT_HOST_CACHE != '') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
       continue-on-error: true
       run: enact ci handoff history --artifact "$ENACT_HANDOFF_ARTIFACT" --directory "$RUNNER_TEMP/enact-history-input"
       env:
@@ -304,7 +328,7 @@ jobs:
         printf 'ENACT_HISTORY_DIR=%s\n' "$ENACT_HISTORY_DIR" >> "$GITHUB_ENV"
         enact ci history import --input "$RUNNER_TEMP/enact-history-input/snapshot.json" --manifest "$RUNNER_TEMP/enact-history-input/snapshot.manifest.json" --output "$ENACT_HISTORY_DIR"
     - name: Cache history Handoff on the Receiving Host
-      if: ${{ !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
+      if: ${{ (env.ENACT_HOST_CACHE != '' && steps.history-host.outputs.ready != 'true') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
       continue-on-error: true
       run: enact ci handoff history --publish --artifact "$ENACT_HANDOFF_ARTIFACT" --directory "$RUNNER_TEMP/enact-history-input"
       env:
@@ -313,7 +337,7 @@ jobs:
       if: ${{ (toJson(matrix.output_keys) != 'null') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
       run: |-
         cat > "$ENACT_OUTPUTS_PRODUCERS_FILE" <<'PRODUCERS_JSON'
-        {"frontend--build":{"job":"frontend:build","paths":"frontend/dist\n.enact/state/outputs/frontend--build.key\n.enact/state/outputs/frontend--build.manifest-v1.json","arch_independent":true},"mcp--ui_apps":{"job":"mcp:ui_apps","paths":"services/mcp/public/ui-apps\n.enact/state/outputs/mcp--ui_apps.key\n.enact/state/outputs/mcp--ui_apps.manifest-v1.json","arch_independent":true},"quill--build":{"job":"quill:build","paths":"packages/quill/packages/quill/dist\npackages/quill/packages/tokens/dist\npackages/quill/packages/primitives/dist\npackages/quill/packages/components/dist\npackages/quill/packages/charts/dist\npackages/quill/packages/blocks/dist\npackages/quill/packages/quill/dist/.enact-build-key\n.enact/state/outputs/quill--build.key\n.enact/state/outputs/quill--build.manifest-v1.json","arch_independent":true},"storybook--build":{"job":"storybook:build","paths":"common/storybook/dist\ncommon/hogvm/typescript/dist\nfrontend/.cache/products.hash\n.enact/state/outputs/storybook--build.key\n.enact/state/outputs/storybook--build.manifest-v1.json","arch_independent":true}}
+        {"e2e--build":{"job":"e2e:build","paths":"nodejs/dist\nnodejs/dist/.enact-build-key\ncommon/replay-headless/dist\nrust/replay-anonymizer-node/dist\nrust/replay-anonymizer-node/index.node\nrust/common/hogvm/node/index.node\nrust/.enact-live-bin/e2e\n.enact/state/outputs/e2e--build.key\n.enact/state/outputs/e2e--build.manifest-v1.json"},"frontend--build":{"job":"frontend:build","paths":"frontend/dist\n.enact/state/outputs/frontend--build.key\n.enact/state/outputs/frontend--build.manifest-v1.json","arch_independent":true},"mcp--ui_apps":{"job":"mcp:ui_apps","paths":"services/mcp/public/ui-apps\n.enact/state/outputs/mcp--ui_apps.key\n.enact/state/outputs/mcp--ui_apps.manifest-v1.json","arch_independent":true},"mcp_integration--build":{"job":"mcp_integration:build","paths":"rust/.enact-live-bin/mcp_integration\n.enact/state/outputs/mcp_integration--build.key\n.enact/state/outputs/mcp_integration--build.manifest-v1.json"},"plugin_transpiler--build":{"job":"plugin_transpiler:build","paths":"common/plugin_transpiler/dist\ncommon/plugin_transpiler/dist/.enact-build-key\n.enact/state/outputs/plugin_transpiler--build.key\n.enact/state/outputs/plugin_transpiler--build.manifest-v1.json","arch_independent":true},"quill--build":{"job":"quill:build","paths":"packages/quill/packages/quill/dist\npackages/quill/packages/tokens/dist\npackages/quill/packages/primitives/dist\npackages/quill/packages/components/dist\npackages/quill/packages/charts/dist\npackages/quill/packages/blocks/dist\npackages/quill/packages/quill/dist/.enact-build-key\n.enact/state/outputs/quill--build.key\n.enact/state/outputs/quill--build.manifest-v1.json","arch_independent":true},"storybook--build":{"job":"storybook:build","paths":"common/storybook/dist\ncommon/hogvm/typescript/dist\nfrontend/.cache/products.hash\n.enact/state/outputs/storybook--build.key\n.enact/state/outputs/storybook--build.manifest-v1.json","arch_independent":true}}
         PRODUCERS_JSON
       env:
         ENACT_OUTPUTS_PRODUCERS_FILE: ${{ runner.temp }}/enact-outputs-producers.json
@@ -326,6 +350,31 @@ jobs:
         ENACT_OUTPUTS_NEEDED: ${{ toJson(matrix.output_keys) }}
         ENACT_OUTPUTS_PLATFORM: ${{ runner.os }}-${{ runner.arch }}
         ENACT_OUTPUTS_PRODUCERS_FILE: ${{ runner.temp }}/enact-outputs-producers.json
+    - name: Restore Built Outputs (e2e:build)
+      id: outputs-e2e--build
+      if: ${{ (matrix.output_keys['e2e--build'] != '' && steps.outputs-host.outputs['e2e--build'] != 'true') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
+      continue-on-error: true
+      uses: actions/cache/restore@v6
+      with:
+        key: enact-outputs-e2e--build-${{ runner.os }}-${{ runner.arch }}-${{ matrix.output_keys['e2e--build'] }}
+        path: |-
+          nodejs/dist
+          nodejs/dist/.enact-build-key
+          common/replay-headless/dist
+          rust/replay-anonymizer-node/dist
+          rust/replay-anonymizer-node/index.node
+          rust/common/hogvm/node/index.node
+          rust/.enact-live-bin/e2e
+          .enact/state/outputs/e2e--build.key
+          .enact/state/outputs/e2e--build.manifest-v1.json
+    - name: Restore Built Outputs Artifact (e2e:build)
+      id: outputs-artifact-e2e--build
+      if: ${{ (matrix.output_keys['e2e--build'] != '' && steps.outputs-host.outputs['e2e--build'] != 'true' && steps.outputs-e2e--build.outputs.cache-hit != 'true') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
+      continue-on-error: true
+      uses: actions/download-artifact@v8
+      with:
+        name: enact-outputs-e2e--build-${{ runner.os }}-${{ runner.arch }}
+        path: '.'
     - name: Restore Built Outputs (frontend:build)
       id: outputs-frontend--build
       if: ${{ (matrix.output_keys['frontend--build'] != '' && steps.outputs-host.outputs['frontend--build'] != 'true') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
@@ -363,6 +412,45 @@ jobs:
       uses: actions/download-artifact@v8
       with:
         name: enact-outputs-mcp--ui_apps-${{ runner.os }}
+        path: '.'
+    - name: Restore Built Outputs (mcp_integration:build)
+      id: outputs-mcp_integration--build
+      if: ${{ (matrix.output_keys['mcp_integration--build'] != '' && steps.outputs-host.outputs['mcp_integration--build'] != 'true') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
+      continue-on-error: true
+      uses: actions/cache/restore@v6
+      with:
+        key: enact-outputs-mcp_integration--build-${{ runner.os }}-${{ runner.arch }}-${{ matrix.output_keys['mcp_integration--build'] }}
+        path: |-
+          rust/.enact-live-bin/mcp_integration
+          .enact/state/outputs/mcp_integration--build.key
+          .enact/state/outputs/mcp_integration--build.manifest-v1.json
+    - name: Restore Built Outputs Artifact (mcp_integration:build)
+      id: outputs-artifact-mcp_integration--build
+      if: ${{ (matrix.output_keys['mcp_integration--build'] != '' && steps.outputs-host.outputs['mcp_integration--build'] != 'true' && steps.outputs-mcp_integration--build.outputs.cache-hit != 'true') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
+      continue-on-error: true
+      uses: actions/download-artifact@v8
+      with:
+        name: enact-outputs-mcp_integration--build-${{ runner.os }}-${{ runner.arch }}
+        path: '.'
+    - name: Restore Built Outputs (plugin_transpiler:build)
+      id: outputs-plugin_transpiler--build
+      if: ${{ (matrix.output_keys['plugin_transpiler--build'] != '' && steps.outputs-host.outputs['plugin_transpiler--build'] != 'true') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
+      continue-on-error: true
+      uses: actions/cache/restore@v6
+      with:
+        key: enact-outputs-plugin_transpiler--build-${{ runner.os }}-${{ matrix.output_keys['plugin_transpiler--build'] }}
+        path: |-
+          common/plugin_transpiler/dist
+          common/plugin_transpiler/dist/.enact-build-key
+          .enact/state/outputs/plugin_transpiler--build.key
+          .enact/state/outputs/plugin_transpiler--build.manifest-v1.json
+    - name: Restore Built Outputs Artifact (plugin_transpiler:build)
+      id: outputs-artifact-plugin_transpiler--build
+      if: ${{ (matrix.output_keys['plugin_transpiler--build'] != '' && steps.outputs-host.outputs['plugin_transpiler--build'] != 'true' && steps.outputs-plugin_transpiler--build.outputs.cache-hit != 'true') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
+      continue-on-error: true
+      uses: actions/download-artifact@v8
+      with:
+        name: enact-outputs-plugin_transpiler--build-${{ runner.os }}
         path: '.'
     - name: Restore Built Outputs (quill:build)
       id: outputs-quill--build
@@ -661,7 +749,7 @@ jobs:
           path: rust/target/release
           restore-keys: replay-anonymizer-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('enve.lock', 'enve.cue', 'rust/Cargo.toml', 'rust/Cargo.lock', '.cargo/config*', 'rust/.cargo/config*', 'rust-toolchain*', 'rust/rust-toolchain*', 'rust/replay-anonymizer/Cargo.toml', 'rust/replay-anonymizer/src/**', 'rust/replay-anonymizer-node/Cargo.toml', 'rust/replay-anonymizer-node/src/**', 'rust/replay-anonymizer-node/package.json', 'rust/replay-anonymizer-node/tsconfig.json', 'rust/replay-anonymizer-node/turbo.json', 'turbo.json', '.enact/*.cue', 'showcase/scripts/build_e2e.sh', 'showcase/scripts/run_nodejs_tests.sh', 'showcase/scripts/rust_ci_env.sh') }}
     - name: Record Restored Package Caches
-      if: ${{ ((steps.runner_caches.outputs.host == '' || contains(format(',{0},', matrix.caches), ',backend-templates,') || contains(format(',{0},', matrix.caches), ',live-migrations,')) && github.event_name != 'pull_request') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
+      if: ${{ ((steps.runner_caches.outputs.host == '' && steps.python_l1_cache.outputs.cache-hit != 'true' || steps.runner_caches.outputs.host == '' && steps.node_l1_cache.outputs.cache-hit != 'true' || contains(format(',{0},', matrix.caches), ',backend-templates,') && steps.cache_backend_templates.outputs.cache-hit != 'true' || contains(format(',{0},', matrix.caches), ',live-migrations,') && steps.cache_live_migrations.outputs.cache-hit != 'true') && github.event_name != 'pull_request') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
       continue-on-error: true
       run: enact ci cache-delta record
       env:
@@ -673,6 +761,11 @@ jobs:
           cache_backend_templates ~/.cache/enact/snapshots/v3
           cache_live_migrations ~/.cache/enact/snapshots/live-v1
           cache_live_migrations ~/.cache/enact/snapshots/ch-v1
+        ENACT_CACHE_HITS: |-
+          python_l1_cache=${{ steps.python_l1_cache.outputs.cache-hit }}
+          node_l1_cache=${{ steps.node_l1_cache.outputs.cache-hit }}
+          cache_backend_templates=${{ steps.cache_backend_templates.outputs.cache-hit }}
+          cache_live_migrations=${{ steps.cache_live_migrations.outputs.cache-hit }}
     - name: Require Seeded Cache [frontend tsgo declaration-emit cache]
       if: ${{ (contains(format(',{0},', matrix.caches), ',frontend-tsgo,') && !(github.event_name == 'workflow_dispatch' && inputs.seed_caches == 'true') && steps.cache_frontend_tsgo.outputs.cache-matched-key == '') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
       run: |-
@@ -689,13 +782,14 @@ jobs:
         ENACT_SEED_MESSAGE: "cache 'mypy fine-grained cache' needs a seed: its jobs never start cold. Run workflow '${{ github.workflow }}' on the default branch by workflow_dispatch with seed_caches=true, then rerun this one."
     - name: Restore reach Handoff
       id: reach-native
-      if: ${{ (toJSON(matrix.needs_reach) != 'false') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
+      if: ${{ (toJSON(matrix.needs_reach) != 'false' && (env.ENACT_HOST_CACHE != '')) && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
       continue-on-error: true
       run: enact ci handoff reach --artifact "$ENACT_HANDOFF_ARTIFACT" --directory "$RUNNER_TEMP/enact-reach"
       env:
         ENACT_HANDOFF_ARTIFACT: enact-reach-map
         GH_TOKEN: ${{ github.token }}
     - name: Download the Reach Map
+      id: reach-download
       if: ${{ (toJSON(matrix.needs_reach) != 'false' && (steps.reach-native.outputs.ready != 'true')) && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
       continue-on-error: true
       uses: actions/download-artifact@v8
@@ -704,7 +798,7 @@ jobs:
         path: ${{ runner.temp }}/enact-reach
     - name: Cache reach Handoff on the Receiving Host
       id: reach-verified
-      if: ${{ (toJSON(matrix.needs_reach) != 'false') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
+      if: ${{ (toJSON(matrix.needs_reach) != 'false' && (env.ENACT_HOST_CACHE != '' && steps.reach-native.outputs.ready != 'true')) && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
       continue-on-error: true
       run: enact ci handoff reach --publish --artifact "$ENACT_HANDOFF_ARTIFACT" --directory "$RUNNER_TEMP/enact-reach"
       env:
@@ -716,11 +810,11 @@ jobs:
         if [ -n "${GITHUB_HEAD_SHA:-}" ] && [ -z "$(git rev-list -n1 --no-walk --ignore-missing --missing=allow-any "$GITHUB_HEAD_SHA" -- 2>/dev/null)" ]; then
           git fetch --no-tags --depth=1 --filter=blob:none origin "$GITHUB_HEAD_SHA" 2>/dev/null
         fi
-        if [ "$ENACT_HANDOFF_READY" = true ] && [ -f "$RUNNER_TEMP/enact-reach/map.bin" ]; then
+        if [ "$ENACT_HANDOFF_READY" = true ] && [ -f "$RUNNER_TEMP/enact-reach/map.bin" ] && [ -f "$RUNNER_TEMP/enact-reach/map.age.json" ]; then
           echo "ENACT_REACH_FILE=$RUNNER_TEMP/enact-reach/map.bin" >> "$GITHUB_ENV"
         fi
       env:
-        ENACT_HANDOFF_READY: ${{ steps.reach-verified.outputs.ready }}
+        ENACT_HANDOFF_READY: ${{ steps.reach-native.outputs.ready == 'true' || steps.reach-verified.outputs.ready == 'true' || (env.ENACT_HOST_CACHE == '' && steps.reach-download.outcome == 'success') }}
         GITHUB_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
     - name: Fetch the Revisions Selection Ages By
       if: ${{ (matrix.selects_in_job) && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
@@ -786,7 +880,7 @@ jobs:
         ENACT_SHARD_WEIGHTS: ${{ matrix.env.ENACT_SHARD_WEIGHTS || '' }}
         ENACT_TOPOLOGY: ${{ matrix.topology }}
     - name: Push Updated Dependencies to the Remote Cache
-      if: ${{ (success() && env.ENACT_REMOTE_SAVE_EVENT == 'true') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
+      if: ${{ (success() && env.ENACT_REMOTE_SAVE_EVENT == 'true' && env.ENACT_HAS_SIGNING_KEY == 'true') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
       continue-on-error: true
       run: enact ci deps push --signed
       env:
@@ -799,6 +893,8 @@ jobs:
         ENACT_PREPARE_ENVIRONMENT_FILES: ${{ toJSON(matrix.preparation_environment_files || fromJSON('[]')) }}
         ENACT_R2_BUCKET: ${{ secrets.R2_BUCKET || env.R2_BUCKET }}
         ENVE_CACHE_CONCURRENCY: "16"
+        ENVE_CACHE_SECRET_KEY: ${{ secrets.ENVE_CACHE_SECRET_KEY || env.ENVE_CACHE_SECRET_KEY }}
+        NIX_SECRET_KEY: ${{ secrets.NIX_SECRET_KEY || env.NIX_SECRET_KEY }}
     - name: Upload Execution Telemetry & Workflow Dashboard
       if: ${{ (always()) && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
       continue-on-error: true
@@ -823,7 +919,7 @@ jobs:
         retention-days: "1"
     - name: Check Package Caches for New Entries
       id: cache_delta
-      if: ${{ (!cancelled() && (steps.runner_caches.outputs.host == '' || contains(format(',{0},', matrix.caches), ',backend-templates,') || contains(format(',{0},', matrix.caches), ',live-migrations,')) && env.ENACT_SAVE_EVENT == 'true' && (matrix.shard_index == '' || matrix.shard_index == 1 || matrix.shard_index == '1') && github.event_name != 'pull_request') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
+      if: ${{ (!cancelled() && (steps.runner_caches.outputs.host == '' && steps.python_l1_cache.outputs.cache-hit != 'true' || steps.runner_caches.outputs.host == '' && steps.node_l1_cache.outputs.cache-hit != 'true' || contains(format(',{0},', matrix.caches), ',backend-templates,') && steps.cache_backend_templates.outputs.cache-hit != 'true' || contains(format(',{0},', matrix.caches), ',live-migrations,') && steps.cache_live_migrations.outputs.cache-hit != 'true') && env.ENACT_SAVE_EVENT == 'true' && (matrix.shard_index == '' || matrix.shard_index == 1 || matrix.shard_index == '1') && github.event_name != 'pull_request') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
       continue-on-error: true
       run: enact ci cache-delta check
       env:
@@ -835,7 +931,12 @@ jobs:
           cache_backend_templates ~/.cache/enact/snapshots/v3
           cache_live_migrations ~/.cache/enact/snapshots/live-v1
           cache_live_migrations ~/.cache/enact/snapshots/ch-v1
-        ENACT_UV_PRUNE: ${{ contains(matrix.technology, 'python') }}
+        ENACT_CACHE_HITS: |-
+          python_l1_cache=${{ steps.python_l1_cache.outputs.cache-hit }}
+          node_l1_cache=${{ steps.node_l1_cache.outputs.cache-hit }}
+          cache_backend_templates=${{ steps.cache_backend_templates.outputs.cache-hit }}
+          cache_live_migrations=${{ steps.cache_live_migrations.outputs.cache-hit }}
+        ENACT_UV_PRUNE: ${{ contains(matrix.technology, 'python') && steps.python_l1_cache.outputs.cache-hit != 'true' }}
     - name: Save Python build & venv cache
       if: ${{ ((!cancelled() && (success() || steps.python_install.outcome == 'success') && (env.ENACT_SAVE_EVENT == 'true' && contains(matrix.technology, 'python') && steps.runner_caches.outputs.host == '' && hashFiles('**/uv.lock', '**/pyproject.toml', '**/requirements.txt', '**/poetry.lock') != '' && (matrix.shard_index == '' || matrix.shard_index == 1 || matrix.shard_index == '1') && steps.cache_delta.outputs.python_l1_cache == 'true')) && github.event_name != 'pull_request' && steps.python_l1_cache.outputs.cache-hit != 'true') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
       continue-on-error: true

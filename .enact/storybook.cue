@@ -88,13 +88,13 @@ pipeline: components: {
 						"common/storybook/dist",
 						"common/hogvm/typescript/dist", "frontend/.cache/products.hash",
 					]
-					key: [
-						"frontend/**", "products/**", "common/**", "packages/**", "ee/frontend/**",
+					key: list.Concat([[
+						"frontend/**", "common/**", "packages/**", "ee/frontend/**",
 						"services/mcp/src/ui-apps/**", "posthog/templates/replay_player_frame/**",
 						"package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml", "turbo.json",
 						"tsconfig.json", "patches/**",
 						"showcase/scripts/{run_storybook_tests.sh,build_once.sh,build_quill.sh,build_hogvm.sh,build_products.sh,exclusive.sh}",
-					]
+					], _productsFrontendInputs])
 				}
 				tasks: [{name: "Build Storybook", command: "showcase/scripts/run_storybook_tests.sh --build", timeout: "30m"}]
 			}

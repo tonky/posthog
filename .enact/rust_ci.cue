@@ -77,6 +77,7 @@ pipeline: components: {
 			"posthog/models/feature_flag/**",
 			"posthog/models/cohort/**",
 			"posthog/models/group_type_mapping.py",
+			"products/ai_observability/shared/**",
 			"showcase/scripts/run_flags_integration.sh",
 			"showcase/scripts/rust_ci_env.sh",
 			"showcase/scripts/rust_footprint.py",

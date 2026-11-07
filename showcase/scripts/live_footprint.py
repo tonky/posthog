@@ -407,17 +407,70 @@ def _collapse_probes(fp: core.Footprint) -> None:
     fp.probes = collapsed
 
 
-def entry(fp: core.Footprint, shared: core.Footprint | None = None) -> dict:
-    fp.flush_codes()
-    _collapse_probes(fp)
-    shared_files = (set(shared.code) | shared.reads | shared.present) if shared else set()
-    files = (set(fp.code) | fp.reads | fp.present) - shared_files
-    functions = {
-        file: sorted(called)
-        for file, called in sorted(fp.code.items())
-        if file not in fp.reads and (shared is None or file not in shared.reads)
-    }
-    probes = fp.probes - files - shared_files
+_ARTIFACT_PREFIXES = (
+    ".playwright-screenshots/",
+    "playwright/test-results/",
+    "playwright/playwright-report/",
+)
+_ARTIFACT_DIRS = frozenset({
+    ".playwright-screenshots",
+    "playwright/test-results",
+    "playwright/playwright-report",
+})
+
+
+def _strip_artifacts(fp: core.Footprint) -> None:
+    def keep(rel: str) -> bool:
+        return rel not in _ARTIFACT_DIRS and not rel.startswith(_ARTIFACT_PREFIXES)
+
+    for attr in ("reads", "present", "dirs", "probes", "loaded"):
+        setattr(fp, attr, {rel for rel in getattr(fp, attr) if keep(rel)})
+    fp.code = {rel: fns for rel, fns in fp.code.items() if keep(rel)}
+
+
+def _hoist_common(fps: list[core.Footprint], shared: core.Footprint) -> None:
+    """Hoist exact intersection across all target footprints into `shared` (lossless under `extend`)."""
+    if len(fps) < 2:
+        return
+    common_dirs = set.intersection(*(fp.dirs for fp in fps))
+    shared.dirs.update(common_dirs)
+
+    whole_sets = [(fp.reads | fp.present) for fp in fps]
+    common_whole = set.intersection(*whole_sets)
+    shared.reads.update(common_whole)
+
+    narrow_sets = [set(fp.code) - fp.reads - fp.present for fp in fps]
+    for file in set.intersection(*narrow_sets):
+        common_fns = set.intersection(*(fp.code[file] for fp in fps))
+        shared.code.setdefault(file, set()).update(common_fns)
+
+    own_files = [set(fp.code) | fp.reads | fp.present for fp in fps]
+    effective_probes = [fp.probes - own for fp, own in zip(fps, own_files)]
+    shared.probes.update(set.intersection(*effective_probes))
+
+    shared_held = set(shared.code) | shared.reads | shared.present
+    common_loaded = set.intersection(*(fp.loaded for fp in fps)) & shared_held
+    shared.loaded.update(common_loaded)
+
+
+def entry(fp: core.Footprint, shared: core.Footprint | None = None, *, prepared: bool = False) -> dict:
+    if not prepared:
+        fp.flush_codes()
+        _strip_artifacts(fp)
+        _collapse_probes(fp)
+    shared_whole = (shared.reads | shared.present) if shared else set()
+    shared_all_files = (set(shared.code) | shared_whole) if shared else set()
+    own_whole = fp.reads | fp.present
+    own_narrow = set(fp.code) - own_whole
+    files = (own_whole - shared_whole) | (own_narrow - shared_all_files)
+    functions = {}
+    for file, called in sorted(fp.code.items()):
+        if file in own_whole or file in shared_whole:
+            continue
+        rem = called - shared.code[file] if (shared and file in shared.code) else called
+        if rem:
+            functions[file] = sorted(rem)
+    probes = fp.probes - (own_whole | own_narrow) - shared_all_files - (shared.probes if shared else set())
     dirs = fp.dirs - shared.dirs if shared else fp.dirs
     loaded = fp.loaded - shared.loaded if shared else fp.loaded
     result = {
@@ -462,12 +515,15 @@ def write(directory: str, results: list[str]) -> None:
         )
         shared.reads.update(frontend.stylesheets())
     map_built(shared, frontend)
+    shared.flush_codes()
+    _strip_artifacts(shared)
+    _collapse_probes(shared)
     wanted = None
     listed = os.environ.get("ENACT_FOOTPRINT_TARGETS")
     if listed:
         with open(listed) as f:
             wanted = {line.strip().split("::")[0] for line in f if line.strip()}
-    targets, opaque = {}, {}
+    prepared_specs: list[tuple[str, str, core.Footprint, bool | None]] = []
     for index, result in enumerate(results, 1):
         spec, _, status = result.rpartition("=")
         if wanted is not None and spec not in wanted:
@@ -481,7 +537,18 @@ def write(directory: str, results: list[str]) -> None:
             fp.opaque.add("its run left no record of the tests it skipped")
         map_built(fp, frontend)
         fp.reads.add(spec)
-        target = entry(fp, shared)
+        fp.flush_codes()
+        _strip_artifacts(fp)
+        _collapse_probes(fp)
+        prepared_specs.append((spec, status, fp, skipped))
+    for token in python:
+        print(f"live_footprint: records for {token!r}, no spec of this run", file=sys.stderr)
+    if not prepared_specs:
+        return
+    _hoist_common([fp for _, _, fp, _ in prepared_specs], shared)
+    targets, opaque = {}, {}
+    for spec, status, fp, skipped in prepared_specs:
+        target = entry(fp, shared, prepared=True)
         if skipped:
             target["skipped_on"] = [PLATFORM]
         why = sorted(fp.opaque | shared.opaque)
@@ -492,10 +559,6 @@ def write(directory: str, results: list[str]) -> None:
         elif why:
             target["outcome"] = "partial"
         targets[spec] = target
-    for token in python:
-        print(f"live_footprint: records for {token!r}, no spec of this run", file=sys.stderr)
-    if not targets:
-        return
     os.makedirs(out_dir, exist_ok=True)
     shard = os.environ.get("ENACT_SHARD_INDEX", "1")
     out = os.path.join(out_dir, f"live-shard{shard}-{os.getpid()}.json")
@@ -505,7 +568,7 @@ def write(directory: str, results: list[str]) -> None:
                 "version": 1,
                 "recorder": RECORDER,
                 "outcomes": True,
-                "shared": entry(shared),
+                "shared": entry(shared, prepared=True),
                 "targets": targets,
             },
             f,

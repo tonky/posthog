@@ -8,5 +8,5 @@ scripts="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 "$scripts/build_quill.sh"
 cd "$scripts/../.."
 exec showcase/scripts/build_once.sh mcp-ui-apps services/mcp/public/ui-apps/.enact-build-key \
-    services/mcp products packages/quill common/mosaic package.json pnpm-lock.yaml pnpm-workspace.yaml patches -- \
+    services/mcp ':(glob)products/*/mcp/**' ':(glob)products/*/frontend/**' ':(glob)products/*/*.ts' ':(glob)products/*/*.tsx' ':(glob)products/*/*.json' products/ai_observability/shared packages/quill common/mosaic package.json pnpm-lock.yaml pnpm-workspace.yaml patches -- \
     bash -c 'cd services/mcp && pnpm run generate:ui-apps && pnpm exec tsx scripts/build-ui-apps.ts'

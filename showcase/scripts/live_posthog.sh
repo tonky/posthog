@@ -47,7 +47,9 @@ live_clone_databases() { # <database>
 }
 
 live_setup() { # <component> <job> <redis db> <log dir>
-    live_worker="$(test_worker_name "$1" "$2" 1)"
+    local shard_idx="${ENACT_SHARD_INDEX:-1}"
+    [[ "$shard_idx" =~ ^[0-9]+$ ]] && [ "$shard_idx" -ge 1 ] || shard_idx=1
+    live_worker="$(test_worker_name "$1" "$2" "$shard_idx")"
     live_db="test_posthog_${live_worker}"
     live_ch_db="posthog_${live_worker}"
     live_logs="$4"
@@ -221,27 +223,42 @@ live_migrate_ch() {
             return 0
         fi
         echo "live-ch snapshot failed migrate_clickhouse --check; rebuilding cold" >&2
-        "${live_ch[@]}" -q "DROP DATABASE IF EXISTS ${live_ch_db} SYNC" >/dev/null || return 1
-        "${live_ch[@]}" -q "SYSTEM FLUSH LOGS" >/dev/null || return 1
-        live_py manage.py migrate_clickhouse || return 1
-    elif [ "$mode" = "base" ]; then
-        echo "live-ch incremental top-up from subset base" >&2
-        if ! live_py manage.py migrate_clickhouse; then
-            echo "live-ch incremental top-up failed; rebuilding cold" >&2
-            "${live_ch[@]}" -q "DROP DATABASE IF EXISTS ${live_ch_db} SYNC" >/dev/null || return 1
-            "${live_ch[@]}" -q "SYSTEM FLUSH LOGS" >/dev/null || return 1
-            live_py manage.py migrate_clickhouse || return 1
-        fi
-    else
-        "${live_ch[@]}" -q "SYSTEM FLUSH LOGS" >/dev/null || return 1
-        live_py manage.py migrate_clickhouse || return 1
+        mode=""
     fi
-    live_py manage.py migrate_clickhouse --check >/dev/null || return 1
-    python3 showcase/scripts/live_migrate_cache.py ch-capture \
-        --snapshot-root "$SNAPSHOT_ROOT" --repo . --key "$ch_key" --ch-version "$ch_version" \
-        --http-url "$ch_http_url" --ch-db "$live_ch_db" --kafka-prefix "${live_worker}_" \
-        --kafka-broker "${KAFKA_HOSTS:?the env Kafka bootstrap}" \
-        --user "${CLICKHOUSE_USER:-default}" --password "${CLICKHOUSE_PASSWORD:-}" >/dev/null
+
+    mkdir -p "$SNAPSHOT_ROOT/ch-v1"
+    (
+        flock 8 || exit 1
+        if [ "$mode" != "base" ] && python3 showcase/scripts/live_migrate_cache.py ch-restore \
+            --snapshot-root "$SNAPSHOT_ROOT" --repo . --key "$ch_key" --ch-version "$ch_version" \
+            --http-url "$ch_http_url" --ch-db "$live_ch_db" --kafka-prefix "${live_worker}_" \
+            --kafka-broker "${KAFKA_HOSTS:?the env Kafka bootstrap}" \
+            --user "${CLICKHOUSE_USER:-default}" --password "${CLICKHOUSE_PASSWORD:-}" --exact-only >/dev/null 2>&1; then
+            if live_py manage.py migrate_clickhouse --check >/dev/null 2>&1; then
+                echo "live-ch snapshot hit after lock: $ch_key" >&2
+                exit 0
+            fi
+        fi
+        if [ "$mode" = "base" ]; then
+            echo "live-ch incremental top-up from subset base" >&2
+            if ! live_py manage.py migrate_clickhouse; then
+                echo "live-ch incremental top-up failed; rebuilding cold" >&2
+                "${live_ch[@]}" -q "DROP DATABASE IF EXISTS ${live_ch_db} SYNC" >/dev/null || exit 1
+                "${live_ch[@]}" -q "SYSTEM FLUSH LOGS" >/dev/null || exit 1
+                live_py manage.py migrate_clickhouse || exit 1
+            fi
+        else
+            "${live_ch[@]}" -q "DROP DATABASE IF EXISTS ${live_ch_db} SYNC" >/dev/null || exit 1
+            "${live_ch[@]}" -q "SYSTEM FLUSH LOGS" >/dev/null || exit 1
+            live_py manage.py migrate_clickhouse || exit 1
+        fi
+        live_py manage.py migrate_clickhouse --check >/dev/null || exit 1
+        python3 showcase/scripts/live_migrate_cache.py ch-capture \
+            --snapshot-root "$SNAPSHOT_ROOT" --repo . --key "$ch_key" --ch-version "$ch_version" \
+            --http-url "$ch_http_url" --ch-db "$live_ch_db" --kafka-prefix "${live_worker}_" \
+            --kafka-broker "${KAFKA_HOSTS:?the env Kafka bootstrap}" \
+            --user "${CLICKHOUSE_USER:-default}" --password "${CLICKHOUSE_PASSWORD:-}" >/dev/null
+    ) 8>"$SNAPSHOT_ROOT/ch-v1/${ch_key}.migrate.lock"
 }
 
 # "Prime posthog from cached schema" and the migrations: the template, like upstream's schema
@@ -264,11 +281,55 @@ live_migrate() {
 # Recording, the build's artifacts (a no-op rebuild) and the workspace's graph go to
 # live_rust_footprint, with each package's binary (`$live_bin/<package>`) by its root file.
 live_rust_roots=()
+live_prebuilt_footprint=""
 # <command...> in rust/ with rust_ci_env.sh's build settings: the Rust jobs sharing its target
 # dir build with them.
 live_in_rust() { (source showcase/scripts/rust_ci_env.sh && cd rust && "$@"); }
+live_stage_rust() { # <stage_dir> <package...>
+    local stage_dir="$1" args=() built_args=() package root profile src_bin tmp_dir
+    shift
+    for package in "$@"; do args+=(-p "$package"); done
+    profile="$(live_in_rust rust_no_assertions)"
+    local build=(env -u REDIS_URL cargo build "${args[@]}" --config "$profile")
+    live_in_rust "${build[@]}"
+    src_bin="$(cd rust && cargo metadata --no-deps --format-version 1 | jq -r .target_directory)/debug"
+    tmp_dir="$(mktemp -d)"
+    trap 'rm -rf "$tmp_dir"' RETURN
+    live_in_rust "${build[@]}" --message-format json >"$tmp_dir/artifacts.jsonl"
+    (cd rust && cargo metadata --format-version 1 >"$tmp_dir/metadata.json")
+    for package in "$@"; do
+        root="$(jq -r --arg p "$package" '.workspace_members as $members | .packages[]
+            | select(.name == $p and (.id | IN($members[]))) | .targets[]
+            | select(.name == $p and (.kind | index("bin"))) | .src_path' "$tmp_dir/metadata.json")"
+        [ -n "$root" ] || { echo "live_stage_rust: $package builds no binary named $package" >&2; return 1; }
+        built_args+=(--built-from "$root")
+    done
+    printf '{"shared":{"files":[],"recorders":[]},"targets":{}}\n' >"$tmp_dir/seed.json"
+    mkdir -p "$tmp_dir/out"
+    python3 showcase/scripts/rust_footprint.py --repo "$PWD" --artifacts "$tmp_dir/artifacts.jsonl" \
+        --metadata "$tmp_dir/metadata.json" --recorder "rust_footprint.py/3" --out "$tmp_dir/out" \
+        "${built_args[@]}" "$tmp_dir/seed.json"
+    mkdir -p "$stage_dir"
+    for package in "$@"; do
+        cp -f "$src_bin/$package" "$stage_dir/$package"
+        chmod +x "$stage_dir/$package"
+    done
+    cp -f "$tmp_dir/out/seed.json" "$stage_dir/built-from.json"
+}
 live_build_rust() { # <package...>
-    local args=() package root profile
+    local stage_dir="$PWD/rust/.enact-live-bin/${ENACT_COMPONENT:-}" all_staged=1 package
+    if [ -n "${ENACT_COMPONENT:-}" ] && [ -s "$stage_dir/built-from.json" ]; then
+        for package in "$@"; do
+            [ -x "$stage_dir/$package" ] || { all_staged=0; break; }
+        done
+        if [ "$all_staged" -eq 1 ]; then
+            live_bin="$stage_dir"
+            live_prebuilt_footprint="$stage_dir/built-from.json"
+            echo "live_build_rust: using pre-built Rust binaries from $stage_dir" >&2
+            return 0
+        fi
+    fi
+    local args=() root profile
     for package in "$@"; do args+=(-p "$package"); done
     profile="$(live_in_rust rust_no_assertions)"
     local build=(env -u REDIS_URL cargo build "${args[@]}" --config "$profile")
@@ -296,6 +357,32 @@ live_rust_footprint() { # <dir>
     [ -e "${maps[0]}" ] || return 0
     mkdir -p "$ENACT_FOOTPRINT_DIR"
     cp "$1"/*.stats "$ENACT_FOOTPRINT_DIR"/ 2>/dev/null || true
+    if [ -n "${live_prebuilt_footprint:-}" ] && [ -s "$live_prebuilt_footprint" ]; then
+        python3 - "$live_prebuilt_footprint" "$ENACT_FOOTPRINT_DIR" "${maps[@]}" <<'PY'
+import json
+import os
+import sys
+
+built_doc = json.loads(open(sys.argv[1], encoding="utf-8").read())
+built_shared = built_doc.get("shared") or {}
+built_files = set(built_shared.get("files") or ())
+built_recs = set(built_shared.get("recorders") or ("rust_footprint.py/3",))
+out_dir = sys.argv[2]
+for map_path in sys.argv[3:]:
+    doc = json.loads(open(map_path, encoding="utf-8").read())
+    shared = doc.setdefault("shared", {})
+    shared["files"] = sorted(set(shared.get("files") or ()) | built_files)
+    shared["recorders"] = sorted(set(shared.get("recorders") or ()) | built_recs)
+    for fp in (doc.get("targets") or {}).values():
+        if isinstance(fp, dict):
+            fp["recorders"] = sorted(set(fp.get("recorders") or ()) | built_recs)
+    dst = os.path.join(out_dir, os.path.basename(map_path))
+    with open(dst, "w", encoding="utf-8") as out:
+        json.dump(doc, out, separators=(",", ":"))
+PY
+        echo "live_footprint: merged pre-built Rust inputs -> $ENACT_FOOTPRINT_DIR" >&2
+        return 0
+    fi
     if [ "${#live_rust_roots[@]}" -eq 0 ]; then
         cp "${maps[@]}" "$ENACT_FOOTPRINT_DIR"/
         return

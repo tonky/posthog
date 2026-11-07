@@ -1,0 +1,15 @@
+<!-- Per-query memory cap across all root profiles (start.sh lays users.d/memory.xml over
+     upstream's users-dev.xml, whose default 10 GB max_memory_usage exceeds 5-8 GiB shard containers). -->
+<clickhouse>
+    <profiles>
+        <default>
+            <max_memory_usage>2147483648</max_memory_usage>
+        </default>
+        <readonly>
+            <max_memory_usage>2147483648</max_memory_usage>
+        </readonly>
+        <autoresearch>
+            <max_memory_usage>2147483648</max_memory_usage>
+        </autoresearch>
+    </profiles>
+</clickhouse>

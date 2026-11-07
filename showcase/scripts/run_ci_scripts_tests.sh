@@ -5,30 +5,46 @@
 #
 #   run_ci_scripts_tests.sh [test file...]
 #
-# Test files, relative to the caller's directory or the repository: Python ones go to
-# pytest, .js/.mjs ones to node --test. None: the workflow's, the tools/ ones by name (a
-# glob would take tests other jobs run, and test_selection_verdict.py, which is no test).
+# Test files, relative to the caller's directory or the repository (or via @<targets_file> /
+# ENACT_TARGETS_FILE): Python ones go to a single batched pytest process, .js/.mjs ones to a
+# single batched node --test process. When recording footprints on Linux, only wanted targets
+# (capped by ENACT_MAX_AUTO_TRACE_FILES under ENACT_RECORD=auto) run individually under
+# `enact trace run`, while all remaining targets run in the fast batched pytest / node pools.
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
+
+raw_args=("$@")
+if [ "${#raw_args[@]}" -eq 1 ] && [[ "${raw_args[0]}" == @* ]]; then
+    target_list="${raw_args[0]#@}"
+    raw_args=()
+    while IFS= read -r line || [ -n "$line" ]; do
+        [[ "$line" =~ [^[:space:]] ]] && raw_args+=("$line")
+    done < "$target_list"
+elif [ "${#raw_args[@]}" -eq 0 ] && [ -n "${ENACT_TARGETS_FILE:-}" ] && [ -f "$ENACT_TARGETS_FILE" ]; then
+    while IFS= read -r line || [ -n "$line" ]; do
+        [[ "$line" =~ [^[:space:]] ]] && raw_args+=("$line")
+    done < "$ENACT_TARGETS_FILE"
+fi
+
 py=() js=()
-if [ "$#" -eq 0 ]; then
+if [ "${#raw_args[@]}" -eq 0 ]; then
     cd "$root"
     py=(.github/scripts/test_*.py tools/test_snob_backend_test_selection_shadow.py tools/test_test_selection_verdict.py)
     js=(.github/scripts/*.test.js .github/scripts/*.test.mjs)
+else
+    for file in "${raw_args[@]}"; do
+        dir="$(cd "$(dirname "$file")" 2>/dev/null && pwd -P)" || dir="$root/$(dirname "$file")"
+        file="${dir#"$root"/}/$(basename "$file")"
+        case "$file" in
+            *.py) py+=("$file") ;;
+            *.js | *.mjs) js+=("$file") ;;
+            *)
+                echo "✗ run_ci_scripts_tests.sh: $file is neither a Python nor a node:test file" >&2
+                exit 64
+                ;;
+        esac
+    done
 fi
-for file in "$@"; do
-    # Repository-relative.
-    dir="$(cd "$(dirname "$file")" 2>/dev/null && pwd -P)" || dir="$root/$(dirname "$file")"
-    file="${dir#"$root"/}/$(basename "$file")"
-    case "$file" in
-        *.py) py+=("$file") ;;
-        *.js | *.mjs) js+=("$file") ;;
-        *)
-            echo "✗ run_ci_scripts_tests.sh: $file is neither a Python nor a node:test file" >&2
-            exit 64
-            ;;
-    esac
-done
 cd "$root"
 status=0
 # The helpers read the Actions run they serve (GITHUB_REPOSITORY, GITHUB_REF_NAME, ...): this
@@ -38,12 +54,53 @@ for var in GITHUB_REPOSITORY GITHUB_REF_NAME GITHUB_REF GITHUB_HEAD_REF GITHUB_B
     GITHUB_SHA GITHUB_RUN_ID GITHUB_WORKFLOW_REF GITHUB_SERVER_URL GITHUB_STEP_SUMMARY GITHUB_EVENT_NAME; do
     unset "$var"
 done
-py_plugins=(-p no:cacheprovider)
-if [ -n "${ENACT_FOOTPRINT_DIR:-}" ]; then
-    export PYTHONPATH="$root/showcase/pytest_plugins${PYTHONPATH:+:$PYTHONPATH}"
-    py_plugins+=(-p pytest_footprint)
-    export NODE_OPTIONS="--import $root/showcase/scripts/node_reads.mjs${NODE_OPTIONS:+ $NODE_OPTIONS}"
+
+if [ -x "$root/.venv/bin/python" ]; then
+    pytest_cmd=("$root/.venv/bin/python" -m pytest)
+else
+    pytest_cmd=(uv run --no-sync pytest)
 fi
-[ "${#py[@]}" -eq 0 ] || uv run --no-sync pytest -v -c /dev/null "${py_plugins[@]}" --noconftest "${py[@]}" || status=1
+py_flags=(-v -c /dev/null -p no:cacheprovider --noconftest)
+
+if [ -n "${ENACT_FOOTPRINT_DIR:-}" ] && [ "${ENACT_CI_SCRIPTS_FORCE_TRACE:-$(uname -s)}" = Linux ]; then
+    max_auto="${ENACT_MAX_AUTO_TRACE_FILES:-5}"
+    n=0
+    py_rest=()
+    for file in ${py[@]+"${py[@]}"}; do
+        if [ -n "${ENACT_FOOTPRINT_TARGETS:-}" ] && ! rg -qxF -- "$file" "$ENACT_FOOTPRINT_TARGETS"; then
+            py_rest+=("$file")
+            continue
+        fi
+        if [ "${ENACT_RECORD:-}" = "auto" ] && [ "$n" -ge "$max_auto" ]; then
+            py_rest+=("$file")
+            continue
+        fi
+        n=$((n + 1))
+        echo "🎙️  tracing $file for enact's reach map"
+        "${ENACT_EXE:-enact}" trace run --outcomes --shared-tmpdir --no-fingerprint \
+            --reach-file "$ENACT_FOOTPRINT_DIR/ci-scripts-traced-$n.json" -t "$file" -- \
+            "${pytest_cmd[@]}" "${py_flags[@]}" "$file" || status=1
+    done
+    js_rest=()
+    for file in ${js[@]+"${js[@]}"}; do
+        if [ -n "${ENACT_FOOTPRINT_TARGETS:-}" ] && ! rg -qxF -- "$file" "$ENACT_FOOTPRINT_TARGETS"; then
+            js_rest+=("$file")
+            continue
+        fi
+        if [ "${ENACT_RECORD:-}" = "auto" ] && [ "$n" -ge "$max_auto" ]; then
+            js_rest+=("$file")
+            continue
+        fi
+        n=$((n + 1))
+        echo "🎙️  tracing $file for enact's reach map"
+        "${ENACT_EXE:-enact}" trace run --node-functions --outcomes --shared-tmpdir --no-fingerprint \
+            --reach-file "$ENACT_FOOTPRINT_DIR/ci-scripts-traced-$n.json" -t "$file" -- \
+            node --test "$file" || status=1
+    done
+    py=(${py_rest[@]+"${py_rest[@]}"})
+    js=(${js_rest[@]+"${js_rest[@]}"})
+fi
+
+[ "${#py[@]}" -eq 0 ] || "${pytest_cmd[@]}" "${py_flags[@]}" "${py[@]}" || status=1
 [ "${#js[@]}" -eq 0 ] || node --test "${js[@]}" || status=1
 exit "$status"

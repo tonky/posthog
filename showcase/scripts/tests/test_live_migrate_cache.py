@@ -434,5 +434,339 @@ class SnapshotVerificationAndHttpRoundtripTest(unittest.TestCase):
             self.assertEqual(ver.returncode, 0, ver.stderr)
 
 
+class ScriptAndFootprintOptimizationsTest(unittest.TestCase):
+    def test_pg_and_ch_keys_ignore_runner_script_edits(self) -> None:
+        with tempfile.TemporaryDirectory() as work:
+            root = Path(work)
+            _seed_repo(root)
+            pg1 = lmc.compute_pg_key(root, "tpl_a", "15")
+            ch1 = lmc.compute_ch_key(root, "25.3.1")
+            (root / "showcase/scripts/live_posthog.sh").write_text("# edited\n", encoding="utf-8")
+            (root / "showcase/scripts/live_migrate_cache.py").write_text("# edited\n", encoding="utf-8")
+            self.assertEqual(pg1, lmc.compute_pg_key(root, "tpl_a", "15"))
+            self.assertEqual(ch1, lmc.compute_ch_key(root, "25.3.1"))
+
+    def test_restored_delta_suppresses_unchanged_cache_saves_until_new_entry_or_schedule(self) -> None:
+        with tempfile.TemporaryDirectory() as work:
+            root = Path(work) / "snapshots"
+            runner_temp = Path(work) / "runner-temp"
+            delta_dir = runner_temp / "enact-cache-delta"
+            delta_dir.mkdir(parents=True)
+            key = "b" * 64
+            gen = lmc.publish_generation(
+                root / "live-v1",
+                lmc.PG_FORMAT_PREFIX,
+                key,
+                "pg15",
+                {"live-postgres.dump": b"PGDMP", "live-migrations.json": b'{"applied": [["posthog", "0001"]]}'},
+            )
+            (root / "live-v1" / f"{key}.migrate.lock").write_text("", encoding="utf-8")
+            restored_entries = [
+                f"{(root / 'live-v1').as_posix()}/{key}/current-v1",
+                f"{gen.as_posix()}/manifest",
+                f"{gen.as_posix()}/live-postgres.dump",
+                f"{gen.as_posix()}/live-migrations.json",
+            ]
+            (delta_dir / "cache_live_migrations.restored").write_text(
+                "\n".join(restored_entries) + "\n", encoding="utf-8"
+            )
+
+            gh_out = Path(work) / "gh-out-unchanged"
+            res = subprocess.run(
+                [sys.executable, str(SCRIPTS / "live_migrate_cache.py"), "verify", str(root)],
+                env={
+                    **os.environ,
+                    "RUNNER_TEMP": str(runner_temp),
+                    "GITHUB_OUTPUT": str(gh_out),
+                    "GITHUB_EVENT_NAME": "push",
+                },
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(res.returncode, 0, res.stderr)
+            self.assertEqual(gh_out.read_text(encoding="utf-8").strip(), "eligible=false")
+
+            # Scheduled runs still refresh rolling lineage.
+            gh_sched = Path(work) / "gh-out-schedule"
+            subprocess.run(
+                [sys.executable, str(SCRIPTS / "live_migrate_cache.py"), "verify", str(root)],
+                env={
+                    **os.environ,
+                    "RUNNER_TEMP": str(runner_temp),
+                    "GITHUB_OUTPUT": str(gh_sched),
+                    "GITHUB_EVENT_NAME": "schedule",
+                },
+                check=True,
+            )
+            self.assertEqual(gh_sched.read_text(encoding="utf-8").strip(), "eligible=true")
+
+            # Publishing a new CH generation flips eligible back to true.
+            lmc.publish_generation(
+                root / "ch-v1",
+                lmc.CH_FORMAT_PREFIX,
+                "c" * 64,
+                "ch25.3",
+                {
+                    "ddl.json": b'{"database_ddl":"CREATE DATABASE IF NOT EXISTS __ENACT_CH_DB__","statements":[]}',
+                    "migrations.json": b'{"applied":[["posthog.clickhouse.migrations","0001"]],"applied_jsonl":"{}"}',
+                    "seed_rows.json": b"{}",
+                },
+            )
+            gh_added = Path(work) / "gh-out-added"
+            subprocess.run(
+                [sys.executable, str(SCRIPTS / "live_migrate_cache.py"), "verify", str(root)],
+                env={
+                    **os.environ,
+                    "RUNNER_TEMP": str(runner_temp),
+                    "GITHUB_OUTPUT": str(gh_added),
+                    "GITHUB_EVENT_NAME": "push",
+                },
+                check=True,
+            )
+            self.assertEqual(gh_added.read_text(encoding="utf-8").strip(), "eligible=true")
+
+    def test_template_publications_skips_unchanged_restored_v3_snapshot(self) -> None:
+        with tempfile.TemporaryDirectory() as work:
+            v3 = Path(work) / "v3"
+            (v3 / "k1").mkdir(parents=True)
+            (v3 / "k1/manifest").write_text("ok\n", encoding="utf-8")
+            (v3 / "k1.lock").write_text("", encoding="utf-8")
+            runner_temp = Path(work) / "rt"
+            (runner_temp / "enact-cache-delta").mkdir(parents=True)
+            (runner_temp / "enact-cache-delta/cache_backend_templates.restored").write_text(
+                f"{v3.as_posix()}/k1/manifest\n", encoding="utf-8"
+            )
+            fake_enact = Path(work) / "fake-enact"
+            fake_enact.write_text(
+                "#!/usr/bin/env bash\n"
+                '[ -z "${GITHUB_OUTPUT:-}" ] || echo "eligible=true" >> "$GITHUB_OUTPUT"\n'
+                "exit 0\n",
+                encoding="utf-8",
+            )
+            fake_enact.chmod(0o755)
+            gh_out = Path(work) / "gh-tpl"
+            res = subprocess.run(
+                [sys.executable, str(SCRIPTS / "template_publications.py"), str(v3)],
+                env={
+                    **os.environ,
+                    "ENACT_EXE": str(fake_enact),
+                    "RUNNER_TEMP": str(runner_temp),
+                    "GITHUB_OUTPUT": str(gh_out),
+                    "GITHUB_EVENT_NAME": "push",
+                },
+                check=False,
+            )
+            self.assertEqual(res.returncode, 0)
+            self.assertEqual(gh_out.read_text(encoding="utf-8").strip(), "eligible=false")
+
+    def test_live_footprint_hoists_multi_spec_intersection_and_strips_playwright_artifacts(self) -> None:
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from hermetic import helper_env
+
+        with tempfile.TemporaryDirectory() as work:
+            repo = Path(work)
+            (repo / "frontend/app-esbuild-meta.json").parent.mkdir(parents=True)
+            (repo / "frontend/app-esbuild-meta.json").write_text('{"outputs": {}}', encoding="utf-8")
+            common_dirs = [f"frontend/src/dir_{i}" for i in range(120)]
+            common_files = [f"frontend/src/shared_{i}.tsx" for i in range(80)]
+            for rel in common_files:
+                p = repo / rel
+                p.parent.mkdir(parents=True, exist_ok=True)
+                p.write_text("export const x = 1\n", encoding="utf-8")
+            recording = repo / "rec"
+            (recording / "records").mkdir(parents=True)
+            specs = [f"playwright/e2e/spec_{i}.spec.ts" for i in range(12)]
+            for idx, spec in enumerate(specs, 1):
+                (repo / spec).parent.mkdir(parents=True, exist_ok=True)
+                (repo / spec).write_text("test()\n", encoding="utf-8")
+                (recording / "records" / f"{idx}.started").write_text(f"{spec}\n", encoding="utf-8")
+                (recording / "records" / f"{idx}.json").write_text(
+                    json.dumps(
+                        {
+                            "footprint": {
+                                "reads": [
+                                    *common_files,
+                                    f"unique_{idx}.py",
+                                    ".playwright-screenshots/shot.png",
+                                    "playwright/test-results/trace.zip",
+                                ],
+                                "dirs": [*common_dirs, f"dir_unique_{idx}", ".playwright-screenshots"],
+                                "code": {"posthog/api/shared_view.py": ["common_fn", f"fn_{idx}"]},
+                                "loaded": ["posthog/api/shared_view.py"],
+                            }
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                node = recording / f"node/{idx}"
+                node.mkdir(parents=True)
+                (node / "1.started").write_text("node\n", encoding="utf-8")
+                (node / "1.json").write_text(json.dumps({"reads": [spec]}), encoding="utf-8")
+
+            out = repo / "maps"
+            env = helper_env() | {"ENACT_FOOTPRINT_DIR": str(out), "LIVE_JOB": "run_e2e_tests.sh"}
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPTS / "live_footprint.py"),
+                    "write",
+                    str(recording),
+                    *[f"{s}=0" for s in specs],
+                ],
+                cwd=repo,
+                env=env,
+                check=True,
+            )
+            (written,) = [p for p in out.iterdir() if p.suffix == ".json"]
+            doc = json.loads(written.read_text(encoding="utf-8"))
+            shared = doc["shared"]
+            self.assertTrue(set(common_files).issubset(set(shared["files"])))
+            self.assertTrue(set(common_dirs).issubset(set(shared["dirs"])))
+            self.assertEqual(shared["functions"].get("posthog/api/shared_view.py"), ["common_fn"])
+            self.assertIn("posthog/api/shared_view.py", shared["loaded"])
+            self.assertNotIn(".playwright-screenshots", shared["dirs"])
+            for idx, spec in enumerate(specs, 1):
+                t = doc["targets"][spec]
+                self.assertFalse(set(common_files) & set(t["files"]))
+                self.assertFalse(set(common_dirs) & set(t["dirs"]))
+                self.assertEqual(t["functions"].get("posthog/api/shared_view.py"), [f"fn_{idx}"])
+                self.assertNotIn(".playwright-screenshots/shot.png", t["files"])
+                self.assertNotIn("playwright/test-results/trace.zip", t["files"])
+
+    def test_ci_scripts_runner_caps_auto_traces_and_batches_remaining(self) -> None:
+        with tempfile.TemporaryDirectory() as work:
+            repo = Path(work)
+            (repo / "showcase/scripts").mkdir(parents=True)
+            runner = repo / "showcase/scripts/run_ci_scripts_tests.sh"
+            runner.write_text((SCRIPTS / "run_ci_scripts_tests.sh").read_text(encoding="utf-8"), encoding="utf-8")
+            runner.chmod(0o755)
+
+            venv_bin = repo / ".venv/bin"
+            venv_bin.mkdir(parents=True)
+            calls_log = repo / "calls.log"
+            fake_py = venv_bin / "python"
+            fake_py.write_text(
+                "#!/usr/bin/env bash\n"
+                f'echo "PY:$*" >> "{calls_log}"\n'
+                "exit 0\n",
+                encoding="utf-8",
+            )
+            fake_py.chmod(0o755)
+            fake_enact = repo / "fake-enact"
+            fake_enact.write_text(
+                "#!/usr/bin/env bash\n"
+                f'echo "TRACE:$*" >> "{calls_log}"\n'
+                'while [ "$#" -gt 0 ] && [ "$1" != "--" ]; do shift; done\n'
+                '[ "$#" -gt 0 ] && shift\n'
+                'exec "$@"\n',
+                encoding="utf-8",
+            )
+            fake_enact.chmod(0o755)
+
+            (repo / ".github/scripts").mkdir(parents=True)
+            targets = []
+            for i in range(6):
+                rel = f".github/scripts/test_{i}.py"
+                (repo / rel).write_text("def test_ok(): pass\n", encoding="utf-8")
+                targets.append(rel)
+            targets_file = repo / "wanted.txt"
+            targets_file.write_text("\n".join(targets) + "\n", encoding="utf-8")
+            fp_dir = repo / "fp"
+            fp_dir.mkdir()
+
+            subprocess.run(
+                ["bash", str(runner), *targets],
+                cwd=repo,
+                env={
+                    **os.environ,
+                    "ENACT_EXE": str(fake_enact),
+                    "ENACT_FOOTPRINT_DIR": str(fp_dir),
+                    "ENACT_FOOTPRINT_TARGETS": str(targets_file),
+                    "ENACT_CI_SCRIPTS_FORCE_TRACE": "Linux",
+                    "ENACT_RECORD": "auto",
+                    "ENACT_MAX_AUTO_TRACE_FILES": "2",
+                },
+                check=True,
+            )
+            lines = calls_log.read_text(encoding="utf-8").splitlines()
+            traces = [l for l in lines if l.startswith("TRACE:")]
+            pys = [l for l in lines if l.startswith("PY:")]
+            self.assertEqual(len(traces), 2, lines)
+            # 2 traced individual runs + 1 batched pytest run for the remaining 4 files!
+            self.assertEqual(len(pys), 3, lines)
+            self.assertIn(".github/scripts/test_2.py .github/scripts/test_3.py .github/scripts/test_4.py .github/scripts/test_5.py", pys[-1])
+
+    def test_frontend_runner_caps_auto_traces_and_preserves_unlimited_explicit_record(self) -> None:
+        runner_text = (SCRIPTS / "run_frontend_tests.sh").read_text(encoding="utf-8")
+        with tempfile.TemporaryDirectory() as work:
+            repo = Path(work).resolve()
+            (repo / "showcase/scripts").mkdir(parents=True)
+            runner = repo / "showcase/scripts/run_frontend_tests.sh"
+            runner.write_text(runner_text, encoding="utf-8")
+            runner.chmod(0o755)
+
+            bin_dir = repo / "fake-bin"
+            bin_dir.mkdir()
+            calls_log = repo / "fe-calls.log"
+            for name, body in (
+                ("realpath", '#!/usr/bin/env bash\necho "${!#}"\n'),
+                (
+                    "pnpm",
+                    "#!/usr/bin/env bash\n"
+                    f'echo "PNPM:$*" >> "{calls_log}"\n'
+                    "exit 0\n",
+                ),
+            ):
+                p = bin_dir / name
+                p.write_text(body, encoding="utf-8")
+                p.chmod(0o755)
+            fake_enact = repo / "fake-enact"
+            fake_enact.write_text(
+                "#!/usr/bin/env bash\n"
+                f'echo "TRACE:$*" >> "{calls_log}"\n'
+                'while [ "$#" -gt 0 ] && [ "$1" != "--" ]; do shift; done\n'
+                '[ "$#" -gt 0 ] && shift\n'
+                'exec "$@"\n',
+                encoding="utf-8",
+            )
+            fake_enact.chmod(0o755)
+
+            recorders_dir = repo / "recorders/js"
+            recorders_dir.mkdir(parents=True)
+            (recorders_dir / "jest-attribution.cjs").write_text("", encoding="utf-8")
+
+            targets = [f"frontend/src/t_{i}.test.tsx" for i in range(5)]
+            for rel in targets:
+                (repo / rel).parent.mkdir(parents=True, exist_ok=True)
+                (repo / rel).write_text("test()\n", encoding="utf-8")
+            wanted = repo / "wanted.txt"
+            wanted.write_text("\n".join(targets) + "\n", encoding="utf-8")
+            fp_dir = repo / "fp"
+            fp_dir.mkdir()
+
+            base_env = {
+                **os.environ,
+                "PATH": f"{bin_dir}:{os.environ['PATH']}",
+                "ENACT_EXE": str(fake_enact),
+                "ENACT_RECORDERS_DIR": str(repo / "recorders"),
+                "ENACT_FOOTPRINT_DIR": str(fp_dir),
+                "ENACT_FOOTPRINT_TARGETS": str(wanted),
+                "ENACT_FRONTEND_FORCE_TRACE": "Linux",
+                "ENACT_MAX_AUTO_TRACE_FILES": "2",
+            }
+
+            subprocess.run(["bash", str(runner), *targets], cwd=repo, env={**base_env, "ENACT_RECORD": "auto"}, check=True)
+            auto_lines = calls_log.read_text(encoding="utf-8").splitlines()
+            self.assertEqual(len([l for l in auto_lines if l.startswith("TRACE:")]), 2, auto_lines)
+            self.assertTrue(any("--maxWorkers=3" in l and "t_2.test.tsx" in l for l in auto_lines), auto_lines)
+
+            calls_log.write_text("", encoding="utf-8")
+            subprocess.run(["bash", str(runner), *targets], cwd=repo, env={**base_env, "ENACT_RECORD": "every"}, check=True)
+            every_lines = calls_log.read_text(encoding="utf-8").splitlines()
+            self.assertEqual(len([l for l in every_lines if l.startswith("TRACE:")]), 5, every_lines)
+            self.assertFalse(any("--maxWorkers=3" in l for l in every_lines), every_lines)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -128,5 +128,43 @@ class ShardProvisioningTest(unittest.TestCase):
         self.assertFalse((self.repo / ".venv/.replay-provisioned.json").exists())
         self.assertEqual(1, self.entries("sync"))
 
+    def test_uv_venv_cache_is_bounded_and_ephemeral_proof_dirs_skip_writing_cache(self) -> None:
+        uv_cache = self.repo / "uv-cache"
+        for idx, age in enumerate((300, 200, 100)):
+            d = uv_cache / f"venv-v2-old{idx}"
+            d.mkdir(parents=True)
+            ts = 1_700_000_000 - age
+            os.utime(d, (ts, ts))
+        (self.repo / "uv.lock").write_text("lock\n")
+        (self.repo / "pyproject.toml").write_text("[project]\nname = 'x'\n")
+        env = {
+            **self.env(),
+            "UV_CACHE_DIR": str(uv_cache),
+            "STUB_LOG": str(self.log),
+            "PATH": f"{self.repo / 'bin'}:{os.environ['PATH']}",
+        }
+        done = subprocess.run(
+            ["bash", "showcase/scripts/setup.sh", "backend"], cwd=self.repo, env=env, capture_output=True, text=True
+        )
+        self.assertEqual(0, done.returncode, done.stdout + done.stderr)
+        remaining = sorted(p.name for p in uv_cache.glob("venv-v2-*"))
+        self.assertEqual(2, len(remaining), remaining)
+        self.assertFalse((uv_cache / "venv-v2-old0").exists())
+        self.assertFalse((uv_cache / "venv-v2-old1").exists())
+
+        ephemeral = self.repo / "readiness-outputs/proof-abc123/runtime"
+        (ephemeral / "showcase/scripts").mkdir(parents=True)
+        for name in ("setup.sh", "backend_runtime.py"):
+            shutil.copy2(self.repo / "showcase/scripts" / name, ephemeral / "showcase/scripts" / name)
+        (ephemeral / "uv.lock").write_text("lock\n")
+        (ephemeral / "pyproject.toml").write_text("[project]\nname = 'x'\n")
+        before = set(uv_cache.glob("venv-v2-*"))
+        done = subprocess.run(
+            ["bash", "showcase/scripts/setup.sh", "backend"], cwd=ephemeral, env=env, capture_output=True, text=True
+        )
+        self.assertEqual(0, done.returncode, done.stdout + done.stderr)
+        self.assertEqual(before, set(uv_cache.glob("venv-v2-*")))
+
+
 if __name__ == "__main__":
     unittest.main()

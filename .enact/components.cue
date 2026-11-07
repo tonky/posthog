@@ -72,6 +72,7 @@ _python_core_paths: [
 _py_cone: list.Concat([_djangoTree, [
 	".depot/workflows", ".github/new-events-schema-targets.txt", ".github/workflows/ci-python.yml",
 	".semgrep/rules/devex", ".stamphog", "docker/clickhouse/user_defined_function.xml",
+	"frontend/src/lib/constants.tsx", "frontend/src/queries/schema.json",
 	"frontend/src/taxonomy/core-filter-definitions-by-group.json", "livestream/bot",
 	"rust/feature-flags/src/properties", "rust/feature-flags/tests/fixtures",
 	"services/hogql-language-service/internal/completion", "services/mcp/schema", "services/mcp/src/templates",
@@ -156,12 +157,22 @@ _djangoRustTree: list.Concat([
 		"posthog", "ee", "common", "bin", "tools/hogli-commands", "tools/hogli",
 		"packages/owners-yaml", "packages/personhog-proto",
 		"products/__init__.py", "products/db_routing.yaml",
-		"products/experiments/stats", "products/data_warehouse/dags",
+		"products/ai_observability/shared", "products/experiments/stats", "products/data_warehouse/dags",
+		"frontend/src/products.json", "products/canvas/packages/canvas_builder/manifest.json",
 	],
 	[for p in _productBackendDirs {"products/\(p)/backend"}],
 ])
+_productsFrontendInputs: [
+	"products/*/frontend/**",
+	"products/*/*.{ts,tsx,js,jsx,json}",
+	"products/games/**",
+	"products/canvas/packages/**",
+	"products/ai_observability/shared/**",
+	"products/*/mcp/**",
+]
+_jestFrontendIgnore: "--modulePathIgnorePatterns='/products/([^/]+/(backend|dags|eval|evals|eval_harness|mcp|skills|opensearch|scout|stats|fixtures|management|observability|plan|adr|agent|scripts)|desktop|visual_review/cli)(/|$)' --modulePathIgnorePatterns='/([.]turbo|__pycache__)(/|$)' --watchPathIgnorePatterns='/products/([^/]+/(backend|dags|eval|evals|eval_harness|mcp|skills|opensearch|scout|stats|fixtures|management|observability|plan|adr|agent|scripts)|desktop|visual_review/cli)(/|$)' --watchPathIgnorePatterns='/([.]turbo|__pycache__)(/|$)'"
 _mcpPrebuild: "pnpm exec tsx scripts/copy-instructions.ts"
-_frontendBuild: "showcase/scripts/build_once.sh frontend-build frontend/dist/.enact-build-key frontend products common packages ee/frontend services/mcp/src/ui-apps package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json tsconfig.json patches -- bash -c 'showcase/scripts/build_quill.sh && showcase/scripts/build_hogvm.sh && bin/turbo --filter=@posthog/frontend prepare && showcase/scripts/build_products.sh && pnpm --filter=@posthog/frontend build && mkdir -p frontend/dist/.enact-esbuild-meta && cp -f frontend/*-esbuild-meta.json frontend/dist/.enact-esbuild-meta/'"
+_frontendBuild: "showcase/scripts/build_once.sh frontend-build frontend/dist/.enact-build-key frontend ':(glob)products/*/frontend/**' ':(glob)products/*/*.ts' ':(glob)products/*/*.tsx' ':(glob)products/*/*.js' ':(glob)products/*/*.jsx' ':(glob)products/*/*.json' products/games products/canvas/packages products/ai_observability/shared ':(glob)products/*/mcp/**' common packages ee/frontend services/mcp/src/ui-apps package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json tsconfig.json patches -- bash -c 'showcase/scripts/build_quill.sh && showcase/scripts/build_hogvm.sh && bin/turbo --filter=@posthog/frontend prepare && showcase/scripts/build_products.sh && pnpm --filter=@posthog/frontend build && mkdir -p frontend/dist/.enact-esbuild-meta && cp -f frontend/*-esbuild-meta.json frontend/dist/.enact-esbuild-meta/'"
 
 _buildOnceKey: [
 	"package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml", "turbo.json", "tsconfig.json",
@@ -314,18 +325,55 @@ pipeline: schema.#Pipeline & {
 			name: "geoip", title: "GeoIP database installer"
 			watch_paths: ["bin/download-mmdb"]
 		}
+		"frontend_harness": _harness & {
+			name: "frontend_harness", title: "Frontend Jest runner", technology: "typescript"
+			watch_paths: ["showcase/scripts/run_frontend_tests.sh"]
+		}
+		"plugin_transpiler": {
+			name:            "plugin_transpiler"
+			title:           "PostHog Plugin Transpiler"
+			description:     "Babel and Rollup transpiler bundling HogQL and CDP site-app code"
+			kind:            "library"
+			domain:          "analytics"
+			technology:      "typescript"
+			root:            "common/plugin_transpiler"
+			depends_on:      ["root", "build_once"]
+			workspace_scope: include: ["common/esbuilder", "bin"]
+			watch_paths:     ["common/plugin_transpiler/**", "showcase/scripts/build_plugin_transpiler.sh"]
+			jobs: build: {
+				services: false
+				builds:   true
+				outputs: {
+					arch_independent: true
+					paths: [
+						"common/plugin_transpiler/dist",
+						"common/plugin_transpiler/dist/.enact-build-key",
+					]
+					key: list.Concat([[
+						"common/plugin_transpiler/**",
+						"common/esbuilder/**",
+						"bin/turbo",
+						"showcase/scripts/build_plugin_transpiler.sh",
+					], _buildOnceKey])
+				}
+				tasks: [{
+					dir:     "."
+					command: "rm -f common/plugin_transpiler/dist/.enact-build-key && showcase/scripts/build_plugin_transpiler.sh"
+					timeout: "15m"
+				}]
+			}
+		}
 		"helper_tests": {
 			name:            "helper_tests"
 			title:           "Overlay helpers' tests"
 			description:     "The unittest suite of the overlay's scripts: shard provisioning, runners, templates"
 			technology:      "python"
 			root:            "."
-			depends_on:      ["test_env", "py-root", "pytest_plugins", "pytest_runner", "build_once"]
+			depends_on:      ["test_env", "py-root", "pytest_plugins", "pytest_runner", "build_once", "plugin_transpiler", "frontend_harness", "live_harness", "github_scripts_harness"]
 			workspace_scope: include: [".github/workflows/ci.yml"]
 			watch_paths: [
 				"showcase/scripts/tests/**", "showcase/scripts/run_nodejs_tests.sh",
 				"showcase/scripts/rust_footprint.py", "showcase/scripts/run_rust_release_build.sh",
-				"showcase/scripts/live_footprint.py", "showcase/scripts/live_migrate_cache.py", "showcase/scripts/node_reads.mjs",
 				"showcase/scripts/no_drift.sh", "posthog/user_scripts/**",
 				"packages/personhog-proto/pyproject.toml", "packages/owners-yaml/pyproject.toml", "tools/hogli/pyproject.toml",
 			]
@@ -341,7 +389,7 @@ pipeline: schema.#Pipeline & {
 			name:        "base"
 			title:       "PostHog Core Django API & Analytics Backend"
 			description: "Django ASGI server, models, HogQL, REST endpoints and ClickHouse queries"
-			depends_on:  ["py-root", "pytest_plugins", "pytest_runner", "test_env", "build_once"]
+			depends_on:  ["py-root", "pytest_plugins", "pytest_runner", "test_env", "build_once", "plugin_transpiler"]
 			tags:        ["backend", "django", "api"]
 			// ee/hogai/test/test_llm.py reads the settings scene's ids (SETTINGS_MAP_PATH).
 			workspace_scope: {include_dependencies: false, include: list.Concat([_python_monolith_include, ["frontend/src/scenes/settings/SettingsMap.tsx"]])}
@@ -356,7 +404,6 @@ pipeline: schema.#Pipeline & {
 				"tools/hogli-commands/hogli_commands/{quarantine,product}/**",
 				"tools/hogli/src/hogli/{__init__,manifest}.py",
 				"products/**/*.py", ".semgrep/**",
-				"showcase/scripts/build_plugin_transpiler.sh",
 				"showcase/scripts/fetch_test_durations.sh",
 				"showcase/scripts/repo_invariants.sh",
 			], _baseData])
@@ -378,7 +425,11 @@ pipeline: schema.#Pipeline & {
 					tasks: [{
 						name:    "Check Migrations"
 						command: "uv run --no-sync python manage.py makemigrations --check --dry-run"
-						filter: include: ["**/*.py"]
+						filter: include: [
+							"**/models/**", "**/models.py", "**/migrations/**", "**/apps.py",
+							"posthog/settings/**", "posthog/constants.py", "posthog/schema_enums.py",
+							"products/db_routing.yaml", "manage.py",
+						]
 					}]
 				}
 				test: {
@@ -387,6 +438,7 @@ pipeline: schema.#Pipeline & {
 					// absence: test_groups_revenue_analytics' s3() reads retried at upstream's bucket).
 					resources:        {cpus: 0.75, memory_mb: 4096}
 					record_resources: resources
+					needs:            ["plugin_transpiler:build"]
 					tasks: [
 						{name: "Build plugin transpiler", command: "showcase/scripts/build_plugin_transpiler.sh", timeout: "15m"},
 						_pytestRunTask & {name: "Run Tests"},
@@ -450,8 +502,8 @@ pipeline: schema.#Pipeline & {
 			max_shards:   12
 			shards:       10
 			shard_groups: {by: "products/*/", overhead_s: 1}
-			// Keep combined shard + service ask within l7's 8 GiB cap (6656 + 1024 reserve -> c1m8g).
-			resources:        {cpus: 0.75, memory_mb: 6656}
+			// Measured 2.1-3.3 GiB peak RSS across shards; 4096 + 1024 reserve quantizes to c2m5g.
+			resources:        {cpus: 2.0, memory_mb: 4096}
 			record_resources: resources
 			scoping: {
 				domain_roots:    ["posthog", "ee", "products"]
@@ -476,7 +528,10 @@ pipeline: schema.#Pipeline & {
 				]
 				tests: [for f in _pytestFiles {"products/*/backend/**/\(f)"}]
 				not_run: [{
-					tests:  ["products/warehouse_sources/backend/temporal/data_imports/tests/e2e/test_end_to_end.py"]
+					tests: [
+						"products/warehouse_sources/backend/temporal/data_imports/tests/e2e/test_end_to_end.py",
+						"products/warehouse_sources/backend/temporal/data_imports/tests/e2e/test_mysql_source.py",
+					]
 					reason: "uses docker-py / Testcontainers (`DockerException`); enact CI is daemonless and zero-Docker"
 				}]
 			}
@@ -582,7 +637,7 @@ pipeline: schema.#Pipeline & {
 			uses:        [{protocol: schema.#Protocol.Http, target: "base", title: "Queries Django REST & HogQL endpoints"}]
 			technology:  "typescript"
 			root:        "."
-			depends_on:  ["js-root", "quill", "test_quarantine"]
+			depends_on:  ["js-root", "quill", "test_quarantine", "frontend_harness"]
 			tags:        ["frontend", "vite", "react", "kea"]
 			workspace_scope: {
 				// jest.config's setupFilesAfterEnv names .github/scripts/jest-retries.cjs.
@@ -597,7 +652,7 @@ pipeline: schema.#Pipeline & {
 				"common/hogvm/typescript/package.json", "packages/llm-normalizer/src/**",
 				"packages/llm-normalizer/package.json", "products/ai_observability/shared/**",
 				".kearc", "posthog.json", "postcss.config.js",
-				"showcase/scripts/build_products.sh", "showcase/scripts/run_frontend_tests.sh", "bin/validate-setup-tasks.mjs",
+				"showcase/scripts/build_products.sh", "bin/validate-setup-tasks.mjs",
 			], _storybookConfig])
 			fmt:       "pnpm exec oxfmt --check --no-error-on-unmatched-pattern {changed_files}"
 			lint:      "pnpm exec oxlint --no-error-on-unmatched-pattern {changed_files} --quiet"
@@ -612,10 +667,10 @@ pipeline: schema.#Pipeline & {
 						arch_independent: true
 						paths: ["frontend/dist"]
 						key: list.Concat([[
-							"frontend/**", "products/**", "common/**", "packages/**",
+							"frontend/**", "common/**", "packages/**",
 							"ee/frontend/**", "services/mcp/src/ui-apps/**",
 							"showcase/scripts/build_hogvm.sh", "showcase/scripts/build_products.sh",
-						], _buildOnceKey])
+						], _productsFrontendInputs, _buildOnceKey])
 					}
 					needs: ["quill:build"]
 					tasks: [{command: _frontendBuild, env: GOMEMLIMIT: "6GiB"}]
@@ -679,7 +734,7 @@ pipeline: schema.#Pipeline & {
 					needs:            ["quill:build"]
 					tasks: [
 						{name: "Build products", command: "showcase/scripts/build_products.sh"},
-						{name: "Warm jest", command: "CI=true pnpm --filter=@posthog/frontend exec jest --listTests >/dev/null"},
+						{name: "Warm jest", command: "CI=true pnpm --filter=@posthog/frontend exec jest \(_jestFrontendIgnore) --listTests >/dev/null"},
 						// ENACT_TEST_VERBOSE: each test's line (`✓`/`✕`), which enact reads into per-test outcomes.
 						{name: "Run Tests", command: "showcase/scripts/run_frontend_tests.sh {targets}", timeout: "48m"},
 					]
@@ -972,24 +1027,64 @@ pipeline: schema.#Pipeline & {
 			workspace_scope: include: [
 				".config", "cli/lib", "common/mosaic", "services/mcp", "packages/llm-normalizer",
 				"products", "frontend/src/mocks", "frontend/src/taxonomy", "frontend/bin",
+				"frontend/src/lib/agentScopes.generated.ts", "frontend/src/scenes/settings/types.ts",
 			]
 			watch_paths: [
 				"services/mcp/**", "products/*/mcp/**", "packages/llm-normalizer/**",
 				"packages/quill/**", "common/mosaic/**", ".config/.markdownlint-cli2.jsonc",
-				"posthog/[!d]*/**/*.py", "posthog/d[!a]*/**/*.py", "posthog/*.py",
-				"ee/**/*.py", "common/**/*.py", "products/*/backend/**/*.py",
 				"products/ai_observability/backend/prompts/parser_recipe_examples.yaml",
 				"products/*/skills/**",
 				"products/{actions,ai_observability,cohorts,error_tracking,experiments,feature_flags,product_analytics,replay,replay_vision,surveys,tasks,tracing,visual_review,workflows}/apps/**",
-				"products/notebooks/**", "products/product_analytics/frontend/insights/**",
+				"products/notebooks/*.{ts,tsx,json}", "products/notebooks/frontend/**",
+				"products/product_analytics/frontend/insights/**",
 				"products/*/frontend/generated/**", "frontend/src/mocks/fixtures/**",
+				"frontend/src/queries/schema.json",
 				"showcase/scripts/check_mcp_ui_apps.sh", "showcase/scripts/build_mcp_ui_apps.sh",
 			]
 			fmt:  "pnpm exec oxfmt --check \"./**/*.{md,mdx}\" \"./**/*.{yaml,yml}\""
 			lint: "pnpm exec oxlint --quiet . && pnpm exec markdownlint-cli2 --config ../../.config/.markdownlint-cli2.jsonc \"./**/*.{md,mdx}\""
+			_mcpScopeRules: [
+				{
+					match: [
+						"services/mcp/**/*.{ts,tsx,js,jsx,mjs,cjs,mts,cts}",
+						"products/*/mcp/**/*.{ts,tsx,js,jsx,mjs,cjs}",
+						"packages/llm-normalizer/src/**/*.ts",
+						"packages/quill/**/*.{ts,tsx,js,jsx,mjs,cjs}",
+						"common/mosaic/**/*.{ts,tsx,js,jsx,mjs,cjs}",
+						"products/notebooks/*.{ts,tsx}", "products/notebooks/frontend/**/*.{ts,tsx,js,jsx}",
+						"products/product_analytics/frontend/insights/**/*.{ts,tsx,js,jsx}",
+						"products/*/frontend/generated/**/*.{ts,tsx,js,jsx}",
+						"frontend/src/mocks/fixtures/**/*.{ts,tsx,js,jsx}",
+					]
+					engine:      "typescript"
+					granularity: "file"
+				},
+				{
+					match: [
+						"services/mcp/**/*.{json,yaml,yml,md,mdx,css,scss,html}",
+						"products/*/mcp/**/*.{json,yaml,yml,md,mdx}",
+						"packages/llm-normalizer/**/*.{json,yaml,yml}",
+						"packages/quill/**/*.{json,css,scss}",
+						"common/mosaic/**/*.{json,css,scss}",
+						"products/ai_observability/backend/prompts/parser_recipe_examples.yaml",
+						"products/*/skills/**",
+						"products/notebooks/*.json", "products/notebooks/frontend/**/*.json",
+						"frontend/src/mocks/fixtures/**/*.json",
+						"frontend/src/queries/schema.json",
+						"showcase/scripts/build_mcp_ui_apps.sh",
+					]
+					engine: "reach"
+				},
+				{
+					match:  [".config/.markdownlint-cli2.jsonc", "showcase/scripts/check_mcp_ui_apps.sh", "**/*.stories.{ts,tsx,js,jsx}"]
+					action: "ignore"
+				},
+			]
 			target_scope: {
-				tests:   ["services/mcp/tests/**/*.test.ts"]
-				exclude: ["services/mcp/tests/**/*.integration.test.ts", "services/mcp/tests/hono/**"]
+				fallback: "none"
+				rules:    _mcpScopeRules
+				tests:    ["services/mcp/tests/**/*.test.ts"]
+				exclude:  ["services/mcp/tests/**/*.integration.test.ts", "services/mcp/tests/hono/**"]
 				not_run: [{
 					tests:  ["services/mcp/tests/live/**"]
 					reason: "test:live checks the live context-mill manifest over the network (ci-mcp-live-canary.yml, scheduled)"
@@ -1010,7 +1105,11 @@ pipeline: schema.#Pipeline & {
 						{name: "Build", command: _mcpPrebuild},
 						{name: "Run Tests", command: "../../.enact/vitest/vitest.sh run --config vitest.hono.config.mts {relative_targets}"},
 					]
-					target_scope: tests: ["services/mcp/tests/hono/**/*.test.ts"]
+					target_scope: {
+						fallback: "none"
+						rules:    _mcpScopeRules
+						tests:    ["services/mcp/tests/hono/**/*.test.ts"]
+					}
 				}
 				typecheck: {
 					direct:    true
@@ -1026,9 +1125,9 @@ pipeline: schema.#Pipeline & {
 						arch_independent: true
 						paths: ["services/mcp/public/ui-apps"]
 						key: list.Concat([[
-							"services/mcp/**", "products/**", "packages/quill/**",
+							"services/mcp/**", "packages/quill/**",
 							"common/mosaic/**", "showcase/scripts/build_mcp_ui_apps.sh",
-						], _buildOnceKey])
+						], _productsFrontendInputs, _buildOnceKey])
 					}
 					tasks: [{command: "../../showcase/scripts/build_mcp_ui_apps.sh"}]
 				}
@@ -1055,7 +1154,11 @@ pipeline: schema.#Pipeline & {
 			technology:      ["python", "typescript"]
 			depends_on:      ["test_env", "geoip"]
 			workspace_scope: include: ["products/db_routing.yaml", "infra/clickhouse/config.xml"]
-			watch_paths:     ["showcase/scripts/live_posthog.sh", "showcase/scripts/live_migrate_cache.py", "showcase/scripts/rust_ci_env.sh", "bin/celery-queues.env"]
+			watch_paths: [
+				"showcase/scripts/live_posthog.sh", "showcase/scripts/live_migrate_cache.py",
+				"showcase/scripts/live_footprint.py", "showcase/scripts/node_reads.mjs",
+				"showcase/scripts/rust_ci_env.sh", "bin/celery-queues.env",
+			]
 		}
 		"e2e_harness": _harness & {
 			name:        "e2e_harness"
@@ -1072,7 +1175,7 @@ pipeline: schema.#Pipeline & {
 			technology:       ["typescript", "python", "rust"]
 			root:             "."
 			cargo: workspace: "rust"
-			depends_on:       ["base", "products", "frontend", "proto", "e2e_harness", "vitest_marker"]
+			depends_on:       ["base", "products", "frontend", "proto", "e2e_harness", "vitest_marker", "plugin_transpiler"]
 			workspace_scope: include: list.Concat([_djangoTree, [
 				"playwright", "frontend", "packages", "services/mcp/src/ui-apps", "tools/openapi-codegen",
 				"nodejs", "rust", "proto", "docker", "infra",
@@ -1082,41 +1185,72 @@ pipeline: schema.#Pipeline & {
 				"playwright/**", "products/*/frontend/e2e/**",
 				"tools/playwright_spec_selection.py", "tools/playwright_area_map.json",
 				"tools/test_playwright_spec_selection.py", "rust/persons_migrations/**",
-				"showcase/scripts/live_footprint.py", "showcase/scripts/rust_footprint.py",
-				"showcase/scripts/node_reads.mjs",
+				"showcase/scripts/rust_footprint.py",
 			], _liveCaptureRust, _liveIngestionNode])
-			jobs: test: {
-				recorder:         "own"
-				shards:           1
-				resources:        {cpus: 6, memory_mb: 12288}
-				record_resources: resources
-				needs:     ["frontend:build"]
-				tasks: [
-					{name: "Build", command: _frontendBuild + " && showcase/scripts/build_e2e.sh", timeout: "30m"},
-					{name: "Run Tests", command: "showcase/scripts/run_e2e_tests.sh {targets}", timeout: "60m"},
-				]
-				target_scope: {
-					fallback: "all"
-					tests:    ["playwright/e2e/**/*.spec.ts", "products/*/frontend/e2e/**/*.spec.ts"]
-					rules: [
-						{match: ["posthog/dags/**", "products/*/dags/**", "frontend/snapshots.yml", "playwright/snapshots.yml"], action: "ignore"},
-						{
-							match: [
-								"playwright/**/*.ts", "products/*/frontend/e2e/**/*.ts",
-								"frontend/src/**/*.{ts,tsx,js,jsx,mjs}",
-								"products/*/frontend/**/*.{ts,tsx,js,jsx}",
-								"ee/frontend/**/*.{ts,tsx,js,jsx}",
-							]
-							engine:      "typescript"
-							granularity: "file"
-						},
-						{
-							match:       ["posthog/**/*.py", "ee/**/*.py", "common/**/*.py", "products/**/*.py"]
-							engine:      "python"
-							granularity: "file"
-						},
-						{match: _liveIngestionNodeTests, action: "ignore"},
+			jobs: {
+				build: {
+					services:  false
+					builds:    true
+					resources: {cpus: 4, memory_mb: 8192}
+					needs:     ["plugin_transpiler:build"]
+					outputs: {
+						paths: [
+							"nodejs/dist", "nodejs/dist/.enact-build-key",
+							"common/replay-headless/dist",
+							"rust/replay-anonymizer-node/dist", "rust/replay-anonymizer-node/index.node",
+							"rust/common/hogvm/node/index.node",
+							"rust/.enact-live-bin/e2e",
+						]
+						key: list.Concat([
+							_liveCaptureRust, _liveIngestionNode, _buildOnceKey,
+							[
+								"proto/**", "common/plugin_transpiler/**",
+								"showcase/scripts/build_e2e.sh", "showcase/scripts/build_hogvm.sh",
+								"showcase/scripts/live_posthog.sh", "showcase/scripts/rust_ci_env.sh",
+								"showcase/scripts/rust_footprint.py",
+							],
+						])
+					}
+					tasks: [{
+						name:    "Build E2E native & Rust services"
+						command: "rm -f nodejs/dist/.enact-build-key && showcase/scripts/build_e2e.sh && bash -c 'source showcase/scripts/live_posthog.sh && live_stage_rust rust/.enact-live-bin/e2e capture personhog-replica personhog-router'"
+						timeout: "30m"
+					}]
+				}
+				test: {
+					recorder:         "own"
+					shards:           4
+					max_shards:       4
+					resources:        {cpus: 4, memory_mb: 10240}
+					record_resources: resources
+					needs:            ["frontend:build", "plugin_transpiler:build", "build"]
+					tasks: [
+						{name: "Build", command: _frontendBuild + " && showcase/scripts/build_e2e.sh", timeout: "30m"},
+						{name: "Run Tests", command: "showcase/scripts/run_e2e_tests.sh {targets}", timeout: "60m"},
 					]
+					target_scope: {
+						fallback: "all"
+						tests:    ["playwright/e2e/**/*.spec.ts", "products/*/frontend/e2e/**/*.spec.ts"]
+						rules: [
+							{match: ["posthog/dags/**", "products/*/dags/**", "frontend/snapshots.yml", "playwright/snapshots.yml"], action: "ignore"},
+							{
+								match: [
+									"playwright/**/*.ts", "products/*/frontend/e2e/**/*.ts",
+									"frontend/src/**/*.{ts,tsx,js,jsx,mjs}",
+									"products/*/frontend/**/*.{ts,tsx,js,jsx}",
+									"ee/frontend/**/*.{ts,tsx,js,jsx}",
+								]
+								engine:      "typescript"
+								granularity: "file"
+							},
+							{
+								match:       ["posthog/**/*.py", "ee/**/*.py", "common/**/*.py", "products/**/*.py"]
+								engine:      "python"
+								granularity: "file"
+							},
+							{match: _liveIngestionNodeTests, action: "ignore"},
+						]
+					}
 				}
 			}
 			uses: _liveServices

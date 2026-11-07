@@ -24,10 +24,23 @@
 # replay, recording API, error tracking, logs and traces consumers.
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-# enact gives the specs relative to the task's directory; Playwright matches them against
-# absolute paths, so they go from the checkout's root, as upstream's selection names them.
+# enact gives the specs relative to the task's directory (or via @<targets_file> /
+# ENACT_TARGETS_FILE); Playwright matches them against absolute paths, so they go from the
+# checkout's root, as upstream's selection names them.
+raw_args=("$@")
+if [ "${#raw_args[@]}" -eq 1 ] && [[ "${raw_args[0]}" == @* ]]; then
+    target_list="${raw_args[0]#@}"
+    raw_args=()
+    while IFS= read -r line || [ -n "$line" ]; do
+        [[ "$line" =~ [^[:space:]] ]] && raw_args+=("$line")
+    done < "$target_list"
+elif [ "${#raw_args[@]}" -eq 0 ] && [ -n "${ENACT_TARGETS_FILE:-}" ] && [ -f "$ENACT_TARGETS_FILE" ]; then
+    while IFS= read -r line || [ -n "$line" ]; do
+        [[ "$line" =~ [^[:space:]] ]] && raw_args+=("$line")
+    done < "$ENACT_TARGETS_FILE"
+fi
 specs=()
-for spec in "$@"; do
+for spec in ${raw_args[@]+"${raw_args[@]}"}; do
     spec="$(cd "$(dirname "$spec")" && pwd)/$(basename "$spec")"
     specs+=("${spec#"$root"/}")
 done
@@ -40,8 +53,11 @@ source showcase/scripts/live_posthog.sh
 # The builds ("Install plugin_transpiler", the frontend's prepare, "Build frontend" and the
 # ingestion's Node.js build) ran in the job's task before this one (build_e2e.sh).
 
-results="$root/.enact/state/e2e"
-live_setup "${ENACT_COMPONENT:-e2e}" "${ENACT_JOB:-test}" 5 "$results/logs"
+shard_idx="${ENACT_SHARD_INDEX:-1}"
+[[ "$shard_idx" =~ ^[0-9]+$ ]] && [ "$shard_idx" -ge 1 ] || shard_idx=1
+redis_db=$(( 5 + (shard_idx - 1) % 10 ))
+results="$root/.enact/state/e2e/shard-$shard_idx"
+live_setup "${ENACT_COMPONENT:-e2e}" "${ENACT_JOB:-test}" "$redis_db" "$results/logs"
 capture_port=$(live_free_port) capture_ai_port=$(live_free_port) proxy_port=$(live_free_port)
 ingestion_port=$(live_free_port)
 site="http://localhost:$live_web_port"

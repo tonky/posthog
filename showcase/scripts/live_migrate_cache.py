@@ -292,12 +292,10 @@ def compute_pg_key(repo_root: Path, template_key: str, pg_major: str) -> str:
     apps = routed_apps(repo_root)
     paths = [
         repo_root / "products" / "db_routing.yaml",
-        repo_root / "showcase" / "scripts" / "live_posthog.sh",
-        repo_root / "showcase" / "scripts" / "live_migrate_cache.py",
         *repo_pg_migration_files(repo_root),
     ]
     extra = [
-        "live-pg-v1",
+        PG_FORMAT_PREFIX,
         f"template_key={template_key}",
         f"pg_major={pg_major}",
         f"routed_apps={','.join(apps)}",
@@ -414,12 +412,10 @@ def compute_ch_key(repo_root: Path, ch_version: str) -> str:
     orm_block = _uv_lock_package_block(repo_root / "uv.lock", ("infi-clickhouse-orm", "infi.clickhouse-orm"))
     paths = [
         repo_root / "infra" / "clickhouse" / "config.xml",
-        repo_root / "showcase" / "scripts" / "live_posthog.sh",
-        repo_root / "showcase" / "scripts" / "live_migrate_cache.py",
         *ch_migration_files(repo_root),
     ]
     extra = [
-        "live-ch-v1",
+        CH_FORMAT_PREFIX,
         f"ch_major_minor={ch_major_minor}",
         f"orm_lock={orm_block}",
     ]
@@ -803,6 +799,28 @@ def restore_ch_snapshot(
 # ---------------------------------------------------------------------------
 
 
+def _has_added_non_dot_entries(roots: list[Path], before: set[str]) -> bool:
+    for root in roots:
+        if not root.is_dir():
+            continue
+        resolved_root = root.resolve()
+        for dirpath, dirnames, filenames in os.walk(root):
+            dirnames[:] = [d for d in dirnames if not d.startswith(".")]
+            rel_dir = Path(dirpath).relative_to(root)
+            for fname in filenames:
+                if fname.startswith(".") or fname.endswith(".lock"):
+                    continue
+                rel = (rel_dir / fname).as_posix() if rel_dir != Path(".") else fname
+                candidates = {
+                    f"{root.as_posix()}/{rel}",
+                    f"{resolved_root.as_posix()}/{rel}",
+                    rel,
+                }
+                if before.isdisjoint(candidates):
+                    return True
+    return False
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -971,11 +989,20 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.cmd == "verify":
-        root = args.snapshot_root.resolve()
+        raw_root = args.snapshot_root
+        root = raw_root.resolve()
         live_ok, live_errs = verify_store(root / "live-v1", PG_FORMAT_PREFIX, PG_REQUIRED_FILES)
         ch_ok, ch_errs = verify_store(root / "ch-v1", CH_FORMAT_PREFIX, CH_REQUIRED_FILES)
         errors = live_errs + ch_errs
         eligible = (not errors) and (live_ok or ch_ok)
+        if eligible and os.environ.get("GITHUB_EVENT_NAME") != "schedule":
+            runner_temp = os.environ.get("RUNNER_TEMP")
+            if runner_temp:
+                restored_file = Path(runner_temp) / "enact-cache-delta" / "cache_live_migrations.restored"
+                if restored_file.is_file():
+                    before = {line.strip() for line in restored_file.read_text(encoding="utf-8").splitlines() if line.strip()}
+                    if before and not _has_added_non_dot_entries([raw_root / "live-v1", raw_root / "ch-v1"], before):
+                        eligible = False
         github_output = os.environ.get("GITHUB_OUTPUT")
         if github_output:
             with open(github_output, "a", encoding="utf-8") as out:

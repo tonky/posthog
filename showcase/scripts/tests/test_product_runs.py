@@ -301,21 +301,32 @@ class ProductRunsTest(unittest.TestCase):
         self.assertEqual(0, code)
         self.assertEqual(40, len(runs))
 
-    def test_tasks_temporal_splits_into_its_own_pytest_group(self) -> None:
-        self.write(
-            "products/tasks/package.json",
-            json.dumps({"scripts": {"backend:test": "pytest -c ../../pytest.ini --rootdir ../.. backend/ -v"}}),
-        )
+    def test_tasks_and_batch_exports_temporal_split_into_their_own_pytest_groups(self) -> None:
+        for prod in ("tasks", "batch_exports"):
+            self.write(
+                f"products/{prod}/package.json",
+                json.dumps({"scripts": {"backend:test": "pytest -c ../../pytest.ini --rootdir ../.. backend/ -v"}}),
+            )
         code, runs = self.run_shard(
             "products/tasks/backend/temporal/workflows/tests/test_wf.py",
             "products/tasks/backend/tests/test_api.py",
+            "products/batch_exports/backend/tests/temporal/destinations/s3/test_workflow.py",
+            "products/batch_exports/backend/tests/management/test_update_batch_export_schedules.py",
         )
         self.assertEqual(0, code)
-        self.assertEqual([str(self.repo / "products/tasks")] * 2, [cwd for cwd, _, _ in runs])
-        self.assertEqual(["tasks_temporal", "tasks"], [group for _, group, _ in runs])
-        temporal_args, api_args = (args for _, _, args in runs)
-        self.assertTrue(temporal_args.endswith("backend/temporal/workflows/tests/test_wf.py"), temporal_args)
-        self.assertTrue(api_args.endswith("backend/tests/test_api.py"), api_args)
+        self.assertEqual(
+            [str(self.repo / "products/tasks")] * 2 + [str(self.repo / "products/batch_exports")] * 2,
+            [cwd for cwd, _, _ in runs],
+        )
+        self.assertEqual(
+            ["tasks_temporal", "tasks", "batch_exports_temporal", "batch_exports"],
+            [group for _, group, _ in runs],
+        )
+        tasks_temp, tasks_api, be_temp, be_mgmt = (args for _, _, args in runs)
+        self.assertTrue(tasks_temp.endswith("backend/temporal/workflows/tests/test_wf.py"), tasks_temp)
+        self.assertTrue(tasks_api.endswith("backend/tests/test_api.py"), tasks_api)
+        self.assertTrue(be_temp.endswith("backend/tests/temporal/destinations/s3/test_workflow.py"), be_temp)
+        self.assertTrue(be_mgmt.endswith("backend/tests/management/test_update_batch_export_schedules.py"), be_mgmt)
 
 
 if __name__ == "__main__":
