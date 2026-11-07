@@ -3,6 +3,9 @@ name: posthog-platform matrix
 on:
   workflow_call:
     inputs:
+      history_input_artifact:
+        type: string
+        required: false
       matrix:
         type: string
         required: true
@@ -31,7 +34,9 @@ env:
   XDG_CACHE_HOME: /tmp/.cache
 jobs:
   entry:
-    name: ${{ matrix.component }}
+    name: ${{ matrix.component }}${{ matrix.env.ENACT_SCHEDULING_HINT }}
+    env:
+      ENACT_OBSERVATIONS_ENABLED: "1"
     if: ${{ inputs.matrix != '{"include":[]}' && inputs.matrix != '[]' && inputs.matrix != '' }}
     strategy:
       fail-fast: false
@@ -187,6 +192,18 @@ jobs:
     - name: Ensure enve & enact CLI on PATH
       if: ${{ !steps.skip.outputs.hit }}
       run: enact ci setup-runner
+    - name: Download the Selected CI History
+      if: ${{ !steps.skip.outputs.hit }}
+      uses: actions/download-artifact@v8
+      with:
+        name: ${{ inputs.history_input_artifact }}
+        path: ${{ runner.temp }}/enact-history-input
+    - name: Import the Selected CI History
+      if: ${{ !steps.skip.outputs.hit }}
+      run: |-
+        export ENACT_HISTORY_DIR="$RUNNER_TEMP/enact-history"
+        printf 'ENACT_HISTORY_DIR=%s\n' "$ENACT_HISTORY_DIR" >> "$GITHUB_ENV"
+        enact ci history import --input "$RUNNER_TEMP/enact-history-input/snapshot.json" --manifest "$RUNNER_TEMP/enact-history-input/snapshot.manifest.json" --output "$ENACT_HISTORY_DIR"
     - name: Restore Built Outputs from the Host Cache
       id: outputs-host
       if: ${{ (steps.runner_caches.outputs.host != '' && toJson(matrix.output_keys) != 'null') && !steps.skip.outputs.hit }}
@@ -522,6 +539,7 @@ jobs:
         ENACT_PREEMPTION_NOTICE_SEC: ${{ matrix.preemption_notice_sec }}
         ENACT_R2_BUCKET: ${{ secrets.R2_BUCKET || env.R2_BUCKET }}
         ENACT_RECORD: ${{ (github.event_name == 'workflow_dispatch' && inputs.warm_reach == 'true' && github.ref_name == github.event.repository.default_branch) && 'every' || (github.event_name == 'push' && github.ref_name == github.event.repository.default_branch || github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref != github.event.repository.default_branch) && 'auto' || 'off' }}
+        ENACT_RUNNER_ALLOCATION: ${{ matrix.env.ENACT_RUNNER_ALLOCATION }}
         ENACT_RUNNER_TIER: ${{ matrix.runner_tier }}
         ENACT_SAME_REPO_PR: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref != github.event.repository.default_branch }}
         ENACT_TOPOLOGY: ${{ matrix.topology }}

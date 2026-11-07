@@ -23,9 +23,10 @@ _nodejsArea: {
 	root:       "."
 	cargo: workspace: "rust"
 	shards:      int | *1
-	recorder:    "own_linux"
-	recorded_by: ["enact-node"]
-	resources:   {cpus: 4, memory_mb: 6144}
+	recorder:         "own_linux"
+	recorded_by:      ["enact-node"]
+	resources:        {cpus: 4, memory_mb: 6144}
+	record_resources: resources
 	test: {
 		command: "showcase/scripts/run_nodejs_tests.sh {targets}"
 		timeout: "90m"

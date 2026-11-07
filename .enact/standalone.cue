@@ -330,7 +330,7 @@ pipeline: components: {
 			"showcase/scripts/rust_footprint.py", "showcase/scripts/node_reads.mjs",
 		], _liveFlagsRust])
 		jobs: test: {
-			worker: "standard", recorder: "own", resources: {cpus: 4, memory_mb: 12288}, needs: _mcpUiAppsNeeds
+			worker: "standard", recorder: "own", resources: {cpus: 4, memory_mb: 11264}, record_resources: resources, needs: _mcpUiAppsNeeds
 			tasks: [
 				{name: "Build UI apps", command: "../../../showcase/scripts/build_mcp_ui_apps.sh"},
 				{name: "Run Tests", command: "../../../showcase/scripts/run_mcp_integration.sh {targets}", timeout: "60m"},

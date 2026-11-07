@@ -66,6 +66,7 @@ jobs:
     if: ${{ needs.detect.outputs.builds != '{"include":[]}' && needs.detect.outputs.builds != '[]' && needs.detect.outputs.builds != '' }}
     uses: ./.github/workflows/ci-matrix.yml
     with:
+      history_input_artifact: ${{ needs.detect.outputs.history_input_artifact }}
       matrix: ${{ needs.detect.outputs.builds }}
       seed_caches: ${{ inputs.seed_caches }}
       warm_reach: ${{ inputs.warm_reach }}
@@ -78,22 +79,30 @@ jobs:
     if: ${{ !cancelled() && !failure() && needs.detect.outputs.builds_2 != '{"include":[]}' && needs.detect.outputs.builds_2 != '[]' && needs.detect.outputs.builds_2 != '' }}
     uses: ./.github/workflows/ci-matrix.yml
     with:
+      history_input_artifact: ${{ needs.detect.outputs.history_input_artifact }}
       matrix: ${{ needs.detect.outputs.builds_2 }}
       seed_caches: ${{ inputs.seed_caches }}
       warm_reach: ${{ inputs.warm_reach }}
     secrets: inherit
   detect:
     name: Detect Affected Components
+    env:
+      ENACT_OBSERVATIONS_ENABLED: "1"
+    permissions:
+      actions: read
+      contents: read
     runs-on:
     - self-hosted
     - Linux
+    - X64
     - tonky-ci
-    - tonky-ci-s
+    - tonky-ci-c2m4g
     timeout-minutes: 5
     outputs:
       builds: ${{ steps.diff.outputs.builds }}
       builds_2: ${{ steps.diff.outputs.builds_2 }}
       built: ${{ steps.diff.outputs.built }}
+      history_input_artifact: ${{ steps.history_restore.outputs.artifact }}
       matrix: ${{ steps.diff.outputs.matrix }}
       stage_cargo: ${{ steps.diff.outputs.stage_cargo }}
     steps:
@@ -310,6 +319,28 @@ jobs:
         "$E" ci install-binaries
     - name: Ensure enve & enact CLI on PATH
       run: enact ci setup-runner
+    - name: Select Immutable CI History
+      id: history_restore
+      run: |-
+        enact ci history restore --pipeline "$ENACT_HISTORY_PIPELINE" --repo "$GITHUB_REPOSITORY" --workflow "$ENACT_HISTORY_WORKFLOW" --head "$ENACT_HISTORY_HEAD" --output "$RUNNER_TEMP/enact-history-input/snapshot.json" --max-runs 8 --max-age-days 14 --max-bytes 4194304
+        export ENACT_HISTORY_DIR="$RUNNER_TEMP/enact-history"
+        printf 'ENACT_HISTORY_DIR=%s\n' "$ENACT_HISTORY_DIR" >> "$GITHUB_ENV"
+        enact ci history import --input "$RUNNER_TEMP/enact-history-input/snapshot.json" --manifest "$RUNNER_TEMP/enact-history-input/snapshot.manifest.json" --output "$ENACT_HISTORY_DIR"
+        printf 'artifact=enact-history-input-v1-%s\n' "$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+      env:
+        ENACT_HISTORY_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        ENACT_HISTORY_PIPELINE: .enact
+        ENACT_HISTORY_WORKFLOW: .github/workflows/ci.yml
+        GH_TOKEN: ${{ github.token }}
+    - name: Hand CI History to the Jobs
+      uses: actions/upload-artifact@v7
+      with:
+        if-no-files-found: error
+        name: enact-history-input-v1-${{ github.run_attempt }}
+        path: |-
+          ${{ runner.temp }}/enact-history-input/snapshot.json
+          ${{ runner.temp }}/enact-history-input/snapshot.manifest.json
+        retention-days: "14"
     - name: Compute Affected Component Matrix
       id: diff
       run: |-
@@ -343,6 +374,7 @@ jobs:
         ENACT_INPUT_WARM_REACH: ${{ inputs.warm_reach }}
         ENACT_INTEGRATION_BRANCH: ${{ vars.ENACT_INTEGRATION_BRANCH }}
         ENACT_R2_BUCKET: ${{ secrets.R2_BUCKET || env.R2_BUCKET }}
+        ENACT_RECORD: ${{ (github.event_name == 'workflow_dispatch' && inputs.warm_reach == 'true' && github.ref_name == github.event.repository.default_branch) && 'every' || (github.event_name == 'push' && github.ref_name == github.event.repository.default_branch || github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref != github.event.repository.default_branch) && 'auto' || 'off' }}
         ENACT_SAME_REPO_PR: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
         GITHUB_HEAD_REF: ${{ github.head_ref }}
         GITHUB_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
@@ -366,6 +398,8 @@ jobs:
         retention-days: "1"
   preflight:
     name: "Stage: Preflight"
+    env:
+      ENACT_OBSERVATIONS_ENABLED: "1"
     needs:
     - detect
     runs-on:
@@ -374,7 +408,7 @@ jobs:
     - ARM64
     - tonky-ci
     - mac1
-    - tonky-ci-m
+    - tonky-ci-c2m8g
     timeout-minutes: 90
     steps:
     - name: Probe Runner Caches
@@ -1126,6 +1160,16 @@ jobs:
         "$E" ci install-binaries
     - name: Ensure enve & enact CLI on PATH
       run: enact ci setup-runner
+    - name: Download the Selected CI History
+      uses: actions/download-artifact@v8
+      with:
+        name: ${{ needs.detect.outputs.history_input_artifact }}
+        path: ${{ runner.temp }}/enact-history-input
+    - name: Import the Selected CI History
+      run: |-
+        export ENACT_HISTORY_DIR="$RUNNER_TEMP/enact-history"
+        printf 'ENACT_HISTORY_DIR=%s\n' "$ENACT_HISTORY_DIR" >> "$GITHUB_ENV"
+        enact ci history import --input "$RUNNER_TEMP/enact-history-input/snapshot.json" --manifest "$RUNNER_TEMP/enact-history-input/snapshot.manifest.json" --output "$ENACT_HISTORY_DIR"
     - name: Download the Reach Map
       continue-on-error: true
       uses: actions/download-artifact@v8
@@ -1169,6 +1213,7 @@ jobs:
         ENACT_INPUT_WARM_REACH: ${{ inputs.warm_reach }}
         ENACT_INTEGRATION_BRANCH: ${{ vars.ENACT_INTEGRATION_BRANCH }}
         ENACT_R2_BUCKET: ${{ secrets.R2_BUCKET || env.R2_BUCKET }}
+        ENACT_RUNNER_ALLOCATION: "{\"cpus\":2.0,\"memory_mb\":8192,\"runtime_reserve_mb\":2048}"
         ENACT_SAME_REPO_PR: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
         GITHUB_HEAD_REF: ${{ github.head_ref }}
         GITHUB_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
@@ -1335,6 +1380,7 @@ jobs:
         ENACT_INPUT_WARM_REACH: ${{ inputs.warm_reach }}
         ENACT_INTEGRATION_BRANCH: ${{ vars.ENACT_INTEGRATION_BRANCH }}
         ENACT_R2_BUCKET: ${{ secrets.R2_BUCKET || env.R2_BUCKET }}
+        ENACT_RUNNER_ALLOCATION: "{\"cpus\":2.0,\"memory_mb\":8192,\"runtime_reserve_mb\":2048}"
         ENACT_SAME_REPO_PR: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
         GITHUB_HEAD_REF: ${{ github.head_ref }}
         GITHUB_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
@@ -1464,8 +1510,9 @@ jobs:
     runs-on:
     - self-hosted
     - Linux
+    - X64
     - tonky-ci
-    - tonky-ci-s
+    - tonky-ci-c2m4g
     timeout-minutes: 10
     steps:
     - name: Probe Runner Caches
@@ -1622,8 +1669,7 @@ jobs:
     - Linux
     - X64
     - tonky-ci
-    - ibp8
-    - tonky-ci-l
+    - tonky-ci-c2m13g
     timeout-minutes: 90
     steps:
     - name: Probe Runner Caches
@@ -1851,6 +1897,16 @@ jobs:
         "$E" ci install-binaries
     - name: Ensure enve & enact CLI on PATH
       run: enact ci setup-runner
+    - name: Download the Selected CI History
+      uses: actions/download-artifact@v8
+      with:
+        name: ${{ needs.detect.outputs.history_input_artifact }}
+        path: ${{ runner.temp }}/enact-history-input
+    - name: Import the Selected CI History
+      run: |-
+        export ENACT_HISTORY_DIR="$RUNNER_TEMP/enact-history"
+        printf 'ENACT_HISTORY_DIR=%s\n' "$ENACT_HISTORY_DIR" >> "$GITHUB_ENV"
+        enact ci history import --input "$RUNNER_TEMP/enact-history-input/snapshot.json" --manifest "$RUNNER_TEMP/enact-history-input/snapshot.manifest.json" --output "$ENACT_HISTORY_DIR"
     - name: Download the Reach Map
       continue-on-error: true
       uses: actions/download-artifact@v8
@@ -1996,8 +2052,7 @@ jobs:
     - Linux
     - X64
     - tonky-ci
-    - ibp8
-    - tonky-ci-l
+    - tonky-ci-c2m13g
     timeout-minutes: 90
     steps:
     - name: Probe Runner Caches
@@ -2267,6 +2322,16 @@ jobs:
         "$E" ci install-binaries
     - name: Ensure enve & enact CLI on PATH
       run: enact ci setup-runner
+    - name: Download the Selected CI History
+      uses: actions/download-artifact@v8
+      with:
+        name: ${{ needs.detect.outputs.history_input_artifact }}
+        path: ${{ runner.temp }}/enact-history-input
+    - name: Import the Selected CI History
+      run: |-
+        export ENACT_HISTORY_DIR="$RUNNER_TEMP/enact-history"
+        printf 'ENACT_HISTORY_DIR=%s\n' "$ENACT_HISTORY_DIR" >> "$GITHUB_ENV"
+        enact ci history import --input "$RUNNER_TEMP/enact-history-input/snapshot.json" --manifest "$RUNNER_TEMP/enact-history-input/snapshot.manifest.json" --output "$ENACT_HISTORY_DIR"
     - name: Download the Reach Map
       continue-on-error: true
       uses: actions/download-artifact@v8
@@ -2406,6 +2471,8 @@ jobs:
         retention-days: "1"
   summary:
     name: Telemetry & Summary
+    env:
+      ENACT_OBSERVATIONS_ENABLED: "1"
     needs:
     - detect
     - preflight
@@ -2417,8 +2484,9 @@ jobs:
     runs-on:
     - self-hosted
     - Linux
+    - X64
     - tonky-ci
-    - tonky-ci-s
+    - tonky-ci-c2m4g
     timeout-minutes: 5
     steps:
     - name: Probe Runner Caches
@@ -2548,6 +2616,19 @@ jobs:
         name: enact-workflow-summary
         path: .enact/state/summary.html
         retention-days: "1"
+    - name: Export CI History for All Outcomes
+      if: ${{ always() }}
+      run: enact ci history export --pipeline "$ENACT_HISTORY_PIPELINE" --input .enact/state/telemetry --output "$RUNNER_TEMP/enact-history-export/snapshot.json"
+      env:
+        ENACT_HISTORY_PIPELINE: .enact
+    - name: Upload Attempt CI History
+      if: ${{ always() }}
+      uses: actions/upload-artifact@v7
+      with:
+        if-no-files-found: error
+        name: enact-history-v1-${{ github.run_attempt }}
+        path: ${{ runner.temp }}/enact-history-export/snapshot.json
+        retention-days: "14"
   test:
     name: Run Tests
     needs:
@@ -2555,6 +2636,7 @@ jobs:
     if: ${{ needs.detect.outputs.matrix != '{"include":[]}' && needs.detect.outputs.matrix != '[]' && needs.detect.outputs.matrix != '' }}
     uses: ./.github/workflows/ci-matrix.yml
     with:
+      history_input_artifact: ${{ needs.detect.outputs.history_input_artifact }}
       matrix: ${{ needs.detect.outputs.matrix }}
       seed_caches: ${{ inputs.seed_caches }}
       warm_reach: ${{ inputs.warm_reach }}
@@ -2568,6 +2650,7 @@ jobs:
     if: ${{ !cancelled() && !failure() && needs.detect.outputs.built != '{"include":[]}' && needs.detect.outputs.built != '[]' && needs.detect.outputs.built != '' }}
     uses: ./.github/workflows/ci-matrix.yml
     with:
+      history_input_artifact: ${{ needs.detect.outputs.history_input_artifact }}
       matrix: ${{ needs.detect.outputs.built }}
       seed_caches: ${{ inputs.seed_caches }}
       warm_reach: ${{ inputs.warm_reach }}

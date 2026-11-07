@@ -103,6 +103,9 @@ pipeline: schema.#Pipeline & {
 	}
 
 	ci: {
+		control_worker:   "standard"
+		soft_placement:   {fallback_seconds: 15}
+		history:          {workflow: ".github/workflows/ci.yml"}
 		diagnostic_paths: [".enact/state/nodejs/*.services.log"]
 		rerun: {
 			labels:          ["rerun", "showcase"]
@@ -125,6 +128,7 @@ pipeline: schema.#Pipeline & {
 		workers: {
 			"mac1": {
 				labels:          ["self-hosted", "Linux", "ARM64", "tonky-ci", "mac1"]
+				host_id:         "mac1"
 				tier:            "dedicated"
 				available:       1
 				cost_per_min:    0.010
@@ -133,15 +137,20 @@ pipeline: schema.#Pipeline & {
 					cpus:      16
 					memory_mb: 36864
 					floor: {cpus: 4, memory_mb: 8192} // mac1 under its lane clamp (KNOWLEDGE `tonky-ci` load clamp)
-					sizes: {
-						"tonky-ci-s": {cpus: 2, memory_mb: 4096}
-						"tonky-ci-m": {cpus: 4, memory_mb: 8192}
-						"tonky-ci-l": {cpus: 6, memory_mb: 13312}
+					quantization: {
+						label_prefix:       "tonky-ci"
+						cpu_step:           1
+						memory_step_mb:     1024
+						runtime_reserve_mb: 2048
+						min: {cpus: 1, memory_mb: 4096}
+						max: {cpus: 6, memory_mb: 13312}
+						control: {cpus: 2, memory_mb: 4096}
 					}
 				}
 			}
 			"standard": {
-				labels:          ["self-hosted", "Linux", "X64", "tonky-ci", "ibp8"]
+				labels:          ["self-hosted", "Linux", "X64", "tonky-ci"]
+				host_id:         "ibp8"
 				tier:            "dedicated"
 				available:       1
 				cost_per_min:    0.010
@@ -149,23 +158,31 @@ pipeline: schema.#Pipeline & {
 				pool: {
 					cpus:      14
 					memory_mb: 28672
-					sizes: {
-						"tonky-ci-s": {cpus: 2, memory_mb: 4096}
-						"tonky-ci-m": {cpus: 4, memory_mb: 8192}
-						"tonky-ci-l": {cpus: 6, memory_mb: 13312}
+					quantization: {
+						label_prefix:       "tonky-ci"
+						cpu_step:           1
+						memory_step_mb:     1024
+						runtime_reserve_mb: 2048
+						min: {cpus: 1, memory_mb: 4096}
+						max: {cpus: 6, memory_mb: 13312}
+						control: {cpus: 2, memory_mb: 4096}
 					}
 				}
 			}
 			l7: {
-				// A second X64 host (8c/14G): s and m only; a gate lane holding l7 drains it to zero.
-				// A size costs the rate times its share of the largest size: 0.006 prices its m as
-				// the 13 GB pools price theirs.
-				labels: ["self-hosted", "Linux", "X64", "tonky-ci", "l7"], tier: "dedicated", available: 1, cost_per_min: 0.006, timeout_minutes: 90
+				// A second X64 host (8c/14G), limited to 4c/8G allocations.
+				// A gate lane holding l7 drains its dispatcher to zero.
+				labels: ["self-hosted", "Linux", "X64", "tonky-ci"], host_id: "l7", tier: "dedicated", available: 1, cost_per_min: 0.006, timeout_minutes: 90
 				pool: {
 					cpus: 8, memory_mb: 12288
-					sizes: {
-						"tonky-ci-s": {cpus: 2, memory_mb: 4096}
-						"tonky-ci-m": {cpus: 4, memory_mb: 8192}
+					quantization: {
+						label_prefix:       "tonky-ci"
+						cpu_step:           1
+						memory_step_mb:     1024
+						runtime_reserve_mb: 2048
+						min: {cpus: 1, memory_mb: 4096}
+						max: {cpus: 4, memory_mb: 8192}
+						control: {cpus: 2, memory_mb: 4096}
 					}
 				}
 			}

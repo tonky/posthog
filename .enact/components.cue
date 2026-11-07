@@ -359,7 +359,8 @@ pipeline: schema.#Pipeline & {
 					name: "Test"
 					// Nightly peaks per shard: 1.8-3.8 GB (a 10.9 GB shard was the warehouse-URL hook's
 					// absence: test_groups_revenue_analytics' s3() reads retried at upstream's bucket).
-					resources: {cpus: 0.75, memory_mb: 4096}
+					resources:        {cpus: 0.75, memory_mb: 4096}
+					record_resources: resources
 					tasks: [
 						{name: "Build plugin transpiler", command: "showcase/scripts/build_plugin_transpiler.sh", timeout: "15m"},
 						_pytestRunTask & {name: "Run Tests"},
@@ -425,7 +426,8 @@ pipeline: schema.#Pipeline & {
 			shards:       4
 			shard_groups: {by: "products/*/", overhead_s: 17}
 			// The nightly's measured shard peak: 7.1 GB (warehouse_sources' shard).
-			resources: {cpus: 0.75, memory_mb: 7680}
+			resources:        {cpus: 0.75, memory_mb: 7680}
+			record_resources: resources
 			scoping: {
 				domain_roots:    ["posthog", "ee", "products"]
 				service_markers: ["django_db", "BaseTest", "APITestCase", "ClickhouseTestMixin", "NonDeterministicDatabaseTestMixin", "posthog.test"]
@@ -587,7 +589,7 @@ pipeline: schema.#Pipeline & {
 				typecheck: {
 					direct:    true
 					worker:    "standard"
-					resources: {cpus: 2.0, memory_mb: 12288}
+					resources: {cpus: 2.0, memory_mb: 11264}
 					needs:     ["quill:build"]
 					tasks: [
 						{
@@ -788,9 +790,10 @@ pipeline: schema.#Pipeline & {
 					}]
 				}
 				test: {
-					shards:    1
-					recorder:  "own_linux"
-					resources: {cpus: 4, memory_mb: 8192}
+					shards:           1
+					recorder:         "own_linux"
+					resources:        {cpus: 4, memory_mb: 8192}
+					record_resources: resources
 					tasks: [{command: "../showcase/scripts/run_rust_tests.sh {targets}", timeout: "75m"}]
 					target_scope: {
 						fallback: "none"
@@ -1036,10 +1039,11 @@ pipeline: schema.#Pipeline & {
 				"showcase/scripts/node_reads.mjs",
 			], _liveCaptureRust, _liveIngestionNode])
 			jobs: test: {
-				worker:    "standard"
-				recorder:  "own"
-				shards:    1
-				resources: {cpus: 6, memory_mb: 11264}
+				worker:           "standard"
+				recorder:         "own"
+				shards:           1
+				resources:        {cpus: 6, memory_mb: 11264}
+				record_resources: resources
 				needs:     ["frontend:build"]
 				tasks: [
 					{name: "Build", command: _frontendBuild + " && showcase/scripts/build_e2e.sh", timeout: "30m"},
