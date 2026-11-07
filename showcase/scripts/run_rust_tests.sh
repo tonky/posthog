@@ -94,6 +94,7 @@ endpoints=(
     TEST_REDIS_URL="redis://127.0.0.1:${ENVE_SERVICE_REDIS_PORT:?redis is not running}/"
     KAFKA_HOSTS="127.0.0.1:${ENVE_SERVICE_KAFKA_PORT:?kafka is not running}"
     OBJECT_STORAGE_ENDPOINT="http://127.0.0.1:${ENVE_SERVICE_SEAWEEDFS_PORT:?seaweedfs is not running}"
+    SEAWEEDFS_ENDPOINT="http://127.0.0.1:${ENVE_SERVICE_SEAWEEDFS_OPEN_PORT:?seaweedfs-open is not running}"
     ETCD_ENDPOINT="http://127.0.0.1:${ENVE_SERVICE_ETCD_PORT:?etcd is not running}"
     # No container runtime: the testcontainers tests (the k3s_integration binaries and
     # common-redis's) boot theirs in Docker, which the services here never run in. A host

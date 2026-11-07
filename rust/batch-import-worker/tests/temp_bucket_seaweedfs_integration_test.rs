@@ -21,7 +21,7 @@ use object_store::{ObjectStore, ObjectStoreExt};
 use std::io::Write;
 use uuid::Uuid;
 
-static SEAWEEDFS_ENDPOINT: std::sync::LazyLock<&str> = std::sync::LazyLock::new(|| std::env::var("OBJECT_STORAGE_ENDPOINT").map_or("http://localhost:8333", |v| &*v.leak()));
+static SEAWEEDFS_ENDPOINT: std::sync::LazyLock<&str> = std::sync::LazyLock::new(|| std::env::var("SEAWEEDFS_ENDPOINT").map_or("http://localhost:8333", |v| &*v.leak()));
 const TEST_BUCKET: &str = "posthog";
 
 fn seaweedfs_store() -> Arc<dyn ObjectStore> {

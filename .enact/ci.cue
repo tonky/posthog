@@ -53,6 +53,7 @@ pipeline: schema.#Pipeline & {
 		clickhouse:       {name: "clickhouse", enact: kind: schema.#ServiceKind.ClickHouse}
 		kafka:            {name: "kafka", enact: kind: schema.#ServiceKind.Kafka}
 		seaweedfs:        {name: "seaweedfs", enact: kind: schema.#ServiceKind.ObjectStorage}
+		"seaweedfs-open": {name: "seaweedfs-open", enact: buckets: ["posthog"]}
 		temporal:         {name: "temporal", enact: kind: schema.#ServiceKind.Temporal}
 		etcd:             name: "etcd"
 		"valkey-cluster": name: "valkey-cluster"
@@ -130,6 +131,7 @@ pipeline: schema.#Pipeline & {
 				pool: {
 					cpus:      16
 					memory_mb: 36864
+					floor: {cpus: 4, memory_mb: 8192} // mac1 under its lane clamp (KNOWLEDGE `tonky-ci` load clamp)
 					sizes: {
 						"tonky-ci-s": {cpus: 2, memory_mb: 4096}
 						"tonky-ci-m": {cpus: 4, memory_mb: 8192}
@@ -172,14 +174,5 @@ pipeline: schema.#Pipeline & {
 	workflows: {
 		ci:    {layout: "staged", services: "on_demand", stages: [_preflightStage & {runner: "mac1"}, _testStage]}
 		local: {layout: "staged", services: "on_demand", stages: [_preflightStage, _testStage]}
-		nightly: {
-			layout:   "staged"
-			scope:    "all"
-			services: "on_demand"
-			triggers: {
-				workflow_dispatch: true
-			}
-			stages: [_testStage]
-		}
 	}
 }

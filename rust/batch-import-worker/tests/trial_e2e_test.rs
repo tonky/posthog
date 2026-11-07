@@ -28,7 +28,7 @@ use serde_json::Value;
 use tempfile::TempDir;
 use uuid::Uuid;
 
-static SEAWEEDFS_ENDPOINT: std::sync::LazyLock<&str> = std::sync::LazyLock::new(|| std::env::var("OBJECT_STORAGE_ENDPOINT").map_or("http://localhost:8333", |v| &*v.leak()));
+static SEAWEEDFS_ENDPOINT: std::sync::LazyLock<&str> = std::sync::LazyLock::new(|| std::env::var("SEAWEEDFS_ENDPOINT").map_or("http://localhost:8333", |v| &*v.leak()));
 const TEST_BUCKET: &str = "posthog";
 const TEAM_ID: i32 = 1;
 // Small enough to split the ~100-byte test lines across chunk boundaries.

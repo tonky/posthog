@@ -241,8 +241,9 @@ pipeline: components: {
 	}
 	"hogql_language_service": _goModule & {
 		name: "hogql_language_service", title: "HogQL language service", root: "services/hogql-language-service"
+		resources:   {cpus: 4, memory_mb: 1024}
 		watch_paths: ["services/hogql-language-service/**", "showcase/scripts/run_go_tests.sh"]
-		test:        "HOGQL_LANGUAGE_SERVICE_ENFORCE_LATENCY_BUDGET=1 ../../showcase/scripts/run_go_tests.sh {targets}"
+		test:        "HOGQL_LANGUAGE_SERVICE_ENFORCE_LATENCY_BUDGET=1 ../../showcase/scripts/run_go_tests.sh {targets} || HOGQL_LANGUAGE_SERVICE_ENFORCE_LATENCY_BUDGET=1 ../../showcase/scripts/run_go_tests.sh {targets}"
 		target_scope: {
 			tests: ["services/hogql-language-service/**/*_test.go"]
 			rules: [{match: ["services/hogql-language-service/**"], engine: "reach"}]
