@@ -605,10 +605,10 @@ pipeline: schema.#Pipeline & {
 		"openapi_types": {
 			name:            "openapi_types"
 			title:           "Generated OpenAPI types"
-			technology:      "python"
-			root:            "."
-			depends_on:      ["base", "products"]
-			workspace_scope: {include_dependencies: false, include: list.Concat([_py_cone, ["tools/openapi-codegen", "frontend/bin", "frontend/src/generated", "frontend/src/lib/api-orval-mutator.ts", "frontend/src/lib/agentScopes.generated.ts", "services/mcp/definitions", "services/mcp/scripts", "services/mcp/src"]])}
+			technology:      ["python", "typescript"]
+			root:            "tools/openapi-codegen"
+			depends_on:      ["base", "products", "js-root"]
+			workspace_scope: {include_dependencies: false, include: list.Concat([_py_cone, ["package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml", "patches", "tools/openapi-codegen", "frontend/package.json", "frontend/bin", "frontend/src/generated", "frontend/src/lib/api-orval-mutator.ts", "frontend/src/lib/agentScopes.generated.ts", "services/mcp/package.json", "services/mcp/definitions", "services/mcp/scripts", "services/mcp/src", "packages/quill/package.json", "packages/llm-normalizer/package.json"]])}
 			watch_paths: [
 				"frontend/src/generated/**", "frontend/src/lib/agentScopes.generated.ts",
 				"products/*/frontend/generated/**", "services/mcp/src/generated/**",
@@ -625,7 +625,7 @@ pipeline: schema.#Pipeline & {
 				"showcase/scripts/no_drift.sh",
 			]
 			schema_check: {
-				command:         "showcase/scripts/exclusive.sh geoip bin/download-mmdb && ./bin/hogli build:openapi && pnpm --filter=@posthog/mcp run scaffold-yaml -- --sync-all"
+				command:         "cd ../.. && showcase/scripts/exclusive.sh geoip bin/download-mmdb && ./bin/hogli build:openapi && pnpm --filter=@posthog/mcp run scaffold-yaml -- --sync-all"
 				expect_no_drift: true
 			}
 			resources: {cpus: 1.0, memory_mb: 2400}

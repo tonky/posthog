@@ -1077,11 +1077,14 @@ jobs:
           .github/workflows/update-ai-costs.yml
           services/oauth-proxy
           tools/openapi-codegen
+          frontend/package.json
           frontend/src/generated
           frontend/src/lib/api-orval-mutator.ts
+          services/mcp/package.json
           services/mcp/definitions
           services/mcp/scripts
           services/mcp/src
+          packages/quill/package.json
           tools/phrocs
           products/isolation_baseline.txt
           products/model_crossing_uses_baseline.txt
@@ -1583,11 +1586,14 @@ jobs:
           .github/workflows/update-ai-costs.yml
           services/oauth-proxy
           tools/openapi-codegen
+          frontend/package.json
           frontend/src/generated
           frontend/src/lib/api-orval-mutator.ts
+          services/mcp/package.json
           services/mcp/definitions
           services/mcp/scripts
           services/mcp/src
+          packages/quill/package.json
           tools/phrocs
           products/isolation_baseline.txt
           products/model_crossing_uses_baseline.txt
@@ -2073,7 +2079,7 @@ jobs:
         AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID || env.R2_ACCESS_KEY_ID }}
         AWS_REGION: auto
         AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY || env.R2_SECRET_ACCESS_KEY }}
-        ENACT_ENVIRONMENT_DIRS: "[\".\",\"bin/hobby-installer\",\"cli\",\"livestream\",\"nodejs\",\"products/desktop\",\"proto\",\"rust\",\"services/agent-proxy\",\"services/integration-service\",\"services/mcp\",\"services/oauth-proxy\",\"tools/phrocs\"]"
+        ENACT_ENVIRONMENT_DIRS: "[\".\",\"bin/hobby-installer\",\"cli\",\"livestream\",\"nodejs\",\"products/desktop\",\"proto\",\"rust\",\"services/agent-proxy\",\"services/integration-service\",\"services/mcp\",\"services/oauth-proxy\",\"tools/openapi-codegen\",\"tools/phrocs\"]"
         ENACT_ENVIRONMENT_FILES: "[]"
         ENACT_JOB_SERVICES: ""
         ENACT_PREPARE_ENVIRONMENT_FILES: "[\"enve.cue\"]"
@@ -4088,8 +4094,10 @@ jobs:
           frontend/jest.quarantine.ts
           .github/workflows/update-ai-costs.yml
           services/oauth-proxy
+          frontend/package.json
           frontend/src/generated
           frontend/src/lib/api-orval-mutator.ts
+          services/mcp/package.json
           services/mcp/definitions
           services/mcp/scripts
           services/mcp/src
@@ -4245,7 +4253,6 @@ jobs:
           posthog/templates/replay_player_frame
           devenv
           .github/scripts/migration-deletion-allowlist.txt
-          frontend/package.json
           services/mcp/tsconfig.json
           frontend/src/generated/core/api.ts
           frontend/src/lib/api.ts
@@ -4678,8 +4685,10 @@ jobs:
           frontend/jest.quarantine.ts
           .github/workflows/update-ai-costs.yml
           services/oauth-proxy
+          frontend/package.json
           frontend/src/generated
           frontend/src/lib/api-orval-mutator.ts
+          services/mcp/package.json
           services/mcp/definitions
           services/mcp/scripts
           services/mcp/src
@@ -4835,7 +4844,6 @@ jobs:
           posthog/templates/replay_player_frame
           devenv
           .github/scripts/migration-deletion-allowlist.txt
-          frontend/package.json
           services/mcp/tsconfig.json
           frontend/src/generated/core/api.ts
           frontend/src/lib/api.ts
