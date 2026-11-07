@@ -472,7 +472,7 @@ pipeline: schema.#Pipeline & {
 				}]
 			}
 			shards:    3
-			resources: {cpus: 2.0, memory_mb: 5120}
+			resources: {cpus: 0.75, memory_mb: 2048}
 			scoping: {
 				domain_roots:    ["posthog", "products"]
 				service_markers: ["django_db", "BaseTest", "ClickhouseTestMixin", "posthog.test"]
