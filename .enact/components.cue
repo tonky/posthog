@@ -641,18 +641,19 @@ pipeline: schema.#Pipeline & {
 					]
 				}
 				test: {
-					name:        "Test"
-					shards:      12
-					max_shards:  12
-					worker:      "standard"
-					resources:   {cpus: 2.0, memory_mb: 5120}
-					recorder:    "trace"
-					recorded_by: ["enact-node"]
+					name:             "Test"
+					shards:           12
+					max_shards:       12
+					worker:           "standard"
+					resources:        {cpus: 4.0, memory_mb: 7168}
+					record_resources: resources
+					recorder:         "trace"
+					recorded_by:      ["enact-node"]
 					tasks: [
 						{name: "Build products", command: "showcase/scripts/build_products.sh"},
 						{name: "Warm jest", command: "CI=true pnpm --filter=@posthog/frontend exec jest --listTests >/dev/null"},
 						// ENACT_TEST_VERBOSE: each test's line (`✓`/`✕`), which enact reads into per-test outcomes.
-						{name: "Run Tests", command: "CI=true pnpm --filter=@posthog/frontend exec jest --maxWorkers=2 --forceExit --testNamePattern='^(?!evaluationBackfillsLogic anchors a relative preset on the project timezone$)' ${ENACT_TEST_VERBOSE:+--verbose} {targets}"},
+						{name: "Run Tests", command: "CI=true pnpm --filter=@posthog/frontend exec jest --maxWorkers=2 --forceExit --testNamePattern='^(?!evaluationBackfillsLogic anchors a relative preset on the project timezone$)' ${ENACT_TEST_VERBOSE:+--verbose} {targets}", timeout: "48m"},
 					]
 				}
 			}

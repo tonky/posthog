@@ -112,6 +112,7 @@ pipeline: schema.#Pipeline & {
 			branch_prefixes: ["showcase/"]
 		}
 		concurrency: max_parallel_jobs: 24
+		scheduler: max_matrix_size: 128
 		kept_workflows: [
 			".github/workflows/cd-sandbox-base-image.yml", ".github/workflows/ci-backend.yml",
 			".github/workflows/ci-python.yml", ".github/workflows/ci-security.yaml",
