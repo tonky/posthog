@@ -1020,7 +1020,7 @@ pipeline: schema.#Pipeline & {
 				ui_apps: {
 					services:  false
 					needs:     ["quill:build"]
-					resources: {cpus: 2.0, memory_mb: 3072}
+					resources: {cpus: 2.0, memory_mb: 4096}
 					outputs: {
 						arch_independent: true
 						paths: ["services/mcp/public/ui-apps"]
@@ -1084,7 +1084,7 @@ pipeline: schema.#Pipeline & {
 			jobs: test: {
 				recorder:         "own"
 				shards:           1
-				resources:        {cpus: 6, memory_mb: 11264}
+				resources:        {cpus: 6, memory_mb: 12288}
 				record_resources: resources
 				needs:     ["frontend:build"]
 				tasks: [
