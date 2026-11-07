@@ -194,7 +194,7 @@ pipeline: schema.#Pipeline & {
 						runtime_reserve_mb: 1024
 						min: {cpus: 1, memory_mb: 4096}
 						max: {cpus: 6, memory_mb: 13312}
-						control: {cpus: 2, memory_mb: 4096}
+						control: {cpus: 2, memory_mb: 6144}
 					}
 				}
 			}
@@ -215,7 +215,7 @@ pipeline: schema.#Pipeline & {
 						runtime_reserve_mb: 1024
 						min: {cpus: 1, memory_mb: 4096}
 						max: {cpus: 6, memory_mb: 13312}
-						control: {cpus: 2, memory_mb: 4096}
+						control: {cpus: 2, memory_mb: 6144}
 					}
 				}
 			}
@@ -232,7 +232,7 @@ pipeline: schema.#Pipeline & {
 						runtime_reserve_mb: 1024
 						min: {cpus: 1, memory_mb: 4096}
 						max: {cpus: 8, memory_mb: 8192}
-						control: {cpus: 2, memory_mb: 4096}
+						control: {cpus: 2, memory_mb: 6144}
 					}
 				}
 			}

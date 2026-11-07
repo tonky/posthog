@@ -141,7 +141,7 @@ jobs:
     - self-hosted
     - Linux
     - tonky-ci
-    - tonky-ci-c2m4g
+    - tonky-ci-c2m6g
     timeout-minutes: 5
     outputs:
       builds_frontend__build: ${{ steps.diff.outputs.builds_frontend__build }}
@@ -3139,7 +3139,7 @@ jobs:
     - self-hosted
     - Linux
     - tonky-ci
-    - tonky-ci-c2m4g
+    - tonky-ci-c2m6g
     timeout-minutes: 15
     steps:
     - name: Probe Runner Caches
