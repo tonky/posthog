@@ -132,7 +132,7 @@ pipeline: schema.#Pipeline & {
 				tier: "on_demand", available: 20, cost_per_min: 0
 				// Calibrated from measured ~80s cold preparation on ubuntu-24.04.
 				setup_overhead_sec: 80
-				timeout_minutes: 90
+				timeout_minutes: 120
 			}
 			"mac1": {
 				labels:          ["self-hosted", "Linux", "ARM64", "tonky-ci", "mac1"]
@@ -140,7 +140,7 @@ pipeline: schema.#Pipeline & {
 				tier:            "dedicated"
 				available:       1
 				cost_per_min:    0.010
-				timeout_minutes: 90
+				timeout_minutes: 120
 				pool: {
 					cpus:      16
 					memory_mb: 36864
@@ -162,7 +162,7 @@ pipeline: schema.#Pipeline & {
 				tier:            "dedicated"
 				available:       1
 				cost_per_min:    0.010
-				timeout_minutes: 90
+				timeout_minutes: 120
 				pool: {
 					cpus:      14
 					memory_mb: 28672
@@ -180,7 +180,7 @@ pipeline: schema.#Pipeline & {
 			l7: {
 				// A second X64 host (16t, ~13 GiB free), up to 6c/13G allocations when idle.
 				// A gate lane holding l7 drains its dispatcher to zero.
-				labels: ["self-hosted", "Linux", "X64", "tonky-ci"], host_id: "l7", tier: "dedicated", available: 1, cost_per_min: 0.006, timeout_minutes: 90
+				labels: ["self-hosted", "Linux", "X64", "tonky-ci"], host_id: "l7", tier: "dedicated", available: 1, cost_per_min: 0.006, timeout_minutes: 120
 				pool: {
 					cpus: 16, memory_mb: 13312
 					quantization: {

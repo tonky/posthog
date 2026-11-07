@@ -73,7 +73,10 @@ pipeline: components: {
 			".github/workflows/ci-backend.yml", ".depot/workflows/ci-backend.yml",
 			".github/new-events-schema-targets.txt", "showcase/scripts/run_ci_scripts_tests.sh",
 		]
-		test:             "showcase/scripts/run_ci_scripts_tests.sh {targets}"
+		test: {
+			command: "showcase/scripts/run_ci_scripts_tests.sh {targets}"
+			timeout: "20m"
+		}
 		recorder:         "trace"
 		record_resources: _recordPy
 		recorded_by:      ["enact-node"]
@@ -135,7 +138,12 @@ pipeline: components: {
 				resources: {cpus: 4.0, memory_mb: 9216}
 				tasks: [
 					_install,
-					{name: "Typecheck", command: "pnpm run typecheck", timeout: "30m"},
+					{
+						name:    "Typecheck"
+						command: "pnpm build:agent && pnpm --dir ../../packages/agent exec turbo typecheck --concurrency=2 && pnpm exec turbo typecheck --concurrency=2"
+						env: NODE_OPTIONS: "--max-old-space-size=4096"
+						timeout: "30m"
+					},
 				]
 			}
 			test: {
@@ -144,7 +152,12 @@ pipeline: components: {
 				resources: {cpus: 4.0, memory_mb: 8192}
 				tasks: [
 					_install,
-					{name: "Run Tests", command: "node scripts/rebuild-better-sqlite3-node.mjs && pnpm test", timeout: "30m"},
+					{
+						name:      "Run Tests"
+						command:   "node scripts/rebuild-better-sqlite3-node.mjs && pnpm test"
+						unset_env: ["GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0"]
+						timeout:   "30m"
+					},
 				]
 			}
 		}

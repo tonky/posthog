@@ -48,7 +48,7 @@ jobs:
       max-parallel: 24
       matrix: ${{ fromJson(inputs.matrix) }}
     runs-on: ${{ matrix.runs_on }}
-    timeout-minutes: 90
+    timeout-minutes: 120
     steps:
     - name: Probe Runner Caches
       id: runner_caches

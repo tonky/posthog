@@ -166,7 +166,7 @@ _harness: {
 
 _pytestRunTask: {
 	command:          string | *"bash showcase/scripts/run_sharded_pytest.sh @{targets_file}"
-	timeout:          "90m"
+	timeout:          "110m"
 	error_exit_codes: _pytestErrors
 	services:         [...string] | *_pytestSetupServices
 }
@@ -423,7 +423,7 @@ pipeline: schema.#Pipeline & {
 				}]
 			}
 			max_shards:   12
-			shards:       4
+			shards:       10
 			shard_groups: {by: "products/*/", overhead_s: 17}
 			// The nightly's measured shard peak: 7.1 GB (warehouse_sources' shard).
 			resources:        {cpus: 0.75, memory_mb: 7680}
@@ -642,7 +642,8 @@ pipeline: schema.#Pipeline & {
 				}
 				test: {
 					name:        "Test"
-					shards:      4
+					shards:      12
+					max_shards:  12
 					worker:      "standard"
 					resources:   {cpus: 2.0, memory_mb: 5120}
 					recorder:    "trace"
@@ -750,7 +751,11 @@ pipeline: schema.#Pipeline & {
 						}
 						command: "showcase/scripts/build_once.sh agent-node-modules packages/agent/node_modules/.enact-build-key packages/agent/package.json packages/agent/pnpm-lock.yaml packages/agent/pnpm-workspace.yaml 'packages/agent/packages/*/package.json' -- pnpm --dir packages/agent install --frozen-lockfile && cd packages/agent && pnpm exec turbo run build --filter='!@posthog/agent'"
 					},
-					{name: "Run Tests", command: "../../showcase/scripts/agent_vitest.sh {relative_targets}"},
+					{
+						name:      "Run Tests"
+						command:   "../../showcase/scripts/agent_vitest.sh {relative_targets}"
+						unset_env: ["GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0"]
+					},
 				]
 			}
 			watch_paths:  ["showcase/scripts/agent_vitest.sh"]
@@ -795,11 +800,12 @@ pipeline: schema.#Pipeline & {
 					}]
 				}
 				test: {
-					shards:           1
+					shards:           4
+					max_shards:       4
 					recorder:         "own_linux"
 					resources:        {cpus: 4, memory_mb: 8192}
 					record_resources: resources
-					tasks: [{command: "../showcase/scripts/run_rust_tests.sh {targets}", timeout: "75m"}]
+					tasks: [{command: "../showcase/scripts/run_rust_tests.sh {targets}", timeout: "110m"}]
 					target_scope: {
 						fallback: "none"
 						rules:    _rustTestScopeRules
@@ -832,7 +838,7 @@ pipeline: schema.#Pipeline & {
 					shards:    1
 					services:  false
 					resources: {cpus: 4, memory_mb: 8192}
-					tasks: [{command: "../showcase/scripts/run_rust_release_build.sh {targets}", timeout: "90m"}]
+					tasks: [{command: "../showcase/scripts/run_rust_release_build.sh {targets}", timeout: "110m"}]
 					target_scope: {
 						select_in_job: true
 						tests:         _rustCrates
