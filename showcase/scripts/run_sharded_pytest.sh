@@ -32,13 +32,111 @@ ROOT="$PWD"
 export PYTHONPATH="$ROOT/showcase/pytest_plugins${PYTHONPATH:+:$PYTHONPATH}"
 export POSTHOG_REPO_ROOT="$ROOT"
 export ENACT_REPLAY_RESULTS="${ENACT_REPLAY_RESULTS:-$ROOT/.enact/state/pytest}"
-if [ -z "${TZDIR:-}" ] && [ ! -d /usr/share/zoneinfo ]; then
-    for _tzdir in "$ROOT"/.venv/lib/python*/site-packages/tzdata/zoneinfo; do
-        if [ -d "$_tzdir" ]; then
-            export TZDIR="$_tzdir"
-            break
-        fi
+if [ -z "${TZDIR:-}" ] && [ ! -f /usr/share/zoneinfo/tzdata.zi ]; then
+    _enve_store="${ENVE_STORE_DIR:-}"
+    if [ -z "$_enve_store" ]; then
+        _py_bin="$(command -v python3 2>/dev/null || true)"
+        case "$_py_bin" in
+            */*/*/*) _enve_store="${_py_bin%/*/*/*}" ;;
+        esac
+    fi
+    for _tz_marker in tzdata.zi UTC; do
+        for _tzdir in \
+            ${_enve_store:+"$_enve_store"/*-tzdata-*/share/zoneinfo} \
+            /nix/store/*-tzdata-*/share/zoneinfo \
+            "$ROOT"/.venv/lib/python*/site-packages/tzdata/zoneinfo; do
+            if [ -f "$_tzdir/$_tz_marker" ]; then
+                export TZDIR="$_tzdir"
+                break 2
+            fi
+        done
     done
+fi
+# pyarrow's manylinux wheel compiles arrow_vendored::date::get_tz_dir() with USE_OS_TZDB=1,
+# which ignores TZDIR and stats only /usr/share/zoneinfo{/uclibc}. Minimal CI containers
+# (mac1) omit /usr/share/zoneinfo; preload a tiny path-remap shim to $TZDIR when needed.
+if [ ! -d /usr/share/zoneinfo ] && [ -n "${TZDIR:-}" ] && [ "$(uname -s)" = Linux ] && command -v cc >/dev/null 2>&1; then
+    mkdir -p "$ROOT/.enact/state"
+    _tz_so="$ROOT/.enact/state/tzdir-shim-v1-${HOSTTYPE:-linux}.so"
+    if [ ! -s "$_tz_so" ]; then
+        _tz_tmp="${_tz_so}.$$"
+        cat <<'TZSHIM' | cc -shared -fPIC -O2 -x c - -o "$_tz_tmp" -ldl 2>/dev/null && mv -f "$_tz_tmp" "$_tz_so" || rm -f "$_tz_tmp"
+#define _GNU_SOURCE
+#include <dlfcn.h>
+#include <dirent.h>
+#include <fcntl.h>
+#include <stdarg.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/stat.h>
+
+static const char *enact_tz_remap(const char *p, char *b, size_t cap) {
+    const char *pfx = "/usr/share/zoneinfo";
+    if (!p || strncmp(p, pfx, 19) != 0 || (p[19] != '\0' && p[19] != '/')) return p;
+    const char *tz = getenv("TZDIR");
+    if (!tz || !*tz) return p;
+    int n = snprintf(b, cap, "%s%s", tz, p + 19);
+    return (n > 0 && (size_t)n < cap) ? b : p;
+}
+int __xstat(int v, const char *p, struct stat *s) {
+    static int (*fn)(int, const char *, struct stat *);
+    if (!fn) fn = dlsym(RTLD_NEXT, "__xstat");
+    char b[4096]; return fn(v, enact_tz_remap(p, b, sizeof b), s);
+}
+int __xstat64(int v, const char *p, struct stat64 *s) {
+    static int (*fn)(int, const char *, struct stat64 *);
+    if (!fn) fn = dlsym(RTLD_NEXT, "__xstat64");
+    char b[4096]; return fn(v, enact_tz_remap(p, b, sizeof b), s);
+}
+int stat(const char *p, struct stat *s) {
+    static int (*fn)(const char *, struct stat *);
+    if (!fn) fn = dlsym(RTLD_NEXT, "stat");
+    char b[4096]; return fn(enact_tz_remap(p, b, sizeof b), s);
+}
+int stat64(const char *p, struct stat64 *s) {
+    static int (*fn)(const char *, struct stat64 *);
+    if (!fn) fn = dlsym(RTLD_NEXT, "stat64");
+    char b[4096]; return fn(enact_tz_remap(p, b, sizeof b), s);
+}
+DIR *opendir(const char *p) {
+    static DIR *(*fn)(const char *);
+    if (!fn) fn = dlsym(RTLD_NEXT, "opendir");
+    char b[4096]; return fn(enact_tz_remap(p, b, sizeof b));
+}
+FILE *fopen(const char *p, const char *m) {
+    static FILE *(*fn)(const char *, const char *);
+    if (!fn) fn = dlsym(RTLD_NEXT, "fopen");
+    char b[4096]; return fn(enact_tz_remap(p, b, sizeof b), m);
+}
+FILE *fopen64(const char *p, const char *m) {
+    static FILE *(*fn)(const char *, const char *);
+    if (!fn) fn = dlsym(RTLD_NEXT, "fopen64");
+    char b[4096]; return fn(enact_tz_remap(p, b, sizeof b), m);
+}
+int open(const char *p, int f, ...) {
+    static int (*fn)(const char *, int, mode_t);
+    if (!fn) fn = dlsym(RTLD_NEXT, "open");
+    mode_t m = 0; if (f & O_CREAT) { va_list a; va_start(a, f); m = va_arg(a, int); va_end(a); }
+    char b[4096]; return fn(enact_tz_remap(p, b, sizeof b), f, m);
+}
+int open64(const char *p, int f, ...) {
+    static int (*fn)(const char *, int, mode_t);
+    if (!fn) fn = dlsym(RTLD_NEXT, "open64");
+    mode_t m = 0; if (f & O_CREAT) { va_list a; va_start(a, f); m = va_arg(a, int); va_end(a); }
+    char b[4096]; return fn(enact_tz_remap(p, b, sizeof b), f, m);
+}
+int openat(int fd, const char *p, int f, ...) {
+    static int (*fn)(int, const char *, int, mode_t);
+    if (!fn) fn = dlsym(RTLD_NEXT, "openat");
+    mode_t m = 0; if (f & O_CREAT) { va_list a; va_start(a, f); m = va_arg(a, int); va_end(a); }
+    char b[4096]; return fn(fd, enact_tz_remap(p, b, sizeof b), f, m);
+}
+TZSHIM
+    fi
+    if [ -s "$_tz_so" ]; then
+        export LD_PRELOAD="$_tz_so${LD_PRELOAD:+:$LD_PRELOAD}"
+    fi
 fi
 # pytest_snapshot_worker: snapshots compare this shard's ClickHouse database as upstream's.
 # pytest_fail_early: a broken session-scoped fixture ends the pytest at once (exit 2).

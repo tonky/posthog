@@ -47,8 +47,11 @@ live_migrate
 live_build_rust feature-flags personhog-replica personhog-router
 
 # "Start Rust flags service": it listens on ADDRESS (config.rs).
+# MAXMIND_DB_PATH overrides feature-flags' compile-time env!("CARGO_MANIFEST_DIR") so
+# binaries staged on self-hosted _work/ resolve GeoLite2-City.mmdb on hosted work/.
 LIVE_CWD=rust live_start rust-flags "$flags_port" "http://127.0.0.1:$flags_port/_readiness" \
     "${live_run[@]}" ADDRESS="127.0.0.1:$flags_port" \
+    MAXMIND_DB_PATH="$root/share/GeoLite2-City.mmdb" \
     READ_DATABASE_URL="$live_database" WRITE_DATABASE_URL="$live_database" \
     PERSONS_READ_DATABASE_URL="$live_persons" PERSONS_WRITE_DATABASE_URL="$live_persons" \
     COOKIELESS_REDIS_HOST=127.0.0.1 COOKIELESS_REDIS_PORT="$ENVE_SERVICE_REDIS_PORT" \
