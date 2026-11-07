@@ -113,5 +113,9 @@ pipeline: analysis: {
 			outputs: [".hypothesis/**", "showcase/scripts/product_pytest.py/.venv", "showcase/scripts/product_pytest.py/.venv/**"]
 			inputs:  ["pyproject.toml", "uv.lock"]
 		},
+		{
+			outputs: ["posthog/tasks/test/__emails__/**", "posthog/ee/tasks/test/__emails__/**", "ee/tasks/test/__emails__/**"]
+			inputs:  ["posthog/tasks/test/utils_email_tests.py", "posthog/templates/email/**"]
+		},
 	]
 }

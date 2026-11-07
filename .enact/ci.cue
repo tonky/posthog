@@ -158,6 +158,7 @@ pipeline: schema.#Pipeline & {
 			repo:       "tonky/posthog"
 			branch:     "perf/ci-showcase"
 		}
+		allow_broad: branch_prefixes: ["mirror-broad/"]
 		budget: {enforce: true, untraced_tests: 10, wall_minutes: 30}
 		workers: {
 			github: {
