@@ -67,26 +67,43 @@ if (process.env.PGPORT && process.env.PGPORT !== DEFAULT_PG) {
         }
     };
 
-    // Playwright serializes page.evaluate(fn, arg) arguments via serializeAsCallArgument as { o: [{ k, v }] }.
+    const serializedScalar = (v) => {
+        if (typeof v === 'string' || typeof v === 'number') return v;
+        if (v && typeof v === 'object') {
+            if (typeof v.s === 'string') return v.s;
+            if (typeof v.n === 'number') return v.n;
+        }
+        return undefined;
+    };
+
+    // Playwright serializes page.evaluate(fn, arg) arguments via serializeValue ({ v: { s | n } }) on the client
+    // and serializeAsCallArgument ({ v: primitive | { o } }) over CDP Runtime.callFunctionOn.
     const rewriteSerializedPgConfig = (entries) => {
         let hasLocalhost = false;
         let hasPosthogDb = false;
         let portEntry = null;
         for (const entry of entries) {
-            if (!entry || typeof entry !== 'object' || !entry.v || typeof entry.v !== 'object') continue;
-            if (entry.k === 'host' && isLocalhost(entry.v.s)) {
+            if (!entry || typeof entry !== 'object') continue;
+            const scalar = serializedScalar(entry.v);
+            if (entry.k === 'host' && isLocalhost(scalar)) {
                 hasLocalhost = true;
-            } else if ((entry.k === 'database' || entry.k === 'dbname') && isPosthogDb(entry.v.s)) {
+            } else if ((entry.k === 'database' || entry.k === 'dbname') && isPosthogDb(scalar)) {
                 hasPosthogDb = true;
-            } else if (entry.k === 'port' && (entry.v.s === DEFAULT_PG || entry.v.n === DEFAULT_PG_NUM)) {
+            } else if (entry.k === 'port' && isDefaultPgPort(scalar)) {
                 portEntry = entry;
             }
         }
         if (hasLocalhost && hasPosthogDb && portEntry) {
-            if (portEntry.v.s === DEFAULT_PG) {
-                portEntry.v.s = pgPort;
-            } else if (portEntry.v.n === DEFAULT_PG_NUM && Number.isFinite(pgPortNum)) {
-                portEntry.v.n = pgPortNum;
+            if (portEntry.v === DEFAULT_PG) {
+                portEntry.v = pgPort;
+            } else if (portEntry.v === DEFAULT_PG_NUM && Number.isFinite(pgPortNum)) {
+                portEntry.v = pgPortNum;
+            } else if (portEntry.v && typeof portEntry.v === 'object') {
+                if (portEntry.v.s === DEFAULT_PG) {
+                    portEntry.v.s = pgPort;
+                } else if (portEntry.v.n === DEFAULT_PG_NUM && Number.isFinite(pgPortNum)) {
+                    portEntry.v.n = pgPortNum;
+                }
             }
         }
     };

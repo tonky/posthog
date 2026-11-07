@@ -47,6 +47,16 @@ _hogvmNativeInputs: [
 ]
 _hogvmNativeKey: "hogvm-native-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles(" + strings.Join([for file in _hogvmNativeInputs {"'\(file)'"}], ", ") + ") }}"
 
+_replayAnonymizerInputs: [
+	"enve.lock", "enve.cue", "rust/Cargo.toml", "rust/Cargo.lock", ".cargo/config*", "rust/.cargo/config*",
+	"rust-toolchain*", "rust/rust-toolchain*", "rust/replay-anonymizer/Cargo.toml", "rust/replay-anonymizer/src/**",
+	"rust/replay-anonymizer-node/Cargo.toml", "rust/replay-anonymizer-node/src/**",
+	"rust/replay-anonymizer-node/package.json", "rust/replay-anonymizer-node/tsconfig.json",
+	"rust/replay-anonymizer-node/turbo.json", "turbo.json", ".enact/*.cue", "showcase/scripts/build_e2e.sh",
+	"showcase/scripts/run_nodejs_tests.sh", "showcase/scripts/rust_ci_env.sh",
+]
+_replayAnonymizerKey: "replay-anonymizer-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles(" + strings.Join([for file in _replayAnonymizerInputs {"'\(file)'"}], ", ") + ") }}"
+
 pipeline: schema.#Pipeline & {
 	services: {
 		postgres:         {name: "postgres", enact: kind: schema.#ServiceKind.Postgres}
@@ -71,6 +81,31 @@ pipeline: schema.#Pipeline & {
 			used_by: {
 				components: list.Concat([_nodejsSuites, ["e2e"]])
 				jobs:       [J.build, J.test, J.rust_ingestion_e2e]
+			}
+		}
+		"replay-anonymizer-native": {
+			name:         "Replay anonymizer native release target"
+			paths:        ["rust/target/release"]
+			scope:        "shared"
+			key:          [_replayAnonymizerKey]
+			restore_keys: [_replayAnonymizerKey]
+			used_by: {
+				components: list.Concat([_nodejsSuites, ["e2e"]])
+				jobs:       [J.build, J.test, J.rust_ingestion_e2e]
+			}
+		}
+		"live-migrations": {
+			name: "Live Postgres and ClickHouse migration snapshots"
+			save: {
+				when:    "validated_failure"
+				command: "python3 showcase/scripts/live_migrate_cache.py verify \"$HOME/.cache/enact/snapshots\""
+			}
+			paths:   ["~/.cache/enact/snapshots/live-v1", "~/.cache/enact/snapshots/ch-v1"]
+			version: "1"
+			scope:   "shared"
+			used_by: {
+				components: ["e2e", "mcp_integration"]
+				jobs:       [J.test]
 			}
 		}
 		"backend-templates": {

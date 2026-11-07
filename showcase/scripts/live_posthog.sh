@@ -115,16 +115,139 @@ print(f"created {len(wanted)} Kafka topics under {prefix}")
 PY
 }
 
+# Wait until nothing is connected to <db>; CREATE DATABASE ... TEMPLATE and DROP DATABASE fail
+# while sessions remain active.
+live_wait_db_free() { # <db>
+    local db=$1 deadline=$((SECONDS + ${ENACT_TEMPLATE_FREE_TIMEOUT:-60})) sessions
+    while :; do
+        sessions=$(pg -d postgres -c "SELECT count(*) FROM pg_stat_activity WHERE datname = '$db'") || return 1
+        [ "${sessions:-0}" = "0" ] && return 0
+        [ "$SECONDS" -lt "$deadline" ] || { echo "$db still has $sessions sessions" >&2; return 1; }
+        sleep 1
+    done
+}
+
+live_pg_template_ready() { # <template_db> <format_comment>
+    [ "$(pg -d postgres -c "SELECT count(*) FROM pg_database WHERE datname = '$1' AND shobj_description(oid, 'pg_database') = '$2'")" = "1" ] \
+        && [ "$(pg -d "$1" -c "SELECT to_regclass('public.posthog_organization') IS NOT NULL")" = t ]
+}
+
+live_migrate_pg() {
+    local pg_major template_key key tpl fmt gen_dir base_dir apps tmp_dir tmp_dump tmp_applied migrated=0
+    pg_major=$(pg -d postgres -c 'SHOW server_version_num' | awk '{print int($1 / 10000)}')
+    template_key=$(current_template_key) || return 1
+    key=$(python3 showcase/scripts/live_migrate_cache.py pg-key --repo . --template-key "$template_key" --pg-major "$pg_major") || return 1
+    tpl="posthog_live_template_${key:0:12}"
+    fmt="enact-live-pg-v1:${key}"
+
+    mkdir -p "$SNAPSHOT_ROOT/live-v1"
+    (
+        flock 7 || exit 1
+        if live_pg_template_ready "$tpl" "$fmt"; then
+            live_wait_db_free "$tpl" || exit 1
+            pg -d postgres -c "DROP DATABASE IF EXISTS $live_db WITH (FORCE);" >/dev/null || exit 1
+            pg -d postgres -c "CREATE DATABASE $live_db TEMPLATE $tpl;" >/dev/null || exit 1
+            echo "live-pg cluster hit: $tpl" >&2
+            exit 0
+        fi
+        if gen_dir=$(python3 showcase/scripts/live_migrate_cache.py pg-verify --snapshot-root "$SNAPSHOT_ROOT" --key "$key" --pg-major "$pg_major" 2>/dev/null); then
+            live_wait_db_free "$tpl" || exit 1
+            pg -d postgres -c "DROP DATABASE IF EXISTS $tpl WITH (FORCE);" >/dev/null || exit 1
+            pg -d postgres -c "CREATE DATABASE $tpl;" >/dev/null || exit 1
+            if pg_restore -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" --no-owner --no-privileges -d "$tpl" "$gen_dir/live-postgres.dump" >/dev/null; then
+                pg -d postgres -c "COMMENT ON DATABASE $tpl IS '$fmt';" >/dev/null || exit 1
+                live_wait_db_free "$tpl" || exit 1
+                pg -d postgres -c "DROP DATABASE IF EXISTS $live_db WITH (FORCE);" >/dev/null || exit 1
+                pg -d postgres -c "CREATE DATABASE $live_db TEMPLATE $tpl;" >/dev/null || exit 1
+                echo "live-pg snapshot hit: $gen_dir" >&2
+                exit 0
+            fi
+            pg -d postgres -c "DROP DATABASE IF EXISTS $tpl WITH (FORCE);" >/dev/null || true
+        fi
+        base_dir=$(python3 showcase/scripts/live_migrate_cache.py pg-base --snapshot-root "$SNAPSHOT_ROOT" --repo . --template-key "$template_key" --pg-major "$pg_major" 2>/dev/null || true)
+        if [ -n "$base_dir" ]; then
+            pg -d postgres -c "DROP DATABASE IF EXISTS $live_db WITH (FORCE);" >/dev/null || exit 1
+            pg -d postgres -c "CREATE DATABASE $live_db;" >/dev/null || exit 1
+            if pg_restore -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" --no-owner --no-privileges -d "$live_db" "$base_dir/live-postgres.dump" >/dev/null \
+                && live_py manage.py migrate --noinput; then
+                migrated=1
+                echo "live-pg incremental top-up succeeded from $base_dir" >&2
+            else
+                echo "live-pg incremental top-up failed from $base_dir; falling back to template clone" >&2
+                with_templates fresh_django_clone "$live_db" || exit 1
+            fi
+        fi
+        if [ "$migrated" -eq 0 ]; then
+            apps=$(python3 showcase/scripts/live_migrate_cache.py routed-apps --repo .) || exit 1
+            [ -z "$apps" ] || pg -d "$live_db" -c "DELETE FROM django_migrations WHERE app IN ($apps);" >/dev/null || exit 1
+            live_py manage.py migrate --noinput || exit 1
+        fi
+        live_py manage.py migrate --check --noinput >/dev/null || exit 1
+        tmp_dir=$(mktemp -d)
+        tmp_dump="$tmp_dir/live-postgres.dump"
+        tmp_applied="$tmp_dir/applied.tsv"
+        trap 'rm -rf "$tmp_dir"' EXIT
+        pg_dump -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -Fc -f "$tmp_dump" "$live_db" || exit 1
+        pg -d "$live_db" -F $'\t' -c "SELECT app, name FROM django_migrations ORDER BY app, name" >"$tmp_applied" || exit 1
+        python3 showcase/scripts/live_migrate_cache.py pg-publish \
+            --snapshot-root "$SNAPSHOT_ROOT" --repo . --key "$key" --pg-major "$pg_major" \
+            --template-key "$template_key" --dump-file "$tmp_dump" --applied-file "$tmp_applied" >/dev/null || exit 1
+        live_wait_db_free "$live_db" || exit 1
+        live_wait_db_free "$tpl" || exit 1
+        pg -d postgres -c "DROP DATABASE IF EXISTS $tpl WITH (FORCE);" >/dev/null || exit 1
+        pg -d postgres -c "CREATE DATABASE $tpl TEMPLATE $live_db;" >/dev/null || exit 1
+        pg -d postgres -c "COMMENT ON DATABASE $tpl IS '$fmt';" >/dev/null || exit 1
+    ) 7>"$SNAPSHOT_ROOT/live-v1/${key}.lock"
+}
+
+live_migrate_ch() {
+    local ch_version ch_http_url ch_key mode=""
+    ch_version=$("${live_ch[@]}" -q "SELECT version()" | tr -d '[:space:]')
+    ch_http_url="http://${CLICKHOUSE_HOST:-127.0.0.1}:${CLICKHOUSE_HTTP_PORT:?the env ClickHouse HTTP port}"
+    ch_key=$(python3 showcase/scripts/live_migrate_cache.py ch-key --repo . --ch-version "$ch_version") || return 1
+
+    mode=$(python3 showcase/scripts/live_migrate_cache.py ch-restore \
+        --snapshot-root "$SNAPSHOT_ROOT" --repo . --key "$ch_key" --ch-version "$ch_version" \
+        --http-url "$ch_http_url" --ch-db "$live_ch_db" --kafka-prefix "${live_worker}_" \
+        --kafka-broker "${KAFKA_HOSTS:?the env Kafka bootstrap}" \
+        --user "${CLICKHOUSE_USER:-default}" --password "${CLICKHOUSE_PASSWORD:-}" 2>/dev/null || true)
+
+    if [ "$mode" = "exact" ]; then
+        if live_py manage.py migrate_clickhouse --check >/dev/null 2>&1; then
+            echo "live-ch snapshot hit: $ch_key" >&2
+            return 0
+        fi
+        echo "live-ch snapshot failed migrate_clickhouse --check; rebuilding cold" >&2
+        "${live_ch[@]}" -q "DROP DATABASE IF EXISTS ${live_ch_db} SYNC" >/dev/null || return 1
+        "${live_ch[@]}" -q "SYSTEM FLUSH LOGS" >/dev/null || return 1
+        live_py manage.py migrate_clickhouse || return 1
+    elif [ "$mode" = "base" ]; then
+        echo "live-ch incremental top-up from subset base" >&2
+        if ! live_py manage.py migrate_clickhouse; then
+            echo "live-ch incremental top-up failed; rebuilding cold" >&2
+            "${live_ch[@]}" -q "DROP DATABASE IF EXISTS ${live_ch_db} SYNC" >/dev/null || return 1
+            "${live_ch[@]}" -q "SYSTEM FLUSH LOGS" >/dev/null || return 1
+            live_py manage.py migrate_clickhouse || return 1
+        fi
+    else
+        "${live_ch[@]}" -q "SYSTEM FLUSH LOGS" >/dev/null || return 1
+        live_py manage.py migrate_clickhouse || return 1
+    fi
+    live_py manage.py migrate_clickhouse --check >/dev/null || return 1
+    python3 showcase/scripts/live_migrate_cache.py ch-capture \
+        --snapshot-root "$SNAPSHOT_ROOT" --repo . --key "$ch_key" --ch-version "$ch_version" \
+        --http-url "$ch_http_url" --ch-db "$live_ch_db" --kafka-prefix "${live_worker}_" \
+        --kafka-broker "${KAFKA_HOSTS:?the env Kafka bootstrap}" \
+        --user "${CLICKHOUSE_USER:-default}" --password "${CLICKHOUSE_PASSWORD:-}" >/dev/null
+}
+
 # "Prime posthog from cached schema" and the migrations: the template, like upstream's schema
 # dump, lacks the routed product apps' tables, whose migration records go so `migrate` creates
 # them on the default database. Then ClickHouse's (it reads posthog_instancesetting).
 live_migrate() {
     showcase/scripts/exclusive.sh geoip bin/download-mmdb
-    local apps
-    apps=$(python3 -c 'import re,sys; print(",".join(sorted({"%s%s%s" % (chr(39), m, chr(39)) for m in re.findall(r"app_label:\s*(\w+)", open("products/db_routing.yaml").read())})))')
-    [ -z "$apps" ] || pg -d "$live_db" -c "DELETE FROM django_migrations WHERE app IN ($apps);" >/dev/null
-    live_py manage.py migrate --noinput
-    live_py manage.py migrate_clickhouse
+    live_migrate_pg
+    live_migrate_ch
     # Django renders these for the pages a readiness check fetches (upstream's "Set up needed
     # files"); a built frontend's stay.
     mkdir -p frontend/dist

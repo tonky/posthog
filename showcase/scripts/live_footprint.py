@@ -207,13 +207,24 @@ class Frontend:
         self.outputs: dict[str, set[str]] = {}  # dist-relative name -> repository files
         self.held: set[str] = set()
         self.loaded = False
-        frontend = os.path.join(ROOT, "frontend")
-        metas = [n for n in sorted(os.listdir(frontend)) if n.endswith("-esbuild-meta.json")]
+        meta_dir = os.path.join(ROOT, "frontend", "dist", ".enact-esbuild-meta")
+        metas = (
+            [os.path.join(meta_dir, n) for n in sorted(os.listdir(meta_dir)) if n.endswith("-esbuild-meta.json")]
+            if os.path.isdir(meta_dir)
+            else []
+        )
+        if not metas:
+            frontend = os.path.join(ROOT, "frontend")
+            metas = [
+                os.path.join(frontend, n)
+                for n in sorted(os.listdir(frontend))
+                if n.endswith("-esbuild-meta.json")
+            ]
         if not metas:
             return
         self.loaded = True
         for meta in metas:
-            with open(os.path.join(frontend, meta)) as f:
+            with open(meta) as f:
                 self._add(json.load(f))
         self.held = set().union(*self.outputs.values()) if self.outputs else set()
         manifest = os.path.join(ROOT, STATIC_ROOT, "staticfiles.json")

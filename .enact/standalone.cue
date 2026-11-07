@@ -230,9 +230,10 @@ pipeline: components: {
 		root: "rust/deltalite/python", depends_on: ["py-root", "build_once"]
 		workspace_scope: {include_dependencies: false, include: ["rust"]}
 		watch_paths:     ["rust/deltalite/**"]
-		recorder:        "trace", record_resources: _recordPy
+		recorder:        "trace", record_resources: {cpus: 2.0, memory_mb: 6144}
 		jobs: test: {
-			name: "Test"
+			name:      "Test"
+			resources: {cpus: 2.0, memory_mb: 6144}
 			tasks: [
 				{
 					name: "Install"

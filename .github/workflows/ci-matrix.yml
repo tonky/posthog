@@ -462,17 +462,36 @@ jobs:
         if: ${{ (contains(format(',{0},', matrix.cargo_targets), ',cli/target,') && hashFiles('cli/Cargo.lock', 'cli/**/Cargo.toml') != '' && steps.runner_caches.outputs.host != '') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
         continue-on-error: true
         run: |-
-          src="$ENACT_HOST_CACHE/repo/cargo-target/$ENACT_RUST_HOST_KEY"
+          base="$ENACT_HOST_CACHE/repo/cargo-target"
+          src="$base/$ENACT_RUST_HOST_KEY"
+          seeded=""
+          if [ ! -d "$src" ] && [ -n "${ENACT_RUST_HOST_PREFIX:-}" ]; then
+            for cand in "$base/$ENACT_RUST_HOST_PREFIX"*; do
+              [ -d "$cand" ] || continue
+              case "$cand" in *.new.*|*.old.*) continue ;; esac
+              if [ -z "$seeded" ] || [ "$cand" -nt "$seeded" ]; then
+                seeded="$cand"
+              fi
+            done
+            if [ -n "$seeded" ]; then
+              src="$seeded"
+            fi
+          fi
           if [ -d "$src" ]; then
             mkdir -p "$ENACT_RUST_TARGET"
             cp -a --reflink=auto "$src/." "$ENACT_RUST_TARGET/"
             touch "$src"
-            echo "Restored $ENACT_RUST_TARGET from the host cache"
+            if [ -n "$seeded" ]; then
+              echo "Seeded $ENACT_RUST_TARGET from host cache ($(basename "$src"))"
+            else
+              echo "Restored $ENACT_RUST_TARGET from the host cache"
+            fi
           else
             echo "No host-cached $ENACT_RUST_TARGET yet"
           fi
         env:
           ENACT_RUST_HOST_KEY: ${{ runner.os }}-rust-cli_target-${{ hashFiles('enve.lock', 'cli/rust-toolchain.toml', 'cli/rust-toolchain', 'cli/enve.lock') }}-${{ matrix.cargo_cache }}
+          ENACT_RUST_HOST_PREFIX: ${{ runner.os }}-rust-cli_target-${{ hashFiles('enve.lock', 'cli/rust-toolchain.toml', 'cli/rust-toolchain', 'cli/enve.lock') }}-
           ENACT_RUST_TARGET: cli/target
       - name: Restore Rust target & cargo cache [funnel-udf/target]
         id: rust_l1_cache_funnel_udf_target
@@ -493,17 +512,36 @@ jobs:
         if: ${{ (contains(format(',{0},', matrix.cargo_targets), ',funnel-udf/target,') && hashFiles('funnel-udf/Cargo.lock', 'funnel-udf/**/Cargo.toml') != '' && steps.runner_caches.outputs.host != '') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
         continue-on-error: true
         run: |-
-          src="$ENACT_HOST_CACHE/repo/cargo-target/$ENACT_RUST_HOST_KEY"
+          base="$ENACT_HOST_CACHE/repo/cargo-target"
+          src="$base/$ENACT_RUST_HOST_KEY"
+          seeded=""
+          if [ ! -d "$src" ] && [ -n "${ENACT_RUST_HOST_PREFIX:-}" ]; then
+            for cand in "$base/$ENACT_RUST_HOST_PREFIX"*; do
+              [ -d "$cand" ] || continue
+              case "$cand" in *.new.*|*.old.*) continue ;; esac
+              if [ -z "$seeded" ] || [ "$cand" -nt "$seeded" ]; then
+                seeded="$cand"
+              fi
+            done
+            if [ -n "$seeded" ]; then
+              src="$seeded"
+            fi
+          fi
           if [ -d "$src" ]; then
             mkdir -p "$ENACT_RUST_TARGET"
             cp -a --reflink=auto "$src/." "$ENACT_RUST_TARGET/"
             touch "$src"
-            echo "Restored $ENACT_RUST_TARGET from the host cache"
+            if [ -n "$seeded" ]; then
+              echo "Seeded $ENACT_RUST_TARGET from host cache ($(basename "$src"))"
+            else
+              echo "Restored $ENACT_RUST_TARGET from the host cache"
+            fi
           else
             echo "No host-cached $ENACT_RUST_TARGET yet"
           fi
         env:
           ENACT_RUST_HOST_KEY: ${{ runner.os }}-rust-funnel_udf_target-${{ hashFiles('enve.lock', 'funnel-udf/rust-toolchain.toml', 'funnel-udf/rust-toolchain', 'funnel-udf/enve.lock') }}-${{ matrix.cargo_cache }}
+          ENACT_RUST_HOST_PREFIX: ${{ runner.os }}-rust-funnel_udf_target-${{ hashFiles('enve.lock', 'funnel-udf/rust-toolchain.toml', 'funnel-udf/rust-toolchain', 'funnel-udf/enve.lock') }}-
           ENACT_RUST_TARGET: funnel-udf/target
       - name: Restore Rust target & cargo cache [rust/target]
         id: rust_l1_cache_rust_target
@@ -524,17 +562,36 @@ jobs:
         if: ${{ (contains(format(',{0},', matrix.cargo_targets), ',rust/target,') && hashFiles('rust/Cargo.lock', 'rust/**/Cargo.toml') != '' && steps.runner_caches.outputs.host != '') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
         continue-on-error: true
         run: |-
-          src="$ENACT_HOST_CACHE/repo/cargo-target/$ENACT_RUST_HOST_KEY"
+          base="$ENACT_HOST_CACHE/repo/cargo-target"
+          src="$base/$ENACT_RUST_HOST_KEY"
+          seeded=""
+          if [ ! -d "$src" ] && [ -n "${ENACT_RUST_HOST_PREFIX:-}" ]; then
+            for cand in "$base/$ENACT_RUST_HOST_PREFIX"*; do
+              [ -d "$cand" ] || continue
+              case "$cand" in *.new.*|*.old.*) continue ;; esac
+              if [ -z "$seeded" ] || [ "$cand" -nt "$seeded" ]; then
+                seeded="$cand"
+              fi
+            done
+            if [ -n "$seeded" ]; then
+              src="$seeded"
+            fi
+          fi
           if [ -d "$src" ]; then
             mkdir -p "$ENACT_RUST_TARGET"
             cp -a --reflink=auto "$src/." "$ENACT_RUST_TARGET/"
             touch "$src"
-            echo "Restored $ENACT_RUST_TARGET from the host cache"
+            if [ -n "$seeded" ]; then
+              echo "Seeded $ENACT_RUST_TARGET from host cache ($(basename "$src"))"
+            else
+              echo "Restored $ENACT_RUST_TARGET from the host cache"
+            fi
           else
             echo "No host-cached $ENACT_RUST_TARGET yet"
           fi
         env:
           ENACT_RUST_HOST_KEY: ${{ runner.os }}-rust-rust_target-${{ hashFiles('enve.lock', 'rust/rust-toolchain.toml', 'rust/rust-toolchain', 'rust/enve.lock') }}-${{ matrix.cargo_cache }}
+          ENACT_RUST_HOST_PREFIX: ${{ runner.os }}-rust-rust_target-${{ hashFiles('enve.lock', 'rust/rust-toolchain.toml', 'rust/rust-toolchain', 'rust/enve.lock') }}-
           ENACT_RUST_TARGET: rust/target
       - name: Restore Node dependency cache
         id: node_l1_cache
@@ -574,6 +631,17 @@ jobs:
           key: hogvm-native-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('enve.lock', 'enve.cue', 'rust/Cargo.toml', '.cargo/config*', 'rust/.cargo/config*', 'rust/common/.cargo/config*', 'rust/common/hogvm/.cargo/config*', 'rust/common/hogvm/node/.cargo/config*', 'rust-toolchain*', 'rust/rust-toolchain*', 'rust/common/hogvm/Cargo.toml', 'rust/common/hogvm/build.rs', 'rust/common/hogvm/src/**', 'rust/common/hogvm/node/Cargo.toml', 'rust/common/hogvm/node/Cargo.lock', 'rust/common/hogvm/node/build.rs', 'rust/common/hogvm/node/src/**', 'rust/common/hogvm/node/package.json', 'rust/common/hogvm/node/turbo.json', 'turbo.json', '.enact/*.cue', 'showcase/scripts/run_nodejs_tests.sh', 'showcase/scripts/build_hogvm.sh', 'showcase/scripts/rust_ci_env.sh') }}
           path: rust/common/hogvm/node/target
           restore-keys: hogvm-native-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('enve.lock', 'enve.cue', 'rust/Cargo.toml', '.cargo/config*', 'rust/.cargo/config*', 'rust/common/.cargo/config*', 'rust/common/hogvm/.cargo/config*', 'rust/common/hogvm/node/.cargo/config*', 'rust-toolchain*', 'rust/rust-toolchain*', 'rust/common/hogvm/Cargo.toml', 'rust/common/hogvm/build.rs', 'rust/common/hogvm/src/**', 'rust/common/hogvm/node/Cargo.toml', 'rust/common/hogvm/node/Cargo.lock', 'rust/common/hogvm/node/build.rs', 'rust/common/hogvm/node/src/**', 'rust/common/hogvm/node/package.json', 'rust/common/hogvm/node/turbo.json', 'turbo.json', '.enact/*.cue', 'showcase/scripts/run_nodejs_tests.sh', 'showcase/scripts/build_hogvm.sh', 'showcase/scripts/rust_ci_env.sh') }}
+      - name: Restore Cache [Live Postgres and ClickHouse migration snapshots]
+        id: cache_live_migrations
+        if: ${{ (contains(format(',{0},', matrix.caches), ',live-migrations,')) && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
+        continue-on-error: true
+        uses: actions/cache/restore@v6
+        with:
+          key: live-migrations-1-${{ runner.os }}-${{ github.sha }}
+          path: |-
+            ~/.cache/enact/snapshots/live-v1
+            ~/.cache/enact/snapshots/ch-v1
+          restore-keys: live-migrations-1-${{ runner.os }}-
       - name: Restore Cache [mypy fine-grained cache]
         id: cache_mypy
         if: ${{ (contains(format(',{0},', matrix.caches), ',mypy,')) && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
@@ -583,8 +651,17 @@ jobs:
           key: mypy-${{ runner.os }}-${{ github.sha }}
           path: .mypy_cache
           restore-keys: mypy-${{ runner.os }}-
+      - name: Restore Cache [Replay anonymizer native release target]
+        id: cache_replay_anonymizer_native
+        if: ${{ (contains(format(',{0},', matrix.caches), ',replay-anonymizer-native,')) && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
+        continue-on-error: true
+        uses: actions/cache/restore@v6
+        with:
+          key: replay-anonymizer-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('enve.lock', 'enve.cue', 'rust/Cargo.toml', 'rust/Cargo.lock', '.cargo/config*', 'rust/.cargo/config*', 'rust-toolchain*', 'rust/rust-toolchain*', 'rust/replay-anonymizer/Cargo.toml', 'rust/replay-anonymizer/src/**', 'rust/replay-anonymizer-node/Cargo.toml', 'rust/replay-anonymizer-node/src/**', 'rust/replay-anonymizer-node/package.json', 'rust/replay-anonymizer-node/tsconfig.json', 'rust/replay-anonymizer-node/turbo.json', 'turbo.json', '.enact/*.cue', 'showcase/scripts/build_e2e.sh', 'showcase/scripts/run_nodejs_tests.sh', 'showcase/scripts/rust_ci_env.sh') }}
+          path: rust/target/release
+          restore-keys: replay-anonymizer-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('enve.lock', 'enve.cue', 'rust/Cargo.toml', 'rust/Cargo.lock', '.cargo/config*', 'rust/.cargo/config*', 'rust-toolchain*', 'rust/rust-toolchain*', 'rust/replay-anonymizer/Cargo.toml', 'rust/replay-anonymizer/src/**', 'rust/replay-anonymizer-node/Cargo.toml', 'rust/replay-anonymizer-node/src/**', 'rust/replay-anonymizer-node/package.json', 'rust/replay-anonymizer-node/tsconfig.json', 'rust/replay-anonymizer-node/turbo.json', 'turbo.json', '.enact/*.cue', 'showcase/scripts/build_e2e.sh', 'showcase/scripts/run_nodejs_tests.sh', 'showcase/scripts/rust_ci_env.sh') }}
     - name: Record Restored Package Caches
-      if: ${{ ((steps.runner_caches.outputs.host == '' || contains(format(',{0},', matrix.caches), ',backend-templates,')) && github.event_name != 'pull_request') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
+      if: ${{ ((steps.runner_caches.outputs.host == '' || contains(format(',{0},', matrix.caches), ',backend-templates,') || contains(format(',{0},', matrix.caches), ',live-migrations,')) && github.event_name != 'pull_request') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
       continue-on-error: true
       run: enact ci cache-delta record
       env:
@@ -594,6 +671,8 @@ jobs:
           node_l1_cache .enact/state/pnpm-store
           node_l1_cache node_modules/.cache
           cache_backend_templates ~/.cache/enact/snapshots/v3
+          cache_live_migrations ~/.cache/enact/snapshots/live-v1
+          cache_live_migrations ~/.cache/enact/snapshots/ch-v1
     - name: Require Seeded Cache [frontend tsgo declaration-emit cache]
       if: ${{ (contains(format(',{0},', matrix.caches), ',frontend-tsgo,') && !(github.event_name == 'workflow_dispatch' && inputs.seed_caches == 'true') && steps.cache_frontend_tsgo.outputs.cache-matched-key == '') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
       run: |-
@@ -744,7 +823,7 @@ jobs:
         retention-days: "1"
     - name: Check Package Caches for New Entries
       id: cache_delta
-      if: ${{ (!cancelled() && (steps.runner_caches.outputs.host == '' || contains(format(',{0},', matrix.caches), ',backend-templates,')) && env.ENACT_SAVE_EVENT == 'true' && (matrix.shard_index == '' || matrix.shard_index == 1 || matrix.shard_index == '1') && github.event_name != 'pull_request') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
+      if: ${{ (!cancelled() && (steps.runner_caches.outputs.host == '' || contains(format(',{0},', matrix.caches), ',backend-templates,') || contains(format(',{0},', matrix.caches), ',live-migrations,')) && env.ENACT_SAVE_EVENT == 'true' && (matrix.shard_index == '' || matrix.shard_index == 1 || matrix.shard_index == '1') && github.event_name != 'pull_request') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
       continue-on-error: true
       run: enact ci cache-delta check
       env:
@@ -754,6 +833,8 @@ jobs:
           node_l1_cache .enact/state/pnpm-store
           node_l1_cache node_modules/.cache
           cache_backend_templates ~/.cache/enact/snapshots/v3
+          cache_live_migrations ~/.cache/enact/snapshots/live-v1
+          cache_live_migrations ~/.cache/enact/snapshots/ch-v1
         ENACT_UV_PRUNE: ${{ contains(matrix.technology, 'python') }}
     - name: Save Python build & venv cache
       if: ${{ ((!cancelled() && (success() || steps.python_install.outcome == 'success') && (env.ENACT_SAVE_EVENT == 'true' && contains(matrix.technology, 'python') && steps.runner_caches.outputs.host == '' && hashFiles('**/uv.lock', '**/pyproject.toml', '**/requirements.txt', '**/poetry.lock') != '' && (matrix.shard_index == '' || matrix.shard_index == 1 || matrix.shard_index == '1') && steps.cache_delta.outputs.python_l1_cache == 'true')) && github.event_name != 'pull_request' && steps.python_l1_cache.outputs.cache-hit != 'true') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
@@ -775,8 +856,20 @@ jobs:
           RUN_PREFIX="enve run --locked -f $ENACT_ENV_FILE -- "
         fi
         $RUN_PREFIX python3 showcase/scripts/template_publications.py "$HOME/.cache/enact/snapshots/v3"
+    - name: Verify Cache publication [Live Postgres and ClickHouse migration snapshots]
+      id: cache_live_migrations_publication
+      if: ${{ (!cancelled() && env.ENACT_SAVE_EVENT == 'true' && contains(format(',{0},', matrix.caches), ',live-migrations,') && github.event_name != 'pull_request' && steps.cache_live_migrations.outputs.cache-hit != 'true') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
+      continue-on-error: true
+      run: |-
+        RUN_PREFIX=""
+        ENACT_ENV_FILE=${ENACT_ENVIRONMENT_FILE:-enve.cue}
+        if command -v enve >/dev/null 2>&1 && [ -f "${ENACT_ENV_FILE%enve.cue}enve.lock" ]; then
+          RUN_PREFIX="enve run --locked -f $ENACT_ENV_FILE -- "
+        fi
+        $RUN_PREFIX python3 showcase/scripts/live_migrate_cache.py verify "$HOME/.cache/enact/snapshots"
     - name: Prune Rust caches before saving
-      if: ${{ (env.ENACT_SAVE_EVENT == 'true' && matrix.cargo_targets != '' && (matrix.shard_index == '' || matrix.shard_index == 1 || matrix.shard_index == '1')) && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
+      id: prune_cargo
+      if: ${{ ((success() || !cancelled() && steps.runner_caches.outputs.host != '') && env.ENACT_SAVE_EVENT == 'true' && matrix.cargo_targets != '' && (matrix.shard_index == '' || matrix.shard_index == 1 || matrix.shard_index == '1')) && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
       continue-on-error: true
       run: enact cache prune-cargo --pipeline .enact
     - name: Check Rust target & cargo cache [cli/target] size limit (<= 1.5 GiB)
@@ -849,10 +942,18 @@ jobs:
             ~/.cargo/git/db
             cli/target
       - name: Save Rust target & cargo cache [cli/target] to the Host Cache
-        if: ${{ (env.ENACT_SAVE_EVENT == 'true' && contains(format(',{0},', matrix.cargo_targets), ',cli/target,') && hashFiles('cli/Cargo.lock', 'cli/**/Cargo.toml') != '' && (matrix.shard_index == '' || matrix.shard_index == 1 || matrix.shard_index == '1') && steps.runner_caches.outputs.host != '') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
+        if: ${{ (!cancelled() && env.ENACT_SAVE_EVENT == 'true' && contains(format(',{0},', matrix.cargo_targets), ',cli/target,') && hashFiles('cli/Cargo.lock', 'cli/**/Cargo.toml') != '' && (matrix.shard_index == '' || matrix.shard_index == 1 || matrix.shard_index == '1') && steps.runner_caches.outputs.host != '' && steps.prune_cargo.outcome == 'success') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
         continue-on-error: true
         run: |-
           [ -d "$ENACT_RUST_TARGET" ] || exit 0
+          has_fp=0
+          for fp in "$ENACT_RUST_TARGET"/*/.fingerprint "$ENACT_RUST_TARGET"/*/*/.fingerprint; do
+            if [ -d "$fp" ]; then
+              has_fp=1
+              break
+            fi
+          done
+          [ "$has_fp" = 1 ] || exit 0
           dst="$ENACT_HOST_CACHE/repo/cargo-target/$ENACT_RUST_HOST_KEY"
           tmp="$dst.new.$$"
           mkdir -p "$(dirname "$dst")"
@@ -877,10 +978,18 @@ jobs:
             ~/.cargo/git/db
             funnel-udf/target
       - name: Save Rust target & cargo cache [funnel-udf/target] to the Host Cache
-        if: ${{ (env.ENACT_SAVE_EVENT == 'true' && contains(format(',{0},', matrix.cargo_targets), ',funnel-udf/target,') && hashFiles('funnel-udf/Cargo.lock', 'funnel-udf/**/Cargo.toml') != '' && (matrix.shard_index == '' || matrix.shard_index == 1 || matrix.shard_index == '1') && steps.runner_caches.outputs.host != '') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
+        if: ${{ (!cancelled() && env.ENACT_SAVE_EVENT == 'true' && contains(format(',{0},', matrix.cargo_targets), ',funnel-udf/target,') && hashFiles('funnel-udf/Cargo.lock', 'funnel-udf/**/Cargo.toml') != '' && (matrix.shard_index == '' || matrix.shard_index == 1 || matrix.shard_index == '1') && steps.runner_caches.outputs.host != '' && steps.prune_cargo.outcome == 'success') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
         continue-on-error: true
         run: |-
           [ -d "$ENACT_RUST_TARGET" ] || exit 0
+          has_fp=0
+          for fp in "$ENACT_RUST_TARGET"/*/.fingerprint "$ENACT_RUST_TARGET"/*/*/.fingerprint; do
+            if [ -d "$fp" ]; then
+              has_fp=1
+              break
+            fi
+          done
+          [ "$has_fp" = 1 ] || exit 0
           dst="$ENACT_HOST_CACHE/repo/cargo-target/$ENACT_RUST_HOST_KEY"
           tmp="$dst.new.$$"
           mkdir -p "$(dirname "$dst")"
@@ -905,10 +1014,18 @@ jobs:
             ~/.cargo/git/db
             rust/target
       - name: Save Rust target & cargo cache [rust/target] to the Host Cache
-        if: ${{ (env.ENACT_SAVE_EVENT == 'true' && contains(format(',{0},', matrix.cargo_targets), ',rust/target,') && hashFiles('rust/Cargo.lock', 'rust/**/Cargo.toml') != '' && (matrix.shard_index == '' || matrix.shard_index == 1 || matrix.shard_index == '1') && steps.runner_caches.outputs.host != '') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
+        if: ${{ (!cancelled() && env.ENACT_SAVE_EVENT == 'true' && contains(format(',{0},', matrix.cargo_targets), ',rust/target,') && hashFiles('rust/Cargo.lock', 'rust/**/Cargo.toml') != '' && (matrix.shard_index == '' || matrix.shard_index == 1 || matrix.shard_index == '1') && steps.runner_caches.outputs.host != '' && steps.prune_cargo.outcome == 'success') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
         continue-on-error: true
         run: |-
           [ -d "$ENACT_RUST_TARGET" ] || exit 0
+          has_fp=0
+          for fp in "$ENACT_RUST_TARGET"/*/.fingerprint "$ENACT_RUST_TARGET"/*/*/.fingerprint; do
+            if [ -d "$fp" ]; then
+              has_fp=1
+              break
+            fi
+          done
+          [ "$has_fp" = 1 ] || exit 0
           dst="$ENACT_HOST_CACHE/repo/cargo-target/$ENACT_RUST_HOST_KEY"
           tmp="$dst.new.$$"
           mkdir -p "$(dirname "$dst")"
@@ -942,6 +1059,15 @@ jobs:
         with:
           key: ${{ steps.cache_hogvm_native.outputs.cache-primary-key }}
           path: rust/common/hogvm/node/target
+      - name: Save Cache [Live Postgres and ClickHouse migration snapshots]
+        if: ${{ ((!cancelled() && env.ENACT_SAVE_EVENT == 'true' && contains(format(',{0},', matrix.caches), ',live-migrations,') && (matrix.shard_index == '' || matrix.shard_index == 1 || matrix.shard_index == '1') && (github.event_name == 'schedule' || github.event_name != 'pull_request' && github.ref_name == github.event.repository.default_branch || !startsWith(steps.cache_live_migrations.outputs.cache-matched-key, format('live-migrations-1-{0}-', runner.os)) || steps.cache_delta.outputs.cache_live_migrations == 'true') && steps.cache_live_migrations_publication.outputs.eligible == 'true' && steps.cache_live_migrations_publication.outcome == 'success') && github.event_name != 'pull_request' && steps.cache_live_migrations.outputs.cache-hit != 'true') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
+        continue-on-error: true
+        uses: actions/cache/save@v6
+        with:
+          key: ${{ steps.cache_live_migrations.outputs.cache-primary-key }}
+          path: |-
+            ~/.cache/enact/snapshots/live-v1
+            ~/.cache/enact/snapshots/ch-v1
       - name: Save Cache [mypy fine-grained cache]
         if: ${{ ((env.ENACT_SAVE_EVENT == 'true' && contains(format(',{0},', matrix.caches), ',mypy,') && (matrix.shard_index == '' || matrix.shard_index == 1 || matrix.shard_index == '1') && (github.event_name == 'schedule' || github.event_name != 'pull_request' && github.ref_name == github.event.repository.default_branch || !startsWith(steps.cache_mypy.outputs.cache-matched-key, format('mypy-{0}-', runner.os)))) && github.event_name != 'pull_request' && steps.cache_mypy.outputs.cache-hit != 'true') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
         continue-on-error: true
@@ -949,6 +1075,13 @@ jobs:
         with:
           key: ${{ steps.cache_mypy.outputs.cache-primary-key }}
           path: .mypy_cache
+      - name: Save Cache [Replay anonymizer native release target]
+        if: ${{ ((env.ENACT_SAVE_EVENT == 'true' && contains(format(',{0},', matrix.caches), ',replay-anonymizer-native,') && (matrix.shard_index == '' || matrix.shard_index == 1 || matrix.shard_index == '1')) && github.event_name != 'pull_request' && steps.cache_replay_anonymizer_native.outputs.cache-hit != 'true') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
+        continue-on-error: true
+        uses: actions/cache/save@v6
+        with:
+          key: ${{ steps.cache_replay_anonymizer_native.outputs.cache-primary-key }}
+          path: rust/target/release
     - name: Save Built Outputs to the Host Cache
       if: ${{ success() && steps.runner_caches.outputs.host != '' && !steps.skip.outputs.hit && matrix.output_key != '' }}
       continue-on-error: true

@@ -67,7 +67,7 @@ case "${1:-frontend}" in
         # frontend/dist/index.html was missing, a build of older sources was tested.
         pnpm --filter=@posthog/frontend... install --frozen-lockfile
         bash showcase/scripts/build_e2e.sh
-        STATIC_PRECOMPRESS=0 python3 manage.py collectstatic --noinput
+        STATIC_PRECOMPRESS=0 python3 manage.py collectstatic --noinput --ignore '.enact-*'
         ;;
     all)
         bash showcase/scripts/setup.sh frontend

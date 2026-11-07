@@ -185,6 +185,48 @@ class LiveFootprintTest(unittest.TestCase):
         for file in ["showcase/scripts/run_e2e_tests.sh", "showcase/scripts/run_mcp_integration.sh"]:
             self.assertIn(file, shared)
 
+    def test_staticfiles_resolve_against_restored_dist_esbuild_meta(self):
+        # On a frontend:build cache hit, only frontend/dist (with .enact-esbuild-meta/) is restored.
+        (self.repo / "frontend/app-esbuild-meta.json").unlink()
+        meta_dir = self.repo / "frontend/dist/.enact-esbuild-meta"
+        meta_dir.mkdir(parents=True)
+        (self.repo / "frontend/src/App.tsx").parent.mkdir(parents=True, exist_ok=True)
+        (self.repo / "frontend/src/App.tsx").write_text("export {}\n")
+        (self.repo / "frontend/dist/index.js").write_text("console.log(1);\n")
+        (meta_dir / "posthog-app-esbuild-meta.json").write_text(
+            json.dumps(
+                {
+                    "inputs": {"src/App.tsx": {}},
+                    "outputs": {"dist/index.js": {"inputs": {"src/App.tsx": {"bytesInOutput": 10}}}},
+                }
+            )
+        )
+        (self.repo / "staticfiles").mkdir(parents=True, exist_ok=True)
+        (self.repo / "staticfiles/staticfiles.json").write_text(
+            json.dumps({"paths": {"index.js": "index.abc123.js"}})
+        )
+        records = self.recording / "records"
+        (records / "1.started").write_text("spec.ts\n")
+        (records / "1.json").write_text(json.dumps({"footprint": {"reads": ["staticfiles/index.abc123.js"]}}))
+        node = self.recording / "node/1"
+        (node / "1.started").write_text("node\n")
+        (node / "1.json").write_text(json.dumps({"reads": ["spec.ts"]}))
+        out = self.repo / "maps"
+        env = helper_env() | {"ENACT_FOOTPRINT_DIR": str(out), "LIVE_JOB": "run_e2e_tests.sh"}
+        result = subprocess.run(
+            [sys.executable, str(SCRIPTS / "live_footprint.py"), "write", str(self.recording), "spec.ts=0"],
+            cwd=self.repo,
+            env=env,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        self.assertNotIn("read a build output without the build's record", result.stderr)
+        (written,) = [p for p in out.iterdir() if p.suffix == ".json"]
+        target = json.loads(written.read_text())["targets"]["spec.ts"]
+        self.assertNotIn("outcome", target)
+        self.assertIn("frontend/src/App.tsx", target["files"])
+
     def test_playwright_skip_records_mark_skipped_on_and_missing_records_are_partial(self):
         records = self.recording / "records"
         for idx, spec in enumerate(["pass.spec.ts", "skip.spec.ts", "unreported.spec.ts"], 1):

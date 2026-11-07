@@ -56,7 +56,7 @@ live_run+=(CAPTURE_INTERNAL_URL="$proxy" CAPTURE_AI_INTERNAL_URL="$proxy")
 
 # "Collect static files without compression": Django serves the built bundle from them.
 showcase/scripts/exclusive.sh collectstatic "${live_run[@]}" STATIC_PRECOMPRESS=0 \
-    uv run --no-sync python manage.py collectstatic --noinput >"$live_logs/collectstatic.log"
+    uv run --no-sync python manage.py collectstatic --noinput --ignore '.enact-*' >"$live_logs/collectstatic.log"
 # Recording, from here on (collectstatic copies the whole bundle: what a spec's page fetched
 # counts, by WhiteNoise's reads).
 live_record

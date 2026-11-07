@@ -160,8 +160,8 @@ _djangoRustTree: list.Concat([
 	],
 	[for p in _productBackendDirs {"products/\(p)/backend"}],
 ])
-_mcpPrebuild: "../../showcase/scripts/build_mcp_ui_apps.sh && pnpm exec tsx scripts/copy-instructions.ts"
-_frontendBuild: "showcase/scripts/build_once.sh frontend-build frontend/dist/.enact-build-key frontend products common packages ee/frontend services/mcp/src/ui-apps package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json tsconfig.json patches -- bash -c 'showcase/scripts/build_quill.sh && showcase/scripts/build_hogvm.sh && bin/turbo --filter=@posthog/frontend prepare && showcase/scripts/build_products.sh && pnpm --filter=@posthog/frontend build'"
+_mcpPrebuild: "pnpm exec tsx scripts/copy-instructions.ts"
+_frontendBuild: "showcase/scripts/build_once.sh frontend-build frontend/dist/.enact-build-key frontend products common packages ee/frontend services/mcp/src/ui-apps package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json tsconfig.json patches -- bash -c 'showcase/scripts/build_quill.sh && showcase/scripts/build_hogvm.sh && bin/turbo --filter=@posthog/frontend prepare && showcase/scripts/build_products.sh && pnpm --filter=@posthog/frontend build && mkdir -p frontend/dist/.enact-esbuild-meta && cp -f frontend/*-esbuild-meta.json frontend/dist/.enact-esbuild-meta/'"
 
 _buildOnceKey: [
 	"package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml", "turbo.json", "tsconfig.json",
@@ -325,7 +325,7 @@ pipeline: schema.#Pipeline & {
 			watch_paths: [
 				"showcase/scripts/tests/**", "showcase/scripts/run_nodejs_tests.sh",
 				"showcase/scripts/rust_footprint.py", "showcase/scripts/run_rust_release_build.sh",
-				"showcase/scripts/live_footprint.py", "showcase/scripts/node_reads.mjs",
+				"showcase/scripts/live_footprint.py", "showcase/scripts/live_migrate_cache.py", "showcase/scripts/node_reads.mjs",
 				"showcase/scripts/no_drift.sh", "posthog/user_scripts/**",
 				"packages/personhog-proto/pyproject.toml", "packages/owners-yaml/pyproject.toml", "tools/hogli/pyproject.toml",
 			]
@@ -1015,18 +1015,18 @@ pipeline: schema.#Pipeline & {
 					direct:    true
 					resources: {cpus: 2.0, memory_mb: 4096}
 					needs:     _mcpUiAppsNeeds
-					tasks: [{command: "../../showcase/scripts/build_mcp_ui_apps.sh && pnpm typecheck"}]
+					tasks: [{command: "pnpm exec tsx scripts/copy-instructions.ts && pnpm typecheck"}]
 				}
 				ui_apps: {
 					services:  false
 					needs:     ["quill:build"]
-					resources: {cpus: 2.0, memory_mb: 4096}
+					resources: {cpus: 2.0, memory_mb: 8192}
 					outputs: {
 						arch_independent: true
 						paths: ["services/mcp/public/ui-apps"]
 						key: list.Concat([[
 							"services/mcp/**", "products/**", "packages/quill/**",
-							"frontend/src/**", "showcase/scripts/build_mcp_ui_apps.sh",
+							"common/mosaic/**", "showcase/scripts/build_mcp_ui_apps.sh",
 						], _buildOnceKey])
 					}
 					tasks: [{command: "../../showcase/scripts/build_mcp_ui_apps.sh"}]
@@ -1041,17 +1041,20 @@ pipeline: schema.#Pipeline & {
 					]
 				}
 				build: {
-					services: false
+					services:  false
+					needs:     _mcpUiAppsNeeds
+					resources: {cpus: 2.0, memory_mb: 8192}
 					tasks: [{command: "../../showcase/scripts/check_mcp_ui_apps.sh", filter: include: _mcpUiAppsFiles}]
 				}
 			}
 		}
 		"live_harness": _harness & {
-			name:        "live_harness"
-			title:       "Live PostHog stack"
-			technology:  ["python", "typescript"]
-			depends_on:  ["test_env", "geoip"]
-			watch_paths: ["showcase/scripts/live_posthog.sh", "showcase/scripts/rust_ci_env.sh", "bin/celery-queues.env"]
+			name:            "live_harness"
+			title:           "Live PostHog stack"
+			technology:      ["python", "typescript"]
+			depends_on:      ["test_env", "geoip"]
+			workspace_scope: include: ["products/db_routing.yaml", "infra/clickhouse/config.xml"]
+			watch_paths:     ["showcase/scripts/live_posthog.sh", "showcase/scripts/live_migrate_cache.py", "showcase/scripts/rust_ci_env.sh", "bin/celery-queues.env"]
 		}
 		"e2e_harness": _harness & {
 			name:        "e2e_harness"

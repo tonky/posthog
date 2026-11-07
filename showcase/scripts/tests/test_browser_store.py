@@ -183,6 +183,82 @@ class NodeEnvPreloadTest(unittest.TestCase):
                 },
             ),
             (
+                "playwright CDP serializeAsCallArgument callProjectApi bare primitives",
+                {
+                    "o": [
+                        {"k": "path", "v": "/external_data_sources/"},
+                        {"k": "method", "v": "POST"},
+                        {
+                            "k": "body",
+                            "v": {
+                                "o": [
+                                    {"k": "source_type", "v": "Postgres"},
+                                    {
+                                        "k": "payload",
+                                        "v": {
+                                            "o": [
+                                                {"k": "host", "v": "localhost"},
+                                                {"k": "port", "v": "5432"},
+                                                {"k": "database", "v": "posthog"},
+                                            ],
+                                            "id": 3,
+                                        },
+                                    },
+                                ],
+                                "id": 2,
+                            },
+                        },
+                    ],
+                    "id": 1,
+                },
+                {
+                    "o": [
+                        {"k": "path", "v": "/external_data_sources/"},
+                        {"k": "method", "v": "POST"},
+                        {
+                            "k": "body",
+                            "v": {
+                                "o": [
+                                    {"k": "source_type", "v": "Postgres"},
+                                    {
+                                        "k": "payload",
+                                        "v": {
+                                            "o": [
+                                                {"k": "host", "v": "localhost"},
+                                                {"k": "port", "v": "55432"},
+                                                {"k": "database", "v": "posthog"},
+                                            ],
+                                            "id": 3,
+                                        },
+                                    },
+                                ],
+                                "id": 2,
+                            },
+                        },
+                    ],
+                    "id": 1,
+                },
+            ),
+            (
+                "playwright CDP serializeAsCallArgument numeric bare port",
+                {
+                    "o": [
+                        {"k": "host", "v": "127.0.0.1"},
+                        {"k": "port", "v": 5432},
+                        {"k": "dbname", "v": "posthog"},
+                    ],
+                    "id": 1,
+                },
+                {
+                    "o": [
+                        {"k": "host", "v": "127.0.0.1"},
+                        {"k": "port", "v": 55432},
+                        {"k": "dbname", "v": "posthog"},
+                    ],
+                    "id": 1,
+                },
+            ),
+            (
                 "non-matching database stays untouched",
                 {
                     "plain_other_db": {"host": "localhost", "port": "5432", "database": "other"},
@@ -193,6 +269,13 @@ class NodeEnvPreloadTest(unittest.TestCase):
                             {"k": "database", "v": {"s": "other"}},
                         ]
                     },
+                    "cdp_other": {
+                        "o": [
+                            {"k": "host", "v": "localhost"},
+                            {"k": "port", "v": "5432"},
+                            {"k": "database", "v": "other"},
+                        ]
+                    },
                 },
                 {
                     "plain_other_db": {"host": "localhost", "port": "5432", "database": "other"},
@@ -201,6 +284,13 @@ class NodeEnvPreloadTest(unittest.TestCase):
                             {"k": "host", "v": {"s": "localhost"}},
                             {"k": "port", "v": {"s": "5432"}},
                             {"k": "database", "v": {"s": "other"}},
+                        ]
+                    },
+                    "cdp_other": {
+                        "o": [
+                            {"k": "host", "v": "localhost"},
+                            {"k": "port", "v": "5432"},
+                            {"k": "database", "v": "other"},
                         ]
                     },
                 },

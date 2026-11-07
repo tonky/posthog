@@ -1858,17 +1858,36 @@ jobs:
         if: ${{ (hashFiles('cli/Cargo.lock', 'cli/**/Cargo.toml') != '' && contains(format(',{0},', fromJson(needs.detect.outputs.stage_cargo)['preflight'].cargo_targets), ',cli/target,') && steps.runner_caches.outputs.host != '') && steps.stage_plan.outputs.stage_has_work == 'true' }}
         continue-on-error: true
         run: |-
-          src="$ENACT_HOST_CACHE/repo/cargo-target/$ENACT_RUST_HOST_KEY"
+          base="$ENACT_HOST_CACHE/repo/cargo-target"
+          src="$base/$ENACT_RUST_HOST_KEY"
+          seeded=""
+          if [ ! -d "$src" ] && [ -n "${ENACT_RUST_HOST_PREFIX:-}" ]; then
+            for cand in "$base/$ENACT_RUST_HOST_PREFIX"*; do
+              [ -d "$cand" ] || continue
+              case "$cand" in *.new.*|*.old.*) continue ;; esac
+              if [ -z "$seeded" ] || [ "$cand" -nt "$seeded" ]; then
+                seeded="$cand"
+              fi
+            done
+            if [ -n "$seeded" ]; then
+              src="$seeded"
+            fi
+          fi
           if [ -d "$src" ]; then
             mkdir -p "$ENACT_RUST_TARGET"
             cp -a --reflink=auto "$src/." "$ENACT_RUST_TARGET/"
             touch "$src"
-            echo "Restored $ENACT_RUST_TARGET from the host cache"
+            if [ -n "$seeded" ]; then
+              echo "Seeded $ENACT_RUST_TARGET from host cache ($(basename "$src"))"
+            else
+              echo "Restored $ENACT_RUST_TARGET from the host cache"
+            fi
           else
             echo "No host-cached $ENACT_RUST_TARGET yet"
           fi
         env:
           ENACT_RUST_HOST_KEY: ${{ runner.os }}-rust-cli_target-${{ hashFiles('enve.lock', 'cli/rust-toolchain.toml', 'cli/rust-toolchain', 'cli/enve.lock') }}-${{ fromJson(needs.detect.outputs.stage_cargo)['preflight'].cargo_cache }}
+          ENACT_RUST_HOST_PREFIX: ${{ runner.os }}-rust-cli_target-${{ hashFiles('enve.lock', 'cli/rust-toolchain.toml', 'cli/rust-toolchain', 'cli/enve.lock') }}-
           ENACT_RUST_TARGET: cli/target
       - name: Restore Rust target & cargo cache [rust/target]
         id: rust_l1_cache_rust_target
@@ -1889,17 +1908,36 @@ jobs:
         if: ${{ (hashFiles('rust/Cargo.lock', 'rust/**/Cargo.toml') != '' && contains(format(',{0},', fromJson(needs.detect.outputs.stage_cargo)['preflight'].cargo_targets), ',rust/target,') && steps.runner_caches.outputs.host != '') && steps.stage_plan.outputs.stage_has_work == 'true' }}
         continue-on-error: true
         run: |-
-          src="$ENACT_HOST_CACHE/repo/cargo-target/$ENACT_RUST_HOST_KEY"
+          base="$ENACT_HOST_CACHE/repo/cargo-target"
+          src="$base/$ENACT_RUST_HOST_KEY"
+          seeded=""
+          if [ ! -d "$src" ] && [ -n "${ENACT_RUST_HOST_PREFIX:-}" ]; then
+            for cand in "$base/$ENACT_RUST_HOST_PREFIX"*; do
+              [ -d "$cand" ] || continue
+              case "$cand" in *.new.*|*.old.*) continue ;; esac
+              if [ -z "$seeded" ] || [ "$cand" -nt "$seeded" ]; then
+                seeded="$cand"
+              fi
+            done
+            if [ -n "$seeded" ]; then
+              src="$seeded"
+            fi
+          fi
           if [ -d "$src" ]; then
             mkdir -p "$ENACT_RUST_TARGET"
             cp -a --reflink=auto "$src/." "$ENACT_RUST_TARGET/"
             touch "$src"
-            echo "Restored $ENACT_RUST_TARGET from the host cache"
+            if [ -n "$seeded" ]; then
+              echo "Seeded $ENACT_RUST_TARGET from host cache ($(basename "$src"))"
+            else
+              echo "Restored $ENACT_RUST_TARGET from the host cache"
+            fi
           else
             echo "No host-cached $ENACT_RUST_TARGET yet"
           fi
         env:
           ENACT_RUST_HOST_KEY: ${{ runner.os }}-rust-rust_target-${{ hashFiles('enve.lock', 'rust/rust-toolchain.toml', 'rust/rust-toolchain', 'rust/enve.lock') }}-${{ fromJson(needs.detect.outputs.stage_cargo)['preflight'].cargo_cache }}
+          ENACT_RUST_HOST_PREFIX: ${{ runner.os }}-rust-rust_target-${{ hashFiles('enve.lock', 'rust/rust-toolchain.toml', 'rust/rust-toolchain', 'rust/enve.lock') }}-
           ENACT_RUST_TARGET: rust/target
     - name: Record Restored Package Caches
       if: ${{ (steps.runner_caches.outputs.host == '' && github.event_name != 'pull_request') && steps.stage_plan.outputs.stage_has_work == 'true' }}
@@ -1999,7 +2037,8 @@ jobs:
           /tmp/.cache/uv
           /tmp/.cache/pip
     - name: Prune Rust caches before saving
-      if: ${{ (env.ENACT_SAVE_EVENT == 'true' && fromJson(needs.detect.outputs.stage_cargo)['preflight'].cargo_targets != '') && steps.stage_plan.outputs.stage_has_work == 'true' }}
+      id: prune_cargo
+      if: ${{ ((success() || !cancelled() && steps.runner_caches.outputs.host != '') && env.ENACT_SAVE_EVENT == 'true' && fromJson(needs.detect.outputs.stage_cargo)['preflight'].cargo_targets != '') && steps.stage_plan.outputs.stage_has_work == 'true' }}
       continue-on-error: true
       run: enact cache prune-cargo --pipeline .enact
     - name: Check Rust target & cargo cache [cli/target] size limit (<= 1.5 GiB)
@@ -2056,10 +2095,18 @@ jobs:
             ~/.cargo/git/db
             cli/target
       - name: Save Rust target & cargo cache [cli/target] to the Host Cache
-        if: ${{ (env.ENACT_SAVE_EVENT == 'true' && hashFiles('cli/Cargo.lock', 'cli/**/Cargo.toml') != '' && contains(format(',{0},', fromJson(needs.detect.outputs.stage_cargo)['preflight'].cargo_targets), ',cli/target,') && steps.runner_caches.outputs.host != '') && steps.stage_plan.outputs.stage_has_work == 'true' }}
+        if: ${{ (!cancelled() && env.ENACT_SAVE_EVENT == 'true' && hashFiles('cli/Cargo.lock', 'cli/**/Cargo.toml') != '' && contains(format(',{0},', fromJson(needs.detect.outputs.stage_cargo)['preflight'].cargo_targets), ',cli/target,') && steps.runner_caches.outputs.host != '' && steps.prune_cargo.outcome == 'success') && steps.stage_plan.outputs.stage_has_work == 'true' }}
         continue-on-error: true
         run: |-
           [ -d "$ENACT_RUST_TARGET" ] || exit 0
+          has_fp=0
+          for fp in "$ENACT_RUST_TARGET"/*/.fingerprint "$ENACT_RUST_TARGET"/*/*/.fingerprint; do
+            if [ -d "$fp" ]; then
+              has_fp=1
+              break
+            fi
+          done
+          [ "$has_fp" = 1 ] || exit 0
           dst="$ENACT_HOST_CACHE/repo/cargo-target/$ENACT_RUST_HOST_KEY"
           tmp="$dst.new.$$"
           mkdir -p "$(dirname "$dst")"
@@ -2084,10 +2131,18 @@ jobs:
             ~/.cargo/git/db
             rust/target
       - name: Save Rust target & cargo cache [rust/target] to the Host Cache
-        if: ${{ (env.ENACT_SAVE_EVENT == 'true' && hashFiles('rust/Cargo.lock', 'rust/**/Cargo.toml') != '' && contains(format(',{0},', fromJson(needs.detect.outputs.stage_cargo)['preflight'].cargo_targets), ',rust/target,') && steps.runner_caches.outputs.host != '') && steps.stage_plan.outputs.stage_has_work == 'true' }}
+        if: ${{ (!cancelled() && env.ENACT_SAVE_EVENT == 'true' && hashFiles('rust/Cargo.lock', 'rust/**/Cargo.toml') != '' && contains(format(',{0},', fromJson(needs.detect.outputs.stage_cargo)['preflight'].cargo_targets), ',rust/target,') && steps.runner_caches.outputs.host != '' && steps.prune_cargo.outcome == 'success') && steps.stage_plan.outputs.stage_has_work == 'true' }}
         continue-on-error: true
         run: |-
           [ -d "$ENACT_RUST_TARGET" ] || exit 0
+          has_fp=0
+          for fp in "$ENACT_RUST_TARGET"/*/.fingerprint "$ENACT_RUST_TARGET"/*/*/.fingerprint; do
+            if [ -d "$fp" ]; then
+              has_fp=1
+              break
+            fi
+          done
+          [ "$has_fp" = 1 ] || exit 0
           dst="$ENACT_HOST_CACHE/repo/cargo-target/$ENACT_RUST_HOST_KEY"
           tmp="$dst.new.$$"
           mkdir -p "$(dirname "$dst")"
@@ -3684,6 +3739,7 @@ jobs:
           docs/onboarding
           frontend/public/message-preferences.css
           frontend/public/services
+          infra/clickhouse/config.xml
           packages/agent/packages/harness
           packages/quill
           posthog/hogql_queries/utils/breakdowns.py
@@ -4250,6 +4306,7 @@ jobs:
           docs/onboarding
           frontend/public/message-preferences.css
           frontend/public/services
+          infra/clickhouse/config.xml
           packages/agent/packages/harness
           packages/quill
           posthog/hogql_queries/utils/breakdowns.py
