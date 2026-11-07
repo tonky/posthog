@@ -2,16 +2,22 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import http.server
+import io
 import json
 import os
+import re
+import shutil
+import socket
 import subprocess
 import sys
 import tempfile
 import threading
 import unittest
 import urllib.parse
+import uuid
 from pathlib import Path
 
 SCRIPTS = Path(__file__).resolve().parents[1]
@@ -78,12 +84,50 @@ class CanonicalDdlAndOrderingTest(unittest.TestCase):
             ch_db="posthog_mcp_1",
             kafka_prefix="mcp_1_",
             kafka_broker="127.0.0.1:29092",
-            zk_prefix="posthog_mcp_1_deadbeef",
+            zk_prefix="enactzk_0123456789ab",
         )
         self.assertIn("CREATE TABLE posthog_mcp_1.events (`uuid` UUID)", rehydrated)
-        self.assertIn("'/clickhouse/tables/posthog_mcp_1_deadbeef/noshard/posthog.events'", rehydrated)
+        self.assertIn("'/clickhouse/tables/enactzk_0123456789ab/noshard/posthog.events'", rehydrated)
         self.assertIn("kafka_broker_list = '127.0.0.1:29092'", rehydrated)
         self.assertIn("kafka_topic_list = 'mcp_1_events_json'", rehydrated)
+        self.assertEqual(
+            lmc.canonicalize_ddl(rehydrated, "posthog_mcp_1", "mcp_1_", "127.0.0.1:29092"),
+            canonical,
+        )
+
+    def test_prod_tables_noshard_canonicalization_and_base_recapture_idempotence(self) -> None:
+        cases = [
+            (
+                "CREATE TABLE posthog_e2e_1.infi_clickhouse_orm_migrations (`package_name` String) "
+                "ENGINE = ReplicatedMergeTree('/clickhouse/prod/tables/noshard/posthog_e2e_1/infi_clickhouse_orm_migrations', '{replica}-{shard}')",
+                "'/clickhouse/prod/tables/__ENACT_CH_ZK__/noshard/__ENACT_CH_DB__/infi_clickhouse_orm_migrations'",
+                "'/clickhouse/prod/tables/enactzk_a1b2c3d4e5f6/noshard/posthog_mcp_2/infi_clickhouse_orm_migrations'",
+            ),
+            (
+                "CREATE TABLE posthog_e2e_1.infi_clickhouse_orm_migrations (`package_name` String) "
+                "ENGINE = ReplicatedMergeTree('/clickhouse/prod/tables/noshard/{database}/{table}', '{replica}-{shard}')",
+                "'/clickhouse/prod/tables/__ENACT_CH_ZK__/noshard/{database}/{table}'",
+                "'/clickhouse/prod/tables/enactzk_a1b2c3d4e5f6/noshard/{database}/{table}'",
+            ),
+            (
+                "CREATE TABLE posthog_e2e_1.cohort_membership (`id` Int64) "
+                "ENGINE = ReplicatedReplacingMergeTree('/clickhouse/prod/tables/posthog.cohort_membership', '{replica}-{shard}', id)",
+                "'/clickhouse/prod/tables/__ENACT_CH_ZK__/posthog.cohort_membership'",
+                "'/clickhouse/prod/tables/enactzk_a1b2c3d4e5f6/posthog.cohort_membership'",
+            ),
+        ]
+        for raw_ddl, want_canonical_zk, want_instantiated_zk in cases:
+            canonical = lmc.canonicalize_ddl(raw_ddl, "posthog_e2e_1", "e2e_1_", "127.0.0.1:19092")
+            self.assertIn(want_canonical_zk, canonical)
+            self.assertNotIn("posthog_e2e_1", canonical)
+            instantiated = lmc.instantiate_ddl(
+                canonical, "posthog_mcp_2", "mcp_2_", "127.0.0.1:29092", "enactzk_a1b2c3d4e5f6"
+            )
+            self.assertIn(want_instantiated_zk, instantiated)
+            recaptured = lmc.canonicalize_ddl(instantiated, "posthog_mcp_2", "mcp_2_", "127.0.0.1:29092")
+            self.assertEqual(recaptured, canonical)
+            self.assertNotIn("enactzk_", recaptured)
+            self.assertNotIn("posthog_mcp_2", recaptured)
 
     def test_order_ddl_statements_respects_tiers_and_view_dag(self) -> None:
         rows = [
@@ -766,6 +810,229 @@ class ScriptAndFootprintOptimizationsTest(unittest.TestCase):
             every_lines = calls_log.read_text(encoding="utf-8").splitlines()
             self.assertEqual(len([l for l in every_lines if l.startswith("TRACE:")]), 5, every_lines)
             self.assertFalse(any("--maxWorkers=3" in l for l in every_lines), every_lines)
+
+
+def _live_ch_http_url() -> str | None:
+    port = os.environ.get("CLICKHOUSE_HTTP_PORT", "")
+    host = os.environ.get("CLICKHOUSE_HOST", "127.0.0.1")
+    if not port:
+        return None
+    try:
+        socket.create_connection((host, int(port)), timeout=1).close()
+    except OSError:
+        return None
+    return f"http://{host}:{port}"
+
+
+def _ch_row(name: str, engine: str, ddl: str, deps: list[str] | None = None, rows: str = "0") -> dict:
+    return {"name": name, "engine": engine, "create_table_query": ddl, "dependencies_table": deps or [], "total_rows": rows}
+
+
+class ChV2DanglingMvAndKeeperFixTest(unittest.TestCase):
+    def test_ch_v2_manifest_validation_and_dangling_mv_filtering_roundtrip(self) -> None:
+        self.assertEqual(lmc.CH_FORMAT_PREFIX, "enact-live-ch-v2")
+        executed: list[str] = []
+        state = {"db": "posthog_e2e_1", "zk": "/clickhouse/prod/tables/noshard/posthog_e2e_1/infi_clickhouse_orm_migrations"}
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def log_message(self, format: str, *args: object) -> None:
+                return
+
+            def do_POST(self) -> None:
+                q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query).get("query", [""])[0]
+                if self.headers.get("Content-Length"):
+                    self.rfile.read(int(self.headers["Content-Length"]))
+                executed.append(q)
+                db = state["db"]
+                payload = b""
+                if "FROM system.tables" in q:
+                    payload = json.dumps(
+                        {
+                            "data": [
+                                _ch_row("events", "MergeTree", f"CREATE TABLE {db}.events (`id` Int64) ENGINE = MergeTree()"),
+                                _ch_row(
+                                    "infi_clickhouse_orm_migrations",
+                                    "ReplicatedMergeTree",
+                                    f"CREATE TABLE {db}.infi_clickhouse_orm_migrations (`package_name` String, `module_name` String, `applied` Date) ENGINE = ReplicatedMergeTree('{state['zk']}', '{{replica}}-{{shard}}')",
+                                    rows="1",
+                                ),
+                                _ch_row("events_valid_mv", "MaterializedView", f"CREATE MATERIALIZED VIEW `{db}`.`events_valid_mv` TO `{db}`.`events` AS SELECT id FROM {db}.events", [f"{db}.events"]),
+                                _ch_row("inner_mv", "MaterializedView", f"CREATE MATERIALIZED VIEW {db}.inner_mv (`id` Int64) ENGINE = MergeTree() ORDER BY id AS SELECT id FROM {db}.events -- want to insert", [f"{db}.events"]),
+                                _ch_row("sys_mv", "MaterializedView", f"CREATE MATERIALIZED VIEW {db}.sys_mv TO system.crash_log AS SELECT 1 FROM {db}.events"),
+                                _ch_row(
+                                    "e2e_1_events_plugin_ingestion_historical_partition_statistics_v2_mv",
+                                    "MaterializedView",
+                                    f"CREATE MATERIALIZED VIEW `{db}`.e2e_1_events_plugin_ingestion_historical_partition_statistics_v2_mv ON CLUSTER 'posthog' TO `{db}`.events_plugin_ingestion_partition_statistics_v2 AS SELECT 1 FROM {db}.events",
+                                ),
+                                _ch_row("dangling_bare_mv", "MaterializedView", f"CREATE MATERIALIZED VIEW {db}.dangling_bare_mv TO dropped_target AS SELECT 1 FROM {db}.events"),
+                            ]
+                        }
+                    ).encode("utf-8")
+                elif "infi_clickhouse_orm_migrations`" in q and q.startswith("SELECT"):
+                    payload = b'{"package_name":"posthog.clickhouse.migrations","module_name":"0001_initial","applied":"2026-01-01"}\n'
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(payload)
+
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.shutdown)
+        self.addCleanup(server.server_close)
+        url = f"http://127.0.0.1:{server.server_address[1]}"
+
+        with tempfile.TemporaryDirectory() as work:
+            repo, snap = Path(work) / "repo", Path(work) / "snapshots"
+            _seed_repo(repo)
+            v1_key = "9" * 64
+            lmc.publish_generation(
+                snap / "ch-v1",
+                "enact-live-ch-v1",
+                v1_key,
+                "ch26.6",
+                {
+                    "ddl.json": b'{"database_ddl":"CREATE DATABASE IF NOT EXISTS __ENACT_CH_DB__","statements":[]}',
+                    "migrations.json": b'{"applied":[["posthog.clickhouse.migrations","0001_initial"]],"applied_jsonl":"{}"}',
+                    "seed_rows.json": b"{}",
+                },
+            )
+            self.assertIsNone(lmc.resolve_verified_generation(snap / "ch-v1", lmc.CH_FORMAT_PREFIX, v1_key, lmc.CH_REQUIRED_FILES))
+            self.assertIsNone(lmc.select_ch_base(snap / "ch-v1", repo, "26.6.2"))
+
+            key1 = lmc.compute_ch_key(repo, "26.6.2")
+            err_buf = io.StringIO()
+            with contextlib.redirect_stderr(err_buf):
+                gen1 = lmc.capture_ch_snapshot(snap, repo, key1, "26.6.2", url, "posthog_e2e_1", "e2e_1_", "127.0.0.1:19092", "default", "")
+            self.assertFalse((snap / "ch-v1" / v1_key).exists(), "retired ch-v1 entry must be pruned")
+            self.assertTrue((gen1 / "manifest").read_text(encoding="utf-8").startswith(f"enact-live-ch-v2:{key1} ch26.6"))
+            self.assertIn("e2e_1_events_plugin_ingestion_historical_partition_statistics_v2_mv", err_buf.getvalue())
+            self.assertIn("dangling_bare_mv", err_buf.getvalue())
+            ddl1 = json.loads((gen1 / "ddl.json").read_text(encoding="utf-8"))
+            self.assertEqual(sorted(s["name"] for s in ddl1["statements"]), ["events", "events_valid_mv", "infi_clickhouse_orm_migrations", "inner_mv", "sys_mv"])
+
+            (repo / "posthog/clickhouse/migrations/0003_next.py").write_text("# 3\n", encoding="utf-8")
+            key2 = lmc.compute_ch_key(repo, "26.6.2")
+            poisoned = {**ddl1, "statements": [*ddl1["statements"], {"name": "injected_dangling_mv", "engine": "MaterializedView", "ddl": "CREATE MATERIALIZED VIEW __ENACT_CH_DB__.injected_dangling_mv TO __ENACT_CH_DB__.missing_tbl AS SELECT 1"}]}
+            lmc.publish_generation(snap / "ch-v1", lmc.CH_FORMAT_PREFIX, "8" * 64, "ch26.6", {"ddl.json": json.dumps(poisoned).encode("utf-8"), "migrations.json": (gen1 / "migrations.json").read_bytes(), "seed_rows.json": b"{}"})
+            shutil.rmtree(snap / "ch-v1" / key1)
+            executed.clear()
+            restore_err = io.StringIO()
+            with contextlib.redirect_stderr(restore_err):
+                mode = lmc.restore_ch_snapshot(snap, repo, key2, "26.6.2", url, "posthog_mcp_2", "mcp_2_", "127.0.0.1:29092", "default", "")
+            self.assertEqual(mode, "base")
+            self.assertIn("injected_dangling_mv", restore_err.getvalue())
+            self.assertFalse(any("injected_dangling_mv" in q for q in executed))
+            mig_create = [q for q in executed if "CREATE TABLE posthog_mcp_2.infi_clickhouse_orm_migrations" in q][0]
+            zk_match = re.search(r"'(/clickhouse/prod/tables/enactzk_[0-9a-f]{12}/noshard/posthog_mcp_2/infi_clickhouse_orm_migrations)'", mig_create)
+            self.assertIsNotNone(zk_match, mig_create)
+            assert zk_match is not None
+
+            state["db"], state["zk"] = "posthog_mcp_2", zk_match.group(1)
+            gen2 = lmc.capture_ch_snapshot(snap, repo, key2, "26.6.2", url, "posthog_mcp_2", "mcp_2_", "127.0.0.1:29092", "default", "")
+            ddl2 = json.loads((gen2 / "ddl.json").read_text(encoding="utf-8"))
+            mig_ddl2 = [s["ddl"] for s in ddl2["statements"] if s["name"] == "infi_clickhouse_orm_migrations"][0]
+            self.assertIn("'/clickhouse/prod/tables/__ENACT_CH_ZK__/noshard/__ENACT_CH_DB__/infi_clickhouse_orm_migrations'", mig_ddl2)
+            self.assertNotIn("enactzk_", mig_ddl2)
+            self.assertNotIn("posthog_mcp_2", mig_ddl2)
+
+    def test_live_posthog_logs_ch_restore_stderr_and_cleans_keeper_on_cold_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as work:
+            repo, snap, bin_dir, logs_dir, calls = Path(work) / "repo", Path(work) / "snapshots", Path(work) / "bin", Path(work) / "logs", Path(work) / "calls.log"
+            _seed_repo(repo)
+            for fname in ("live_migrate_cache.py", "live_posthog.sh"):
+                (repo / "showcase/scripts" / fname).write_text((SCRIPTS / fname).read_text(encoding="utf-8"), encoding="utf-8")
+            (snap / "ch-v1" / ("f" * 64)).mkdir(parents=True)
+            bin_dir.mkdir()
+            for name, script in (
+                ("flock", "#!/usr/bin/env bash\nexit 0\n"),
+                ("clickhouse-client", f'#!/usr/bin/env bash\necho "CH_CLIENT:$*" >> "{calls}"\nif [[ "$*" == *"SELECT version()"* ]]; then echo "26.6.2.158"; fi\n'),
+                ("clickhouse", f'#!/usr/bin/env bash\necho "CH_BIN:$*" >> "{calls}"\n'),
+                ("uv", f'#!/usr/bin/env bash\necho "UV:$*" >> "{calls}"\n'),
+            ):
+                p = bin_dir / name
+                p.write_text(script, encoding="utf-8")
+                p.chmod(0o755)
+            res = subprocess.run(
+                ["bash", "-euo", "pipefail", "-c", 'source showcase/scripts/live_posthog.sh && live_ch=(clickhouse-client) live_ch_db=posthog_mcp_1 live_worker=mcp_1 live_logs="$LIVE_LOGS" live_run=(env) && (live_migrate_ch || true)'],
+                cwd=repo,
+                env={**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}", "SNAPSHOT_ROOT": str(snap), "LIVE_LOGS": str(logs_dir), "CLICKHOUSE_HTTP_PORT": "9", "KAFKA_HOSTS": "127.0.0.1:19092", "ENVE_SERVICE_CLICKHOUSE_PORT_KEEPER": "29181"},
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(res.returncode, 0, res.stderr)
+            self.assertIn("ch-restore.log", res.stderr)
+            self.assertIn("ch-restore miss/error:", (logs_dir / "ch-restore.log").read_text(encoding="utf-8"))
+            recorded = calls.read_text(encoding="utf-8").splitlines()
+            drop_idx = next(i for i, l in enumerate(recorded) if "DROP DATABASE IF EXISTS posthog_mcp_1 SYNC" in l)
+            keeper_idx = next(i for i, l in enumerate(recorded) if "keeper-client --port 29181 -q rmr /clickhouse/prod/tables/noshard/posthog_mcp_1" in l)
+            mig_idx = next(i for i, l in enumerate(recorded) if "manage.py migrate_clickhouse" in l)
+            self.assertLess(drop_idx, keeper_idx)
+            self.assertLess(keeper_idx, mig_idx)
+
+
+@unittest.skipUnless(_live_ch_http_url() is not None, "needs live ClickHouse HTTP service (CLICKHOUSE_HTTP_PORT)")
+class LiveClickHouseSnapshotServiceTest(unittest.TestCase):
+    def test_live_clickhouse_replicated_keeper_and_dangling_mv_snapshot_roundtrip(self) -> None:
+        url = _live_ch_http_url()
+        assert url is not None
+        user = os.environ.get("CLICKHOUSE_USER", "default")
+        pw = os.environ.get("CLICKHOUSE_PASSWORD", "")
+        ver = lmc.ch_http_query(url, "SELECT version()", user=user, password=pw).decode("utf-8").strip()
+        tag = uuid.uuid4().hex[:8]
+        src_db = f"posthog_probe_src_{tag}"
+        dst_db = f"posthog_probe_dst_{tag}"
+        self.addCleanup(lambda: lmc.ch_http_query(url, f"DROP DATABASE IF EXISTS `{src_db}` SYNC", user=user, password=pw))
+        self.addCleanup(lambda: lmc.ch_http_query(url, f"DROP DATABASE IF EXISTS `{dst_db}` SYNC", user=user, password=pw))
+
+        lmc.ch_http_query(url, f"CREATE DATABASE `{src_db}`", user=user, password=pw)
+        lmc.ch_http_query(
+            url,
+            f"CREATE TABLE `{src_db}`.`infi_clickhouse_orm_migrations` "
+            "(`package_name` String, `module_name` String, `applied` Date) "
+            "ENGINE = ReplicatedMergeTree('/clickhouse/prod/tables/noshard/{database}/{table}', '{replica}-{shard}') "
+            "ORDER BY (package_name, module_name)",
+            user=user,
+            password=pw,
+        )
+        lmc.ch_http_query(
+            url,
+            f"INSERT INTO `{src_db}`.`infi_clickhouse_orm_migrations` VALUES ('posthog.clickhouse.migrations', '0001_initial', '2026-01-01')",
+            user=user,
+            password=pw,
+        )
+        lmc.ch_http_query(url, f"CREATE TABLE `{src_db}`.`events` (`id` UInt64) ENGINE = MergeTree() ORDER BY id", user=user, password=pw)
+        lmc.ch_http_query(url, f"CREATE TABLE `{src_db}`.`gone_stats` (`id` UInt64) ENGINE = MergeTree() ORDER BY id", user=user, password=pw)
+        lmc.ch_http_query(
+            url,
+            f"CREATE MATERIALIZED VIEW `{src_db}`.`src_events_mv` TO `{src_db}`.`events` AS SELECT id FROM `{src_db}`.`events`",
+            user=user,
+            password=pw,
+        )
+        lmc.ch_http_query(
+            url,
+            f"CREATE MATERIALIZED VIEW `{src_db}`.`src_dangling_mv` TO `{src_db}`.`gone_stats` AS SELECT id FROM `{src_db}`.`events`",
+            user=user,
+            password=pw,
+        )
+        lmc.ch_http_query(url, f"DROP TABLE `{src_db}`.`gone_stats` SYNC", user=user, password=pw)
+
+        with tempfile.TemporaryDirectory() as work:
+            repo = Path(work) / "repo"
+            snap = Path(work) / "snapshots"
+            _seed_repo(repo)
+            key = lmc.compute_ch_key(repo, ver)
+            lmc.capture_ch_snapshot(snap, repo, key, ver, url, src_db, "src_", "127.0.0.1:19092", user, pw)
+            mode = lmc.restore_ch_snapshot(snap, repo, key, ver, url, dst_db, "dst_", "127.0.0.1:19092", user, pw)
+            self.assertEqual(mode, "exact")
+            tables = {
+                r["name"]
+                for r in lmc.ch_http_json_rows(
+                    url, f"SELECT name FROM system.tables WHERE database = '{dst_db}'", user=user, password=pw
+                )
+            }
+            self.assertIn("infi_clickhouse_orm_migrations", tables)
+            self.assertIn("dst_events_mv", tables)
+            self.assertNotIn("dst_dangling_mv", tables)
 
 
 if __name__ == "__main__":

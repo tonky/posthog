@@ -1075,6 +1075,7 @@ jobs:
           frontend/public/services
           frontend/jest.quarantine.ts
           .github/workflows/update-ai-costs.yml
+          showcase/scripts
           services/oauth-proxy
           tools/openapi-codegen
           frontend/package.json
@@ -1584,6 +1585,7 @@ jobs:
           frontend/public/services
           frontend/jest.quarantine.ts
           .github/workflows/update-ai-costs.yml
+          showcase/scripts
           services/oauth-proxy
           tools/openapi-codegen
           frontend/package.json
@@ -1954,11 +1956,11 @@ jobs:
         continue-on-error: true
         uses: actions/cache/restore@v6
         with:
-          key: ${{ runner.os }}-python-${{ hashFiles('**/uv.lock', '**/pyproject.toml', '**/requirements.txt', '**/poetry.lock') }}
+          key: ${{ runner.os }}-${{ runner.arch }}-python-${{ hashFiles('**/uv.lock', '**/pyproject.toml', '**/requirements.txt', '**/poetry.lock') }}
           path: |-
             /tmp/.cache/uv
             /tmp/.cache/pip
-          restore-keys: ${{ runner.os }}-python-
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-python-
       - name: Restore Rust target & cargo cache [cli/target]
         id: rust_l1_cache_cli_target
         if: ${{ (hashFiles('cli/Cargo.lock', 'cli/**/Cargo.toml') != '' && contains(format(',{0},', fromJson(needs.detect.outputs.stage_cargo)['preflight'].cargo_targets), ',cli/target,') && steps.runner_caches.outputs.host == '') && steps.stage_plan.outputs.stage_has_work == 'true' }}
@@ -2100,6 +2102,8 @@ jobs:
       env:
         ENACT_ENVIRONMENT_FILE: enve.cue
         ENACT_PYTHON_INSTALL: bash showcase/scripts/setup.sh backend
+        UV_HTTP_RETRIES: "5"
+        UV_HTTP_TIMEOUT: "120"
     - name: Verify Pipeline Contracts (enact check --contracts)
       run: |-
         ENACT_BIN=""
@@ -3147,11 +3151,11 @@ jobs:
         continue-on-error: true
         uses: actions/cache/restore@v6
         with:
-          key: ${{ runner.os }}-python-${{ hashFiles('**/uv.lock', '**/pyproject.toml', '**/requirements.txt', '**/poetry.lock') }}
+          key: ${{ runner.os }}-${{ runner.arch }}-python-${{ hashFiles('**/uv.lock', '**/pyproject.toml', '**/requirements.txt', '**/poetry.lock') }}
           path: |-
             /tmp/.cache/uv
             /tmp/.cache/pip
-          restore-keys: ${{ runner.os }}-python-
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-python-
       - name: Restore Cache [mypy fine-grained cache]
         id: cache_mypy
         if: ${{ steps.stage_plan.outputs.stage_has_work == 'true' }}
@@ -3193,6 +3197,8 @@ jobs:
       env:
         ENACT_ENVIRONMENT_FILE: enve.cue
         ENACT_PYTHON_INSTALL: bash showcase/scripts/setup.sh backend
+        UV_HTTP_RETRIES: "5"
+        UV_HTTP_TIMEOUT: "120"
     - name: Seed [products:typecheck]
       if: ${{ steps.stage_plan.outputs.stage_has_work == 'true' }}
       run: enact run --pipeline .enact --workflow ci --all --no-cache -c products:typecheck
@@ -3935,6 +3941,7 @@ jobs:
           posthog/hogql_queries/utils/breakdowns.py
           services/mcp
           services/stripe-app
+          showcase/scripts
           posthog/api/test/rust_integration
           products/__init__.py
           products/experiments/stats
@@ -4526,6 +4533,7 @@ jobs:
           posthog/hogql_queries/utils/breakdowns.py
           services/mcp
           services/stripe-app
+          showcase/scripts
           posthog/api/test/rust_integration
           products/__init__.py
           products/experiments/stats
@@ -4906,11 +4914,11 @@ jobs:
         continue-on-error: true
         uses: actions/cache/restore@v6
         with:
-          key: ${{ runner.os }}-python-${{ hashFiles('**/uv.lock', '**/pyproject.toml', '**/requirements.txt', '**/poetry.lock') }}
+          key: ${{ runner.os }}-${{ runner.arch }}-python-${{ hashFiles('**/uv.lock', '**/pyproject.toml', '**/requirements.txt', '**/poetry.lock') }}
           path: |-
             /tmp/.cache/uv
             /tmp/.cache/pip
-          restore-keys: ${{ runner.os }}-python-
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-python-
     - name: Record Restored Package Caches
       if: (steps.runner_caches.outputs.host == '' && steps.node_l1_cache.outputs.cache-hit != 'true' || steps.runner_caches.outputs.host == '' && steps.python_l1_cache.outputs.cache-hit != 'true') && github.event_name != 'pull_request'
       continue-on-error: true
@@ -4952,6 +4960,8 @@ jobs:
       env:
         ENACT_ENVIRONMENT_FILE: enve.cue
         ENACT_PYTHON_INSTALL: bash showcase/scripts/setup.sh backend
+        UV_HTTP_RETRIES: "5"
+        UV_HTTP_TIMEOUT: "120"
     - name: Check Package Caches for New Entries
       id: cache_delta
       if: ${{ !cancelled() && (steps.runner_caches.outputs.host == '' && steps.node_l1_cache.outputs.cache-hit != 'true' || steps.runner_caches.outputs.host == '' && steps.python_l1_cache.outputs.cache-hit != 'true') && github.event_name != 'pull_request' && github.event_name != 'pull_request' }}

@@ -59,6 +59,7 @@ live_setup() { # <component> <job> <redis db> <log dir>
     with_templates live_clone_databases "$live_db"
     live_ch=(clickhouse-client --port "${CLICKHOUSE_TCP_PORT:?the env ClickHouse native port}")
     "${live_ch[@]}" -q "DROP DATABASE IF EXISTS ${live_ch_db} SYNC" >/dev/null
+    live_clean_ch_keeper
     # The system log tables exist once flushed (upstream's init-db.sh): migration 0159's view
     # reads system.crash_log.
     "${live_ch[@]}" -q "SYSTEM FLUSH LOGS" >/dev/null
@@ -205,17 +206,30 @@ live_migrate_pg() {
     ) 7>"$SNAPSHOT_ROOT/live-v1/${key}.migrate.lock"
 }
 
+live_clean_ch_keeper() {
+    if [ -n "${ENVE_SERVICE_CLICKHOUSE_PORT_KEEPER:-}" ] && command -v clickhouse >/dev/null 2>&1; then
+        clickhouse keeper-client --port "$ENVE_SERVICE_CLICKHOUSE_PORT_KEEPER" \
+            -q "rmr /clickhouse/prod/tables/noshard/${live_ch_db}" >/dev/null 2>&1 || true
+    fi
+}
+
 live_migrate_ch() {
-    local ch_version ch_http_url ch_key mode=""
+    local ch_version ch_http_url ch_key ch_restore_log="${live_logs:-.}/ch-restore.log" mode=""
+    mkdir -p "${ch_restore_log%/*}"
     ch_version=$("${live_ch[@]}" -q "SELECT version()" | tr -d '[:space:]')
     ch_http_url="http://${CLICKHOUSE_HOST:-127.0.0.1}:${CLICKHOUSE_HTTP_PORT:?the env ClickHouse HTTP port}"
     ch_key=$(python3 showcase/scripts/live_migrate_cache.py ch-key --repo . --ch-version "$ch_version") || return 1
 
-    mode=$(python3 showcase/scripts/live_migrate_cache.py ch-restore \
+    if ! mode=$(python3 showcase/scripts/live_migrate_cache.py ch-restore \
         --snapshot-root "$SNAPSHOT_ROOT" --repo . --key "$ch_key" --ch-version "$ch_version" \
         --http-url "$ch_http_url" --ch-db "$live_ch_db" --kafka-prefix "${live_worker}_" \
         --kafka-broker "${KAFKA_HOSTS:?the env Kafka bootstrap}" \
-        --user "${CLICKHOUSE_USER:-default}" --password "${CLICKHOUSE_PASSWORD:-}" 2>/dev/null || true)
+        --user "${CLICKHOUSE_USER:-default}" --password "${CLICKHOUSE_PASSWORD:-}" 2>"$ch_restore_log"); then
+        mode=""
+        if [ -d "$SNAPSHOT_ROOT/ch-v1" ] && [ -n "$(ls -A "$SNAPSHOT_ROOT/ch-v1" 2>/dev/null)" ]; then
+            echo "live-ch restore miss/failed (see $ch_restore_log)" >&2
+        fi
+    fi
 
     if [ "$mode" = "exact" ]; then
         if live_py manage.py migrate_clickhouse --check >/dev/null 2>&1; then
@@ -233,7 +247,7 @@ live_migrate_ch() {
             --snapshot-root "$SNAPSHOT_ROOT" --repo . --key "$ch_key" --ch-version "$ch_version" \
             --http-url "$ch_http_url" --ch-db "$live_ch_db" --kafka-prefix "${live_worker}_" \
             --kafka-broker "${KAFKA_HOSTS:?the env Kafka bootstrap}" \
-            --user "${CLICKHOUSE_USER:-default}" --password "${CLICKHOUSE_PASSWORD:-}" --exact-only >/dev/null 2>&1; then
+            --user "${CLICKHOUSE_USER:-default}" --password "${CLICKHOUSE_PASSWORD:-}" --exact-only >/dev/null 2>>"$ch_restore_log"; then
             if live_py manage.py migrate_clickhouse --check >/dev/null 2>&1; then
                 echo "live-ch snapshot hit after lock: $ch_key" >&2
                 exit 0
@@ -244,11 +258,13 @@ live_migrate_ch() {
             if ! live_py manage.py migrate_clickhouse; then
                 echo "live-ch incremental top-up failed; rebuilding cold" >&2
                 "${live_ch[@]}" -q "DROP DATABASE IF EXISTS ${live_ch_db} SYNC" >/dev/null || exit 1
+                live_clean_ch_keeper
                 "${live_ch[@]}" -q "SYSTEM FLUSH LOGS" >/dev/null || exit 1
                 live_py manage.py migrate_clickhouse || exit 1
             fi
         else
             "${live_ch[@]}" -q "DROP DATABASE IF EXISTS ${live_ch_db} SYNC" >/dev/null || exit 1
+            live_clean_ch_keeper
             "${live_ch[@]}" -q "SYSTEM FLUSH LOGS" >/dev/null || exit 1
             live_py manage.py migrate_clickhouse || exit 1
         fi

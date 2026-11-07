@@ -513,11 +513,11 @@ jobs:
         continue-on-error: true
         uses: actions/cache/restore@v6
         with:
-          key: ${{ runner.os }}-python-${{ hashFiles('**/uv.lock', '**/pyproject.toml', '**/requirements.txt', '**/poetry.lock') }}
+          key: ${{ runner.os }}-${{ runner.arch }}-python-${{ hashFiles('**/uv.lock', '**/pyproject.toml', '**/requirements.txt', '**/poetry.lock') }}
           path: |-
             /tmp/.cache/uv
             /tmp/.cache/pip
-          restore-keys: ${{ runner.os }}-python-
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-python-
       - name: Restore Go build cache
         id: go_l1_cache
         if: ${{ (contains(matrix.technology, 'go') && steps.runner_caches.outputs.host == '' && hashFiles('**/go.mod', '**/go.sum') != '') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
@@ -859,6 +859,8 @@ jobs:
       env:
         ENACT_ENVIRONMENT_FILE: enve.cue
         ENACT_PYTHON_INSTALL: bash showcase/scripts/setup.sh backend
+        UV_HTTP_RETRIES: "5"
+        UV_HTTP_TIMEOUT: "120"
     - name: Execute Component Task
       if: ${{ !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
       run: eval "$ENACT_MATRIX_COMMAND"

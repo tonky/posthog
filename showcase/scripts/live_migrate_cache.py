@@ -25,7 +25,8 @@ from pathlib import Path
 from typing import Iterator
 
 PG_FORMAT_PREFIX = "enact-live-pg-v1"
-CH_FORMAT_PREFIX = "enact-live-ch-v1"
+CH_FORMAT_PREFIX = "enact-live-ch-v2"
+_RETIRED_CH_FORMAT_PREFIXES = ("enact-live-ch-v1",)
 PG_REQUIRED_FILES = ("live-postgres.dump", "live-migrations.json")
 CH_REQUIRED_FILES = ("ddl.json", "migrations.json", "seed_rows.json")
 
@@ -43,7 +44,24 @@ _CREATE_UUID_RE = re.compile(
     r"\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:`[^`]+`|\S+))\s+UUID\s+'[0-9a-fA-F-]+'",
     re.IGNORECASE,
 )
-_ZK_PATH_RE = re.compile(r"'/clickhouse/tables/(?:[0-9a-fA-F-]+_)?([^']*)'")
+_ZK_PATH_RE = re.compile(
+    r"'(/clickhouse/(?:prod/)?tables/)(?:(?:enactzk_[0-9a-f]+|__ENACT_CH_ZK__)/)?(?:[0-9a-fA-F-]+_)?([^']*)'"
+)
+_SQL_TOKEN_RE = re.compile(
+    r"""
+    (?P<ws>\s+)
+    |(?P<line_comment>--[^\n]*)
+    |(?P<block_comment>/\*[\s\S]*?\*/)
+    |(?P<bquote>`(?:[^`]|``)*`)
+    |(?P<dquote>"(?:[^"]|"")*")
+    |(?P<squote>'(?:[^']|'')*')
+    |(?P<punct>[.(),=;])
+    |(?P<word>[A-Za-z0-9_]+)
+    |(?P<other>\S)
+    """,
+    re.VERBOSE,
+)
+_MV_HEADER_STOP_WORDS = frozenset({"ENGINE", "POPULATE", "DEFINER", "SQL", "COMMENT", "AS"})
 _VIEW_ENGINES = frozenset({"MaterializedView", "View", "LiveView", "WindowView"})
 _OVERLAY_ENGINES = frozenset({"Buffer", "Distributed"})
 
@@ -208,7 +226,29 @@ def publish_generation(
     return final_dir
 
 
-def verify_store(store_root: Path, format_prefix: str, required_files: tuple[str, ...]) -> tuple[bool, list[str]]:
+def _prune_retired_entry(entry: Path, store_root: Path) -> None:
+    lock_path = store_root / f"{entry.name}.lock"
+    try:
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        with lock_path.open("a+") as handle:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            try:
+                shutil.rmtree(entry, ignore_errors=True)
+                for suffix in (".migrate.lock", ".publish.lock"):
+                    (store_root / f"{entry.name}{suffix}").unlink(missing_ok=True)
+            finally:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        lock_path.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def verify_store(
+    store_root: Path,
+    format_prefix: str,
+    required_files: tuple[str, ...],
+    retired_prefixes: tuple[str, ...] = (),
+) -> tuple[bool, list[str]]:
     """Audit every key directory in ``store_root``; return ``(has_any_valid, errors)``."""
     if not store_root.exists():
         return False, []
@@ -234,6 +274,9 @@ def verify_store(store_root: Path, format_prefix: str, required_files: tuple[str
             errors.append(f"invalid {_POINTER_NAME} in {entry}")
             continue
         if verify_generation(gen_dir, format_prefix, entry.name, required_files) is None:
+            if any(verify_generation(gen_dir, rp, entry.name, required_files) is not None for rp in retired_prefixes):
+                _prune_retired_entry(entry, store_root)
+                continue
             errors.append(f"corrupt generation {gen_dir}")
             continue
         has_valid = True
@@ -425,7 +468,7 @@ def compute_ch_key(repo_root: Path, ch_version: str) -> str:
 def canonicalize_ddl(ddl: str, ch_db: str, kafka_prefix: str, kafka_broker: str) -> str:
     """Strip Atomic UUIDs and replace environment-specific DB/Kafka/Keeper identifiers with tokens."""
     out = _CREATE_UUID_RE.sub(r"\1", ddl.strip())
-    out = _ZK_PATH_RE.sub(rf"'/clickhouse/tables/{TOKEN_CH_ZK}/\1'", out)
+    out = _ZK_PATH_RE.sub(rf"'\1{TOKEN_CH_ZK}/\2'", out)
     if ch_db:
         # Substitute ch_db BEFORE kafka_prefix so `<ch_db>` containing `<worker>_` is never split.
         out = re.sub(rf"(?<![A-Za-z0-9_]){re.escape(ch_db)}(?![A-Za-z0-9_])", TOKEN_CH_DB, out)
@@ -450,6 +493,163 @@ def instantiate_ddl(
         .replace(TOKEN_KAFKA_PREFIX, kafka_prefix)
         .replace(TOKEN_KAFKA_BROKER, kafka_broker)
     )
+
+
+def _iter_sql_header_tokens(ddl: str) -> Iterator[tuple[str, str]]:
+    for match in _SQL_TOKEN_RE.finditer(ddl):
+        kind = match.lastgroup
+        raw = match.group(0)
+        if kind in {"ws", "line_comment", "block_comment"}:
+            continue
+        if kind == "bquote":
+            yield ("IDENT", raw[1:-1].replace("``", "`"))
+        elif kind == "dquote":
+            yield ("IDENT", raw[1:-1].replace('""', '"'))
+        elif kind == "squote":
+            yield ("STRING", raw[1:-1].replace("''", "'"))
+        elif kind == "punct":
+            yield ("PUNCT", raw)
+        elif kind == "word":
+            yield ("WORD", raw)
+        else:
+            yield ("OTHER", raw)
+
+
+def _read_qualified_ident(tokens: list[tuple[str, str]], idx: int) -> tuple[str | None, str, int] | None:
+    if idx >= len(tokens) or tokens[idx][0] not in {"WORD", "IDENT"}:
+        return None
+    first = tokens[idx][1]
+    if idx + 2 < len(tokens) and tokens[idx + 1] == ("PUNCT", ".") and tokens[idx + 2][0] in {"WORD", "IDENT"}:
+        return (first, tokens[idx + 2][1], idx + 3)
+    return (None, first, idx + 1)
+
+
+def _parse_created_object_name(ddl: str) -> str | None:
+    tokens: list[tuple[str, str]] = []
+    for tok in _iter_sql_header_tokens(ddl):
+        tokens.append(tok)
+        if len(tokens) >= 20:
+            break
+    if not tokens or tokens[0][0] != "WORD" or tokens[0][1].upper() != "CREATE":
+        return None
+    idx = 1
+    if (
+        idx + 1 < len(tokens)
+        and tokens[idx][0] == "WORD"
+        and tokens[idx][1].upper() == "OR"
+        and tokens[idx + 1][0] == "WORD"
+        and tokens[idx + 1][1].upper() == "REPLACE"
+    ):
+        idx += 2
+    if idx < len(tokens) and tokens[idx][0] == "WORD" and tokens[idx][1].upper() == "TEMPORARY":
+        idx += 1
+    if idx >= len(tokens) or tokens[idx][0] != "WORD":
+        return None
+    head = tokens[idx][1].upper()
+    if head in {"TABLE", "VIEW", "DICTIONARY"}:
+        idx += 1
+    elif (
+        head in {"MATERIALIZED", "LIVE", "WINDOW"}
+        and idx + 1 < len(tokens)
+        and tokens[idx + 1][0] == "WORD"
+        and tokens[idx + 1][1].upper() == "VIEW"
+    ):
+        idx += 2
+    else:
+        return None
+    if (
+        idx + 2 < len(tokens)
+        and [t[1].upper() if t[0] == "WORD" else "" for t in tokens[idx : idx + 3]] == ["IF", "NOT", "EXISTS"]
+    ):
+        idx += 3
+    parsed = _read_qualified_ident(tokens, idx)
+    return parsed[1] if parsed is not None else None
+
+
+def _parse_mv_to_target(ddl: str) -> tuple[str | None, str] | None:
+    """Return ``(target_db_or_none, target_table)`` for ``CREATE MATERIALIZED VIEW ... TO ...``."""
+    tokens: list[tuple[str, str]] = []
+    for tok in _iter_sql_header_tokens(ddl):
+        tokens.append(tok)
+        if tok == ("PUNCT", "(") or (tok[0] == "WORD" and tok[1].upper() in _MV_HEADER_STOP_WORDS):
+            break
+    if not tokens or tokens[0][0] != "WORD" or tokens[0][1].upper() != "CREATE":
+        return None
+    idx = 1
+    if (
+        idx + 1 < len(tokens)
+        and tokens[idx][0] == "WORD"
+        and tokens[idx][1].upper() == "OR"
+        and tokens[idx + 1][0] == "WORD"
+        and tokens[idx + 1][1].upper() == "REPLACE"
+    ):
+        idx += 2
+    if (
+        idx + 1 >= len(tokens)
+        or tokens[idx][0] != "WORD"
+        or tokens[idx][1].upper() != "MATERIALIZED"
+        or tokens[idx + 1][0] != "WORD"
+        or tokens[idx + 1][1].upper() != "VIEW"
+    ):
+        return None
+    idx += 2
+    if (
+        idx + 2 < len(tokens)
+        and [t[1].upper() if t[0] == "WORD" else "" for t in tokens[idx : idx + 3]] == ["IF", "NOT", "EXISTS"]
+    ):
+        idx += 3
+    view_ident = _read_qualified_ident(tokens, idx)
+    if view_ident is None:
+        return None
+    idx = view_ident[2]
+    while idx < len(tokens):
+        kind, val = tokens[idx]
+        upper = val.upper() if kind == "WORD" else ""
+        if (kind == "PUNCT" and val == "(") or upper in _MV_HEADER_STOP_WORDS:
+            return None
+        if upper == "TO":
+            if idx + 1 < len(tokens) and tokens[idx + 1][0] == "WORD" and tokens[idx + 1][1].upper() == "INNER":
+                return None
+            target = _read_qualified_ident(tokens, idx + 1)
+            return (target[0], target[1]) if target is not None else None
+        idx += 1
+    return None
+
+
+def filter_dangling_materialized_views(rows: list[dict], ch_db: str) -> list[dict]:
+    """Skip MaterializedView rows whose same-DB ``TO [db.]table`` target is missing from ``rows``."""
+    same_dbs = {d for d in (ch_db, TOKEN_CH_DB) if d}
+    kept = list(rows)
+    while True:
+        available = {
+            obj_name
+            for row in kept
+            for obj_name in (_parse_created_object_name(row.get("ddl", "")) or row.get("name"),)
+            if obj_name
+        }
+        next_kept: list[dict] = []
+        dropped_any = False
+        for row in kept:
+            ddl = row.get("ddl", "")
+            is_mv = row.get("engine") == "MaterializedView" or (
+                not row.get("engine") and _parse_mv_to_target(ddl) is not None
+            )
+            target = _parse_mv_to_target(ddl) if is_mv else None
+            if target is not None:
+                target_db, target_table = target
+                if (target_db is None or target_db in same_dbs) and target_table not in available:
+                    mv_name = _parse_created_object_name(ddl) or row.get("name") or "<unnamed_mv>"
+                    qual_target = f"{target_db}.{target_table}" if target_db else target_table
+                    print(
+                        f"ch-snapshot: skipping dangling MaterializedView {mv_name} -> {qual_target}",
+                        file=sys.stderr,
+                    )
+                    dropped_any = True
+                    continue
+            next_kept.append(row)
+        kept = next_kept
+        if not dropped_any:
+            return kept
 
 
 def _table_tier(engine: str) -> int:
@@ -633,16 +833,19 @@ def capture_ch_snapshot(
     if not raw_tables:
         raise RuntimeError(f"No ClickHouse tables found in database {ch_db}")
 
-    ddl_rows = [
-        {
-            "name": row["name"],
-            "engine": row["engine"],
-            "ddl": row["create_table_query"],
-            "dependencies_table": row.get("dependencies_table") or [],
-        }
-        for row in raw_tables
-        if row.get("create_table_query")
-    ]
+    ddl_rows = filter_dangling_materialized_views(
+        [
+            {
+                "name": row["name"],
+                "engine": row["engine"],
+                "ddl": row["create_table_query"],
+                "dependencies_table": row.get("dependencies_table") or [],
+            }
+            for row in raw_tables
+            if row.get("create_table_query")
+        ],
+        ch_db,
+    )
     ordered = order_ddl_statements(ddl_rows, ch_db)
     canonical_statements = [
         {
@@ -722,7 +925,17 @@ def capture_ch_snapshot(
             ).encode("utf-8"),
             "seed_rows.json": json.dumps(seed_tables, sort_keys=True).encode("utf-8"),
         }
-        return publish_generation(store_root, CH_FORMAT_PREFIX, key, f"ch{ch_major_minor}", files)
+        published = publish_generation(store_root, CH_FORMAT_PREFIX, key, f"ch{ch_major_minor}", files)
+    for entry in store_root.iterdir():
+        if entry.name == key or not entry.is_dir() or not _KEY_RE.fullmatch(entry.name):
+            continue
+        gen_dir = _parse_pointer(entry)
+        if gen_dir is not None and any(
+            verify_generation(gen_dir, rp, entry.name, CH_REQUIRED_FILES) is not None
+            for rp in _RETIRED_CH_FORMAT_PREFIXES
+        ):
+            _prune_retired_entry(entry, store_root)
+    return published
 
 
 def restore_ch_snapshot(
@@ -757,7 +970,18 @@ def restore_ch_snapshot(
     mig_doc = json.loads((gen_dir / "migrations.json").read_text(encoding="utf-8"))
     seed_doc = json.loads((gen_dir / "seed_rows.json").read_text(encoding="utf-8"))
 
-    zk_prefix = f"{ch_db}_{uuid.uuid4().hex[:8]}"
+    zk_prefix = f"enactzk_{uuid.uuid4().hex[:12]}"
+    instantiated_statements = filter_dangling_materialized_views(
+        [
+            {
+                "name": stmt.get("name", ""),
+                "engine": stmt.get("engine", ""),
+                "ddl": instantiate_ddl(stmt["ddl"], ch_db, kafka_prefix, kafka_broker, zk_prefix),
+            }
+            for stmt in ddl_doc["statements"]
+        ],
+        ch_db,
+    )
     ch_http_query(http_url, "SYSTEM FLUSH LOGS", user=user, password=password)
     ch_http_query(http_url, f"DROP DATABASE IF EXISTS `{ch_db}` SYNC", user=user, password=password)
     ch_http_query(
@@ -766,9 +990,8 @@ def restore_ch_snapshot(
         user=user,
         password=password,
     )
-    for stmt in ddl_doc["statements"]:
-        sql = instantiate_ddl(stmt["ddl"], ch_db, kafka_prefix, kafka_broker, zk_prefix)
-        ch_http_query(http_url, sql, user=user, password=password, database=ch_db)
+    for stmt in instantiated_statements:
+        ch_http_query(http_url, stmt["ddl"], user=user, password=password, database=ch_db)
 
     applied_jsonl = mig_doc["applied_jsonl"].strip()
     if applied_jsonl:
@@ -992,7 +1215,12 @@ def main(argv: list[str] | None = None) -> int:
         raw_root = args.snapshot_root
         root = raw_root.resolve()
         live_ok, live_errs = verify_store(root / "live-v1", PG_FORMAT_PREFIX, PG_REQUIRED_FILES)
-        ch_ok, ch_errs = verify_store(root / "ch-v1", CH_FORMAT_PREFIX, CH_REQUIRED_FILES)
+        ch_ok, ch_errs = verify_store(
+            root / "ch-v1",
+            CH_FORMAT_PREFIX,
+            CH_REQUIRED_FILES,
+            retired_prefixes=_RETIRED_CH_FORMAT_PREFIXES,
+        )
         errors = live_errs + ch_errs
         eligible = (not errors) and (live_ok or ch_ok)
         if eligible and os.environ.get("GITHUB_EVENT_NAME") != "schedule":

@@ -560,11 +560,11 @@ pipeline: schema.#Pipeline & {
 				}]
 			}
 			shards:    3
-			resources: {cpus: 0.75, memory_mb: 3584}
+			resources: {cpus: 2.0, memory_mb: 3584}
 			resource_forecast: {
 				mode: "bounded"
-				min: {cpus: 0.75, memory_mb: 1024}
-				max: {cpus: 2.0, memory_mb: 4096}
+				min: {cpus: 2.0, memory_mb: 3584}
+				max: {cpus: 3.0, memory_mb: 6144}
 			}
 			scoping: {
 				domain_roots:    ["posthog", "products"]
@@ -992,14 +992,14 @@ pipeline: schema.#Pipeline & {
 			title:           "PostHog Protocol Buffers & Schema Definitions"
 			kind:            "library"
 			domain:          "ingestion"
-			technology:      "protobuf"
+			technology:      ["protobuf", "typescript"]
 			root:            "proto"
 			depends_on:      ["root"]
-			workspace_scope: include: ["bin", "nodejs"]
+			workspace_scope: include: ["bin", "nodejs", "packages/personhog-proto", "pyproject.toml", "uv.lock", "package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml", "patches", "showcase/scripts"]
 			watch_paths:     ["proto/**", "packages/personhog-proto/**", "bin/generate_personhog_proto.sh"]
 			lint: {
 				timeout:         "20m"
-				command:         "buf lint proto/ && buf breaking proto/ --against '../.git#ref=HEAD,subdir=proto' && UV_PROJECT_ENVIRONMENT=.enact/state/proto-venv uv sync --frozen --no-install-project --only-group proto-codegen && PATH=\"$(realpath ../.enact/state/proto-venv)/bin:$PATH\" bash ../bin/generate_personhog_proto.sh && git add -N ../packages/personhog-proto/ && git diff --exit-code -- ../packages/personhog-proto/ && pnpm --dir ../nodejs run generate:personhog-proto && pnpm --dir ../nodejs run generate:ingestion-worker-proto && git add -N ../nodejs/src/common/generated/personhog/ ../nodejs/src/common/generated/ingestion-worker/ && git diff --exit-code -- ../nodejs/src/common/generated/personhog/ ../nodejs/src/common/generated/ingestion-worker/"
+				command:         "buf lint proto/ && buf breaking proto/ --against '../.git#ref=HEAD,subdir=proto' && ../showcase/scripts/exclusive.sh proto-venv env UV_PROJECT_ENVIRONMENT=.enact/state/proto-venv uv sync --frozen --no-install-project --only-group proto-codegen && PATH=\"$(realpath ../.enact/state/proto-venv)/bin:$PATH\" bash ../bin/generate_personhog_proto.sh && git add -N ../packages/personhog-proto/ && git diff --exit-code -- ../packages/personhog-proto/ && if [ ! -x ../nodejs/node_modules/.bin/protoc-gen-es ]; then ../showcase/scripts/exclusive.sh pnpm-install pnpm --dir .. install --frozen-lockfile --filter=@posthog/nodejs...; fi && pnpm --dir ../nodejs run generate:personhog-proto && pnpm --dir ../nodejs run generate:ingestion-worker-proto && git add -N ../nodejs/src/common/generated/personhog/ ../nodejs/src/common/generated/ingestion-worker/ && git diff --exit-code -- ../nodejs/src/common/generated/personhog/ ../nodejs/src/common/generated/ingestion-worker/"
 				expect_no_drift: ["packages/personhog-proto/**", "nodejs/src/common/generated/personhog/**", "nodejs/src/common/generated/ingestion-worker/**"]
 			}
 		}
