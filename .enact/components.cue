@@ -118,9 +118,7 @@ _rustCrateRules: [
 	{
 		match: [
 			"showcase/scripts/run_rust_tests.sh", "showcase/scripts/rust_footprint.py",
-			"showcase/scripts/rust_nextest.toml", "infra/**", "docker/**",
-			"showcase/scripts/{test_databases.sh,template_inputs.py,template_publications.py,create_test_kafka_topics.py,seaweedfs_setup.sh}",
-			"showcase/scripts/tests/**", "showcase/.gitignore",
+			"showcase/scripts/rust_nextest.toml", "showcase/scripts/tests/**",
 		]
 		action: "ignore"
 	},
@@ -329,6 +327,10 @@ pipeline: schema.#Pipeline & {
 			name: "frontend_harness", title: "Frontend Jest runner", technology: "typescript"
 			watch_paths: ["showcase/scripts/run_frontend_tests.sh"]
 		}
+		"nodejs_harness": _harness & {
+			name: "nodejs_harness", title: "Node.js Jest runner", technology: "typescript"
+			watch_paths: ["showcase/scripts/run_nodejs_tests.sh"]
+		}
 		"plugin_transpiler": {
 			name:            "plugin_transpiler"
 			title:           "PostHog Plugin Transpiler"
@@ -369,10 +371,10 @@ pipeline: schema.#Pipeline & {
 			description:     "The unittest suite of the overlay's scripts: shard provisioning, runners, templates"
 			technology:      "python"
 			root:            "."
-			depends_on:      ["test_env", "py-root", "pytest_plugins", "pytest_runner", "build_once", "plugin_transpiler", "frontend_harness", "live_harness", "github_scripts_harness"]
+			depends_on:      ["test_env", "py-root", "pytest_plugins", "pytest_runner", "build_once", "plugin_transpiler", "frontend_harness", "nodejs_harness", "live_harness", "github_scripts_harness"]
 			workspace_scope: include: [".github/workflows/ci.yml"]
 			watch_paths: [
-				"showcase/scripts/tests/**", "showcase/scripts/run_nodejs_tests.sh",
+				"showcase/scripts/tests/**",
 				"showcase/scripts/rust_footprint.py", "showcase/scripts/run_rust_release_build.sh",
 				"showcase/scripts/no_drift.sh", "posthog/user_scripts/**",
 				"packages/personhog-proto/pyproject.toml", "packages/owners-yaml/pyproject.toml", "tools/hogli/pyproject.toml",

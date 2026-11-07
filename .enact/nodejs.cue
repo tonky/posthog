@@ -39,7 +39,7 @@ pipeline: components: {
 		title:           "PostHog Node.js suites' environment"
 		technology:      "shell"
 		root:            "."
-		depends_on:      ["js-root", "test_env", "test_quarantine", "build_once"]
+		depends_on:      ["js-root", "test_env", "test_quarantine", "build_once", "nodejs_harness"]
 		workspace_scope: include: _nodejsCone
 		watch_paths: list.Concat([[
 			"common/replay-headless/**",
@@ -55,7 +55,6 @@ pipeline: components: {
 			"posthog/clickhouse/**",
 			"posthog/plugins/**",
 			"posthog/cdp/filter_globals.json",
-			"showcase/scripts/run_nodejs_tests.sh",
 			"infra/maildev/**",
 		], _rustWorkspaceEveryCrate, _djangoMigrations])
 	}

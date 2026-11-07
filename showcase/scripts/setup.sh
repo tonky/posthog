@@ -22,12 +22,9 @@ case "${1:-frontend}" in
             done
         }
         if [ -n "${UV_CACHE_DIR:-}" ]; then
-            VENV_KEY="$({ printf '%s\n%s\n' "$PY_BIN" "$PWD"; sha256sum uv.lock pyproject.toml 2>/dev/null || shasum -a 256 uv.lock pyproject.toml; } | { sha256sum 2>/dev/null || shasum -a 256; } | cut -c1-16)"
+            VENV_KEY="$({ printf '%s\n' "$PY_BIN"; sha256sum uv.lock pyproject.toml 2>/dev/null || shasum -a 256 uv.lock pyproject.toml; } | { sha256sum 2>/dev/null || shasum -a 256; } | cut -c1-16)"
             VENV_CACHE="${UV_CACHE_DIR}/venv-v2-${VENV_KEY}"
-            case "$PWD" in
-                */readiness-outputs/proof-*/*) ;;
-                *) CACHE_VENV_WRITE=1 ;;
-            esac
+            CACHE_VENV_WRITE=1
             mkdir -p "$UV_CACHE_DIR/work"
             rm -rf "$UV_CACHE_DIR"/venv-[0-9a-f]* 2>/dev/null || true
             prune_venv_cache
@@ -35,12 +32,15 @@ case "${1:-frontend}" in
         fi
         clone_tree() {
             rm -rf "$2"
-            cp -al "$1" "$2" 2>/dev/null || { rm -rf "$2"; cp -a "$1" "$2"; }
+            cp -a --reflink=auto "$1" "$2" 2>/dev/null \
+                || { rm -rf "$2"; cp -al "$1" "$2" 2>/dev/null; } \
+                || { rm -rf "$2"; cp -a "$1" "$2"; }
         }
         RESTORED=0
         if [ -n "$VENV_CACHE" ] && [ -d "$VENV_CACHE" ] && [ ! -e .venv ]; then
             WORK_VENV="$(mktemp -d "$UV_CACHE_DIR/work/venv.XXXXXX")"
             if clone_tree "$VENV_CACHE" "$WORK_VENV"; then
+                find "$WORK_VENV" \( -path '*/bin/*' ! -name 'python*' -o -name '*.pth' \) -type f -delete 2>/dev/null || true
                 touch "$VENV_CACHE" "$WORK_VENV" 2>/dev/null || true
                 ln -sfn "$WORK_VENV" .venv
                 if uv sync --frozen --dev --no-install-package pytest-split --python "$PY_BIN" && uv run --no-sync python -c 'import grpc; from grpc._cython import cygrpc'; then

@@ -28,8 +28,17 @@ case "$1" in
 sync)
     mkdir "$STUB_LOG.syncing" 2>/dev/null || { echo "Failed to install: flameprof-0.4" >&2; exit 2; }
     sleep 0.5
-    mkdir -p .venv && : > .venv/pyvenv.cfg
+    mkdir -p .venv/bin .venv/lib/site-packages
+    : > .venv/pyvenv.cfg
+    : > .venv/bin/python3
+    printf '#!%s/.venv/bin/python3\\n' "$PWD" > .venv/bin/pytest
+    chmod +x .venv/bin/python3 .venv/bin/pytest
+    printf '%s\\n' "$PWD" > .venv/lib/site-packages/_editable.pth
     echo sync >> "$STUB_LOG"
+    case "$*" in
+        *--compile-bytecode*) echo cold-sync >> "$STUB_LOG" ;;
+        *) echo warm-sync >> "$STUB_LOG" ;;
+    esac
     rmdir "$STUB_LOG.syncing"
     ;;
 run)
@@ -128,7 +137,14 @@ class ShardProvisioningTest(unittest.TestCase):
         self.assertFalse((self.repo / ".venv/.replay-provisioned.json").exists())
         self.assertEqual(1, self.entries("sync"))
 
-    def test_uv_venv_cache_is_bounded_and_ephemeral_proof_dirs_skip_writing_cache(self) -> None:
+    def stage_checkout(self, target: Path) -> None:
+        (target / "showcase/scripts").mkdir(parents=True, exist_ok=True)
+        for name in ("setup.sh", "backend_runtime.py"):
+            shutil.copy2(self.repo / "showcase/scripts" / name, target / "showcase/scripts" / name)
+        (target / "uv.lock").write_text("lock\n")
+        (target / "pyproject.toml").write_text("[project]\nname = 'x'\n")
+
+    def test_uv_venv_cache_is_bounded_and_shared_across_ephemeral_proof_dirs(self) -> None:
         uv_cache = self.repo / "uv-cache"
         for idx, age in enumerate((300, 200, 100)):
             d = uv_cache / f"venv-v2-old{idx}"
@@ -151,19 +167,63 @@ class ShardProvisioningTest(unittest.TestCase):
         self.assertEqual(2, len(remaining), remaining)
         self.assertFalse((uv_cache / "venv-v2-old0").exists())
         self.assertFalse((uv_cache / "venv-v2-old1").exists())
+        self.assertEqual(1, self.entries("cold-sync"))
+        self.assertEqual(0, self.entries("warm-sync"))
+        cached_dirs = [p for p in uv_cache.glob("venv-v2-*") if p.name != "venv-v2-old2"]
+        self.assertEqual(1, len(cached_dirs), cached_dirs)
+        cached_venv = cached_dirs[0]
 
-        ephemeral = self.repo / "readiness-outputs/proof-abc123/runtime"
-        (ephemeral / "showcase/scripts").mkdir(parents=True)
-        for name in ("setup.sh", "backend_runtime.py"):
-            shutil.copy2(self.repo / "showcase/scripts" / name, ephemeral / "showcase/scripts" / name)
-        (ephemeral / "uv.lock").write_text("lock\n")
-        (ephemeral / "pyproject.toml").write_text("[project]\nname = 'x'\n")
+        # (b) Running inside readiness-outputs/proof-abc123/runtime hits the cached venv-v2-<key>
+        #     without creating a 3rd directory or mutating hardlinked files inside VENV_CACHE.
+        ephemeral_a = self.repo / "readiness-outputs/proof-abc123/runtime"
+        self.stage_checkout(ephemeral_a)
         before = set(uv_cache.glob("venv-v2-*"))
         done = subprocess.run(
-            ["bash", "showcase/scripts/setup.sh", "backend"], cwd=ephemeral, env=env, capture_output=True, text=True
+            ["bash", "showcase/scripts/setup.sh", "backend"], cwd=ephemeral_a, env=env, capture_output=True, text=True
         )
         self.assertEqual(0, done.returncode, done.stdout + done.stderr)
         self.assertEqual(before, set(uv_cache.glob("venv-v2-*")))
+        self.assertEqual(1, self.entries("cold-sync"))
+        self.assertEqual(1, self.entries("warm-sync"))
+        self.assertEqual(f"{ephemeral_a}\n", (ephemeral_a / ".venv/lib/site-packages/_editable.pth").read_text())
+        self.assertIn(str(ephemeral_a), (ephemeral_a / ".venv/bin/pytest").read_text())
+        self.assertEqual(f"{self.repo}\n", (cached_venv / "lib/site-packages/_editable.pth").read_text())
+        self.assertNotEqual(
+            (ephemeral_a / ".venv/lib/site-packages/_editable.pth").stat().st_ino,
+            (cached_venv / "lib/site-packages/_editable.pth").stat().st_ino,
+        )
+        self.assertNotEqual(
+            (ephemeral_a / ".venv/bin/pytest").stat().st_ino,
+            (cached_venv / "bin/pytest").stat().st_ino,
+        )
+
+        # (c) Starting from an empty uv_cache, proof-abc123 populates venv-v2-<key> and
+        #     proof-def456 reuses it cleanly on warm restore.
+        empty_cache = self.repo / "uv-cache-empty"
+        self.log.unlink()
+        env_empty = {**env, "UV_CACHE_DIR": str(empty_cache)}
+        proof_1 = self.repo / "readiness-outputs/proof-cold1/runtime"
+        proof_2 = self.repo / "readiness-outputs/proof-warm2/runtime"
+        self.stage_checkout(proof_1)
+        self.stage_checkout(proof_2)
+        done1 = subprocess.run(
+            ["bash", "showcase/scripts/setup.sh", "backend"], cwd=proof_1, env=env_empty, capture_output=True, text=True
+        )
+        self.assertEqual(0, done1.returncode, done1.stdout + done1.stderr)
+        populated = list(empty_cache.glob("venv-v2-*"))
+        self.assertEqual(1, len(populated), populated)
+        self.assertEqual(1, self.entries("cold-sync"))
+        self.assertEqual(0, self.entries("warm-sync"))
+
+        done2 = subprocess.run(
+            ["bash", "showcase/scripts/setup.sh", "backend"], cwd=proof_2, env=env_empty, capture_output=True, text=True
+        )
+        self.assertEqual(0, done2.returncode, done2.stdout + done2.stderr)
+        self.assertEqual(populated, list(empty_cache.glob("venv-v2-*")))
+        self.assertEqual(1, self.entries("cold-sync"))
+        self.assertEqual(1, self.entries("warm-sync"))
+        self.assertEqual(f"{proof_2}\n", (proof_2 / ".venv/lib/site-packages/_editable.pth").read_text())
+        self.assertEqual(f"{proof_1}\n", (populated[0] / "lib/site-packages/_editable.pth").read_text())
 
 
 if __name__ == "__main__":

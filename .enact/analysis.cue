@@ -57,10 +57,6 @@ pipeline: analysis: {
 			inputs:  ["bin/download-mmdb"]
 		},
 		{
-			outputs: ["frontend/dist/*.html"]
-			inputs:  ["showcase/scripts/run_sharded_pytest.sh"]
-		},
-		{
 			outputs: ["nodejs/.tmp/**"]
 			inputs:  ["nodejs/jest.setup-env.ts", "nodejs/tests/assets/GeoLite2-City-Test.mmdb.br"]
 		},

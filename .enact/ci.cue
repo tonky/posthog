@@ -109,7 +109,8 @@ pipeline: schema.#Pipeline & {
 			}
 		}
 		"backend-templates": {
-			name: "Backend database templates"
+			name:             "Backend database templates"
+			arch_independent: true
 			save: {
 				when:    "validated_failure"
 				command: "python3 showcase/scripts/template_publications.py \"$HOME/.cache/enact/snapshots/v3\""
