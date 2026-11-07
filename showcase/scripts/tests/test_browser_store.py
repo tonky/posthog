@@ -4,10 +4,14 @@ Run inside the locked environment (`enve run --locked -- python -m unittest ...`
 outside it.
 """
 
+import json
 import os
-from pathlib import Path
+import shutil
 import subprocess
 import unittest
+from pathlib import Path
+
+PRELOAD = Path(__file__).resolve().parents[3] / ".enact" / "vitest" / "node_env_preload.cjs"
 
 
 def in_locked_environment() -> bool:
@@ -76,6 +80,176 @@ class BrowserStoreTest(unittest.TestCase):
             timeout=30,
         )
         self.assertIn("enve-posthog-ok", res.stdout)
+
+
+@unittest.skipUnless(shutil.which("node"), "needs node")
+class NodeEnvPreloadTest(unittest.TestCase):
+    def _stringify_with_preload(self, payload: object, pg_port: str = "55432") -> object:
+        script = "process.stdout.write(JSON.stringify(JSON.parse(process.argv[1])))"
+        res = subprocess.run(
+            ["node", "--require", str(PRELOAD), "-e", script, json.dumps(payload)],
+            check=True,
+            capture_output=True,
+            text=True,
+            env={**os.environ, "PGPORT": pg_port},
+        )
+        return json.loads(res.stdout)
+
+    def test_pgport_rewrites_plain_and_playwright_serialized_trees(self) -> None:
+        cases = [
+            (
+                "plain job_inputs string port",
+                {"job_inputs": {"host": "127.0.0.1", "port": "5432", "dbname": "posthog"}},
+                {"job_inputs": {"host": "127.0.0.1", "port": "55432", "dbname": "posthog"}},
+            ),
+            (
+                "plain payload string port",
+                {"payload": {"host": "localhost", "port": "5432", "database": "posthog"}},
+                {"payload": {"host": "localhost", "port": "55432", "database": "posthog"}},
+            ),
+            (
+                "nested body payload numeric port",
+                {"body": {"payload": {"host": "localhost", "port": 5432, "database": "posthog"}}},
+                {"body": {"payload": {"host": "localhost", "port": 55432, "database": "posthog"}}},
+            ),
+            (
+                "playwright serializeAsCallArgument nested payload",
+                {
+                    "o": [
+                        {
+                            "k": "body",
+                            "v": {
+                                "o": [
+                                    {
+                                        "k": "payload",
+                                        "v": {
+                                            "o": [
+                                                {"k": "host", "v": {"s": "localhost"}},
+                                                {"k": "port", "v": {"s": "5432"}},
+                                                {"k": "database", "v": {"s": "posthog"}},
+                                            ]
+                                        },
+                                    }
+                                ]
+                            },
+                        }
+                    ]
+                },
+                {
+                    "o": [
+                        {
+                            "k": "body",
+                            "v": {
+                                "o": [
+                                    {
+                                        "k": "payload",
+                                        "v": {
+                                            "o": [
+                                                {"k": "host", "v": {"s": "localhost"}},
+                                                {"k": "port", "v": {"s": "55432"}},
+                                                {"k": "database", "v": {"s": "posthog"}},
+                                            ]
+                                        },
+                                    }
+                                ]
+                            },
+                        }
+                    ]
+                },
+            ),
+            (
+                "playwright serialized array numeric port with dbname",
+                {
+                    "a": [
+                        {
+                            "o": [
+                                {"k": "host", "v": {"s": "127.0.0.1"}},
+                                {"k": "port", "v": {"n": 5432}},
+                                {"k": "dbname", "v": {"s": "posthog"}},
+                            ]
+                        }
+                    ]
+                },
+                {
+                    "a": [
+                        {
+                            "o": [
+                                {"k": "host", "v": {"s": "127.0.0.1"}},
+                                {"k": "port", "v": {"n": 55432}},
+                                {"k": "dbname", "v": {"s": "posthog"}},
+                            ]
+                        }
+                    ]
+                },
+            ),
+            (
+                "non-matching database stays untouched",
+                {
+                    "plain_other_db": {"host": "localhost", "port": "5432", "database": "other"},
+                    "serialized_other": {
+                        "o": [
+                            {"k": "host", "v": {"s": "localhost"}},
+                            {"k": "port", "v": {"s": "5432"}},
+                            {"k": "database", "v": {"s": "other"}},
+                        ]
+                    },
+                },
+                {
+                    "plain_other_db": {"host": "localhost", "port": "5432", "database": "other"},
+                    "serialized_other": {
+                        "o": [
+                            {"k": "host", "v": {"s": "localhost"}},
+                            {"k": "port", "v": {"s": "5432"}},
+                            {"k": "database", "v": {"s": "other"}},
+                        ]
+                    },
+                },
+            ),
+            (
+                "non-matching host stays untouched",
+                {
+                    "plain_remote": {"host": "db.example.com", "port": "5432", "database": "posthog"},
+                    "serialized_remote": {
+                        "o": [
+                            {"k": "host", "v": {"s": "db.example.com"}},
+                            {"k": "port", "v": {"s": "5432"}},
+                            {"k": "database", "v": {"s": "posthog"}},
+                        ]
+                    },
+                },
+                {
+                    "plain_remote": {"host": "db.example.com", "port": "5432", "database": "posthog"},
+                    "serialized_remote": {
+                        "o": [
+                            {"k": "host", "v": {"s": "db.example.com"}},
+                            {"k": "port", "v": {"s": "5432"}},
+                            {"k": "database", "v": {"s": "posthog"}},
+                        ]
+                    },
+                },
+            ),
+        ]
+        for label, given, expected in cases:
+            with self.subTest(case=label):
+                self.assertEqual(expected, self._stringify_with_preload(given))
+
+    def test_pgport_handles_circular_objects_without_recursing_forever(self) -> None:
+        script = (
+            "const obj = { payload: { host: 'localhost', port: '5432', database: 'posthog' } };"
+            "obj.self = obj;"
+            "process.stdout.write(JSON.stringify(obj, (k, v) => (k === 'self' ? undefined : v)));"
+        )
+        res = subprocess.run(
+            ["node", "--require", str(PRELOAD), "-e", script],
+            check=True,
+            capture_output=True,
+            text=True,
+            env={**os.environ, "PGPORT": "55432"},
+        )
+        self.assertEqual(
+            {"payload": {"host": "localhost", "port": "55432", "database": "posthog"}},
+            json.loads(res.stdout),
+        )
 
 
 if __name__ == "__main__":

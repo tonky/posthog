@@ -56,30 +56,71 @@ if (process.env.PGPORT && process.env.PGPORT !== DEFAULT_PG) {
         return origConnect.apply(this, args);
     };
 
-    const origStringify = JSON.stringify;
-    JSON.stringify = function (value, replacer, space) {
-        if (value && typeof value === 'object') {
-            const jobInputs = value.job_inputs;
-            if (
-                jobInputs &&
-                (jobInputs.host === '127.0.0.1' || jobInputs.host === 'localhost') &&
-                jobInputs.port === DEFAULT_PG &&
-                jobInputs.dbname === 'posthog'
-            ) {
-                jobInputs.port = pgPort;
-            }
-            const payload = value.payload;
-            if (
-                payload &&
-                (payload.host === '127.0.0.1' || payload.host === 'localhost') &&
-                payload.port === DEFAULT_PG &&
-                payload.database === 'posthog'
-            ) {
-                payload.port = pgPort;
+    const pgPortNum = Number(pgPort);
+    const isLocalhost = (host) => host === '127.0.0.1' || host === 'localhost';
+    const isDefaultPgPort = (port) => port === DEFAULT_PG || port === DEFAULT_PG_NUM;
+    const isPosthogDb = (db) => db === 'posthog';
+
+    const rewritePlainPgConfig = (obj) => {
+        if (isLocalhost(obj.host) && isDefaultPgPort(obj.port) && (isPosthogDb(obj.database) || isPosthogDb(obj.dbname))) {
+            obj.port = typeof obj.port === 'number' && Number.isFinite(pgPortNum) ? pgPortNum : pgPort;
+        }
+    };
+
+    // Playwright serializes page.evaluate(fn, arg) arguments via serializeAsCallArgument as { o: [{ k, v }] }.
+    const rewriteSerializedPgConfig = (entries) => {
+        let hasLocalhost = false;
+        let hasPosthogDb = false;
+        let portEntry = null;
+        for (const entry of entries) {
+            if (!entry || typeof entry !== 'object' || !entry.v || typeof entry.v !== 'object') continue;
+            if (entry.k === 'host' && isLocalhost(entry.v.s)) {
+                hasLocalhost = true;
+            } else if ((entry.k === 'database' || entry.k === 'dbname') && isPosthogDb(entry.v.s)) {
+                hasPosthogDb = true;
+            } else if (entry.k === 'port' && (entry.v.s === DEFAULT_PG || entry.v.n === DEFAULT_PG_NUM)) {
+                portEntry = entry;
             }
         }
+        if (hasLocalhost && hasPosthogDb && portEntry) {
+            if (portEntry.v.s === DEFAULT_PG) {
+                portEntry.v.s = pgPort;
+            } else if (portEntry.v.n === DEFAULT_PG_NUM && Number.isFinite(pgPortNum)) {
+                portEntry.v.n = pgPortNum;
+            }
+        }
+    };
+
+    const rewritePgConfigs = (node, seen = new WeakSet()) => {
+        if (!node || typeof node !== 'object' || seen.has(node)) return;
+        seen.add(node);
+        if (Array.isArray(node)) {
+            for (const item of node) rewritePgConfigs(item, seen);
+            return;
+        }
+        if (Array.isArray(node.o)) {
+            rewriteSerializedPgConfig(node.o);
+        } else {
+            rewritePlainPgConfig(node);
+        }
+        for (const key of Object.keys(node)) {
+            const val = node[key];
+            if (val && typeof val === 'object') {
+                rewritePgConfigs(val, seen);
+            }
+        }
+    };
+
+    const origStringify = JSON.stringify;
+    JSON.stringify = function (value, replacer, space) {
+        rewritePgConfigs(value);
         const json = origStringify.call(this, value, replacer, space);
-        if (typeof json === 'string' && json.includes(DEFAULT_PG) && json.includes('posthog')) {
+        if (
+            typeof json === 'string' &&
+            json.includes(DEFAULT_PG) &&
+            json.includes('posthog') &&
+            (json.includes('localhost') || json.includes('127.0.0.1'))
+        ) {
             return json.replace(singleQuotePortRe, `port: '${pgPort}'`).replace(doubleQuotePortRe, `"port":"${pgPort}"`);
         }
         return json;
