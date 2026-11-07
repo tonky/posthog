@@ -42,11 +42,10 @@ pipeline: components: {
 		root:        "."
 		depends_on:  ["root"]
 		watch_paths: [for g in _dockerfiles {g}, "showcase/scripts/hadolint.sh"]
-		jobs: lint: {
-			direct:    true
-			services:  false
-			resources: {cpus: 1.0, memory_mb: 512}
-			tasks: [{command: "./showcase/scripts/hadolint.sh {changed_files}", filter: include: _dockerfiles}]
+		resources:   {cpus: 1.0, memory_mb: 512}
+		lint: {
+			command: "./showcase/scripts/hadolint.sh {changed_files}"
+			filter:  include: _dockerfiles
 		}
 	}
 	"agent_skills": {
@@ -64,12 +63,8 @@ pipeline: components: {
 			"services/mcp/schema/**",
 			"services/mcp/schema/exec-command-reference.md",
 		]
-		jobs: lint: {
-			direct:    true
-			services:  false
-			resources: {cpus: 1.0, memory_mb: 1024}
-			tasks: [{command: "uv run --no-sync python -m products.posthog_ai.scripts.build_skills --lint"}]
-		}
+		resources: {cpus: 1.0, memory_mb: 1024}
+		lint:      "uv run --no-sync python -m products.posthog_ai.scripts.build_skills --lint"
 	}
 	"duplication": {
 		name:       "duplication"

@@ -10,19 +10,34 @@ _recordJs:    {cpus: 3, memory_mb: 1024}
 _recordCargo: {cpus: 3, memory_mb: 3072}
 
 _tsVitest: {
+	root:             string
 	technology:       "typescript"
 	depends_on:       ["js-root"]
 	resources:        {cpus: 2, memory_mb: 768}
 	test:             "pnpm exec vitest run {relative_targets}"
 	recorder:         "trace"
 	record_resources: _recordJs
+	target_scope: tests: [...string] | *["\(root)/tests/**/*.test.ts"]
 }
 
 _goModule: {
+	root:             string
 	technology:       "go"
 	depends_on:       ["root"]
+	watch_paths:      ["\(root)/**", "showcase/scripts/run_go_tests.sh"]
 	recorder:         "trace"
 	record_resources: _recordGo
+	target_scope: {
+		tests: ["\(root)/**/*_test.go"]
+		rules: [{match: ["\(root)/**"], engine: "reach"}]
+	}
+}
+
+_rustCargoCrate: {
+	technology:       "rust"
+	depends_on:       ["root"]
+	recorder:         "own_linux"
+	record_resources: _recordCargo
 }
 
 pipeline: components: {
@@ -85,8 +100,14 @@ pipeline: components: {
 		// the 600 s default step limit, so the install never finished to warm the store.
 		_install: {
 			name:    "Install"
+			dir:     "."
 			timeout: "30m"
-			command: "cd ../.. && showcase/scripts/build_once.sh desktop-node-modules products/desktop/node_modules/.enact-build-key products/desktop/package.json products/desktop/pnpm-lock.yaml products/desktop/pnpm-workspace.yaml packages/agent/package.json packages/agent/pnpm-lock.yaml packages/agent/pnpm-workspace.yaml -- bash -c 'SKIP_ELECTRON_REBUILD=1 pnpm --dir products/desktop install --frozen-lockfile && showcase/scripts/exclusive.sh agent-node-modules node products/desktop/scripts/build-agent-workspace.mjs'"
+			once: {
+				key:     "desktop-node-modules"
+				inputs:  ["products/desktop/package.json", "products/desktop/pnpm-lock.yaml", "products/desktop/pnpm-workspace.yaml", "packages/agent/package.json", "packages/agent/pnpm-lock.yaml", "packages/agent/pnpm-workspace.yaml"]
+				outputs: ["products/desktop/node_modules"]
+			}
+			command: "showcase/scripts/build_once.sh desktop-node-modules products/desktop/node_modules/.enact-build-key products/desktop/package.json products/desktop/pnpm-lock.yaml products/desktop/pnpm-workspace.yaml packages/agent/package.json packages/agent/pnpm-lock.yaml packages/agent/pnpm-workspace.yaml -- bash -c 'SKIP_ELECTRON_REBUILD=1 pnpm --dir products/desktop install --frozen-lockfile && showcase/scripts/exclusive.sh agent-node-modules node products/desktop/scripts/build-agent-workspace.mjs'"
 		}
 		name:            "desktop"
 		title:           "PostHog desktop app"
@@ -127,33 +148,25 @@ pipeline: components: {
 			}
 		}
 	}
-	"cli": {
-		name:             "cli"
-		title:            "PostHog Developer CLI"
-		description:      "PostHog Developer CLI in Rust"
-		technology:       "rust"
-		root:             "cli"
-		depends_on:       ["root"]
-		watch_paths:      ["cli/**", "dist-workspace.toml", "clippy.toml", "showcase/scripts/run_cargo_tests.sh", "rust/cymbal/tests/static/native/**"]
-		fmt:              "cargo fmt --all -- --check"
-		lint:             "cargo clippy --all-targets --all-features -- -D warnings"
-		shards:           1
-		test:             "../showcase/scripts/run_cargo_tests.sh cli --all-features -- {targets}"
-		recorder:         "own_linux"
-		record_resources: _recordCargo
-		target_scope:     tests: ["cli/src/lib.rs", "cli/tests/*.rs"]
+	"cli": _rustCargoCrate & {
+		name:         "cli"
+		title:        "PostHog Developer CLI"
+		description:  "PostHog Developer CLI in Rust"
+		root:         "cli"
+		watch_paths:  ["cli/**", "dist-workspace.toml", "clippy.toml", "showcase/scripts/run_cargo_tests.sh", "rust/cymbal/tests/static/native/**"]
+		fmt:          "cargo fmt --all -- --check"
+		lint:         "cargo clippy --all-targets --all-features -- -D warnings"
+		shards:       1
+		test:         "../showcase/scripts/run_cargo_tests.sh cli --all-features -- {targets}"
+		target_scope: tests: ["cli/src/lib.rs", "cli/tests/*.rs"]
 	}
-	"funnel_udf": {
-		name:             "funnel_udf"
-		title:            "PostHog ClickHouse Funnel UDF"
-		description:      "PostHog ClickHouse Funnel User Defined Function in Rust"
-		technology:       "rust"
-		root:             "funnel-udf"
-		depends_on:       ["root"]
-		watch_paths:      ["funnel-udf/**", "showcase/scripts/run_cargo_tests.sh"]
-		test:             "../showcase/scripts/run_cargo_tests.sh funnel-udf -- {targets}"
-		recorder:         "own_linux"
-		record_resources: _recordCargo
+	"funnel_udf": _rustCargoCrate & {
+		name:        "funnel_udf"
+		title:       "PostHog ClickHouse Funnel UDF"
+		description: "PostHog ClickHouse Funnel User Defined Function in Rust"
+		root:        "funnel-udf"
+		watch_paths: ["funnel-udf/**", "showcase/scripts/run_cargo_tests.sh"]
+		test:        "../showcase/scripts/run_cargo_tests.sh funnel-udf -- {targets}"
 		target_scope: {
 			tests: ["funnel-udf/src/main.rs"]
 			rules: [{match: ["funnel-udf/**"], engine: "reach"}]
@@ -164,12 +177,7 @@ pipeline: components: {
 		title:       "PostHog ClickHouse UDFs"
 		description: "PostHog ClickHouse User Defined Functions in Go"
 		root:        "clickhouse-udfs"
-		watch_paths: ["clickhouse-udfs/**", "showcase/scripts/run_go_tests.sh"]
 		test:        "../showcase/scripts/run_go_tests.sh --module util --bench {targets}"
-		target_scope: {
-			tests: ["clickhouse-udfs/**/*_test.go"]
-			rules: [{match: ["clickhouse-udfs/**"], engine: "reach"}]
-		}
 	}
 	"terraform": {
 		name: "terraform", title: "PostHog Infrastructure as Code"
@@ -179,11 +187,25 @@ pipeline: components: {
 	"llm_gateway": {
 		name: "llm_gateway", title: "LLM gateway", technology: "python"
 		root: "services/llm-gateway", depends_on: ["root", "build_once"]
+		shards: 1, recorder: "trace", record_resources: _recordPy
 		jobs: test: {
-			name: "Test", shards: 1, recorder: "trace", record_resources: _recordPy
+			name: "Test"
 			tasks: [
-				{name: "Install", command: "cd ../.. && showcase/scripts/build_once.sh llm-gateway-venv services/llm-gateway/.venv/.enact-build-key services/llm-gateway/pyproject.toml services/llm-gateway/uv.lock -- uv --directory services/llm-gateway sync --frozen --dev --python \"$(command -v python3)\""},
-				{name: "Run Tests", command: "env -u AWS_DEFAULT_REGION -u AWS_REGION -u LLM_GATEWAY_BEDROCK_REGION_NAME uv run --no-sync pytest -o addopts='' {relative_targets}"},
+				{
+					name: "Install"
+					dir:  "."
+					once: {
+						key:     "llm-gateway-venv"
+						inputs:  ["services/llm-gateway/pyproject.toml", "services/llm-gateway/uv.lock"]
+						outputs: ["services/llm-gateway/.venv"]
+					}
+					command: "showcase/scripts/build_once.sh llm-gateway-venv services/llm-gateway/.venv/.enact-build-key services/llm-gateway/pyproject.toml services/llm-gateway/uv.lock -- uv --directory services/llm-gateway sync --frozen --dev --python \"$(command -v python3)\""
+				},
+				{
+					name:      "Run Tests"
+					command:   "uv run --no-sync pytest -o addopts='' {relative_targets}"
+					unset_env: ["AWS_DEFAULT_REGION", "AWS_REGION", "LLM_GATEWAY_BEDROCK_REGION_NAME"]
+				},
 			]
 		}
 		target_scope: tests: ["services/llm-gateway/tests/**/test_*.py"]
@@ -193,10 +215,20 @@ pipeline: components: {
 		root: "rust/deltalite/python", depends_on: ["py-root", "build_once"]
 		workspace_scope: {include_dependencies: false, include: ["rust"]}
 		watch_paths:     ["rust/deltalite/**"]
+		recorder:        "trace", record_resources: _recordPy
 		jobs: test: {
-			name: "Test", recorder: "trace", record_resources: _recordPy
+			name: "Test"
 			tasks: [
-				{name: "Install", command: "cd ../../.. && showcase/scripts/build_once.sh deltalite-venv rust/deltalite/python/.venv/.enact-build-key pyproject.toml rust/deltalite/python/pyproject.toml rust/deltalite/python/Cargo.toml -- bash -c 'uv venv --clear rust/deltalite/python/.venv --python \"$(command -v python3)\" && pin() { grep -oE \"\\\"${1}[^\\\"]*\\\"\" pyproject.toml | tr -d \"\\\"\" | head -1; } && VIRTUAL_ENV=$PWD/rust/deltalite/python/.venv uv pip install pytest \"$(pin \"deltalake\\[pyarrow\\]==\")\" \"$(pin \"pyarrow==\")\" \"$(pin \"duckdb~=\")\" \"$(pin \"deltalite==\")\"'"},
+				{
+					name: "Install"
+					dir:  "."
+					once: {
+						key:     "deltalite-venv"
+						inputs:  ["pyproject.toml", "rust/deltalite/python/pyproject.toml", "rust/deltalite/python/Cargo.toml"]
+						outputs: ["rust/deltalite/python/.venv"]
+					}
+					command: "showcase/scripts/build_once.sh deltalite-venv rust/deltalite/python/.venv/.enact-build-key pyproject.toml rust/deltalite/python/pyproject.toml rust/deltalite/python/Cargo.toml -- bash -c 'uv venv --clear rust/deltalite/python/.venv --python \"$(command -v python3)\" && pin() { grep -oE \"\\\"${1}[^\\\"]*\\\"\" pyproject.toml | tr -d \"\\\"\" | head -1; } && VIRTUAL_ENV=$PWD/rust/deltalite/python/.venv uv pip install pytest \"$(pin \"deltalake\\[pyarrow\\]==\")\" \"$(pin \"pyarrow==\")\" \"$(pin \"duckdb~=\")\" \"$(pin \"deltalite==\")\"'"
+				},
 				{name: "Run Tests", command: "VIRTUAL_ENV=$PWD/.venv uv run --no-sync --active python -m pytest {relative_targets} -q"},
 			]
 		}
@@ -219,17 +251,14 @@ pipeline: components: {
 		fmt:             "pnpm exec oxfmt --check 'src/**/*.ts' 'tests/**/*.ts' 'scripts/**/*.ts'"
 		lint:            "pnpm exec oxlint --quiet"
 		typecheck:       "pnpm typecheck"
-		target_scope:    tests: ["services/agent-proxy/tests/**/*.test.ts"]
 	}
 	"oauth_proxy": _tsVitest & {
 		name: "oauth_proxy", title: "OAuth proxy", root: "services/oauth-proxy"
-		typecheck:    "pnpm typecheck"
-		target_scope: tests: ["services/oauth-proxy/tests/**/*.test.ts"]
+		typecheck: "pnpm typecheck"
 	}
 	"integration_service": _tsVitest & {
 		name: "integration_service", title: "Integration service", root: "services/integration-service"
 		fmt: "pnpm run format:check", lint: "pnpm exec oxlint --quiet src tests", typecheck: "pnpm run typecheck", build: "pnpm run build"
-		target_scope: tests: ["services/integration-service/tests/**/*.test.ts"]
 	}
 	"stripe_app": {
 		name: "stripe_app", title: "Stripe app", technology: "typescript"
@@ -240,39 +269,28 @@ pipeline: components: {
 		target_scope: tests: ["tools/openapi-codegen/tests/**/*.test.mjs"]
 	}
 	"hogql_language_service": _goModule & {
-		name: "hogql_language_service", title: "HogQL language service", root: "services/hogql-language-service"
-		resources:   {cpus: 4, memory_mb: 1024}
-		watch_paths: ["services/hogql-language-service/**", "showcase/scripts/run_go_tests.sh"]
-		test:        "HOGQL_LANGUAGE_SERVICE_ENFORCE_LATENCY_BUDGET=1 ../../showcase/scripts/run_go_tests.sh {targets} || HOGQL_LANGUAGE_SERVICE_ENFORCE_LATENCY_BUDGET=1 ../../showcase/scripts/run_go_tests.sh {targets}"
-		target_scope: {
-			tests: ["services/hogql-language-service/**/*_test.go"]
-			rules: [{match: ["services/hogql-language-service/**"], engine: "reach"}]
-		}
+		name:      "hogql_language_service", title: "HogQL language service", root: "services/hogql-language-service"
+		resources: {cpus: 4, memory_mb: 1024}
+		test:      "HOGQL_LANGUAGE_SERVICE_ENFORCE_LATENCY_BUDGET=1 ../../showcase/scripts/run_go_tests.sh {targets} || HOGQL_LANGUAGE_SERVICE_ENFORCE_LATENCY_BUDGET=1 ../../showcase/scripts/run_go_tests.sh {targets}"
 	}
 	"phrocs": _goModule & {
 		name: "phrocs", title: "phrocs process runner", root: "tools/phrocs"
-		watch_paths: ["tools/phrocs/**", "showcase/scripts/run_go_tests.sh"]
 		lint: _golangciLint, test: "../../showcase/scripts/run_go_tests.sh {targets}"
-		target_scope: {
-			tests: ["tools/phrocs/**/*_test.go"]
-			rules: [{match: ["tools/phrocs/**"], engine: "reach"}]
-		}
 	}
 	"hobby_installer": _goModule & {
-		name: "hobby_installer", title: "Hobby installer", root: "bin/hobby-installer"
-		watch_paths: ["bin/hobby-installer/**", "showcase/scripts/run_go_tests.sh"]
-		lint:        _golangciLint
-		build:       "go build -ldflags \"-s -w\" -o ../hobby-installer-development . && rm -f ../hobby-installer-development"
-		test:        "../../showcase/scripts/run_go_tests.sh {targets}"
-		target_scope: {
-			tests: ["bin/hobby-installer/**/*_test.go"]
-			rules: [{match: ["bin/hobby-installer/**"], engine: "reach"}]
-		}
+		name:  "hobby_installer", title: "Hobby installer", root: "bin/hobby-installer"
+		lint:  _golangciLint
+		build: "go build -ldflags \"-s -w\" -o ../hobby-installer-development . && rm -f ../hobby-installer-development"
+		test:  "../../showcase/scripts/run_go_tests.sh {targets}"
 	}
 	"query_performance_ai": {
 		name: "query_performance_ai", title: "Query performance AI", technology: "python"
 		root: "tools/query-performance-ai", depends_on: ["py-root"]
-		test: "cd ../.. && uv run --no-sync pytest {targets}", recorder: "trace", record_resources: _recordPy
+		test: {
+			dir:     "."
+			command: "uv run --no-sync pytest {targets}"
+		}
+		recorder: "trace", record_resources: _recordPy
 		target_scope: {
 			tests:          ["tools/query-performance-ai/query_performance_ai/**/test_*.py"]
 			default_target: "tools/query-performance-ai/query_performance_ai"
@@ -294,9 +312,9 @@ pipeline: components: {
 		name: "traffic_sim", title: "Traffic simulator", technology: "python"
 		root: "tools/traffic-sim", depends_on: ["root"]
 	}
-	"mcp_integration_harness": {
+	"mcp_integration_harness": _harness & {
 		name: "mcp_integration_harness", title: "MCP integration runner", technology: ["python", "typescript"]
-		root: ".", depends_on: ["live_harness"], watch_paths: ["showcase/scripts/run_mcp_integration.sh"]
+		depends_on: ["live_harness"], watch_paths: ["showcase/scripts/run_mcp_integration.sh"]
 	}
 	"mcp_integration": {
 		name:             "mcp_integration"

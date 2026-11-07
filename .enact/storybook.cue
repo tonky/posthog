@@ -2,12 +2,22 @@ package replay
 
 import "list"
 
+_storybookTestJob: {
+	needs:     ["build"]
+	recorder:  "own"
+	resources: {cpus: 2.0, memory_mb: 4096}
+	_args:     string | *""
+	tasks: [
+		{name: "Build products", command: "showcase/scripts/build_quill.sh && showcase/scripts/build_hogvm.sh && showcase/scripts/build_products.sh"},
+		{name: "Run Tests", command: "showcase/scripts/run_storybook_tests.sh \(_args){shard_index} {shard_total} {targets}", timeout: "45m"},
+	]
+}
+
 pipeline: components: {
-	"storybook_harness": {
+	"storybook_harness": _harness & {
 		name:       "storybook_harness"
 		title:      "Storybook runner and footprint instrumentation"
 		technology: "typescript"
-		root:       "."
 		depends_on: ["js-root", "build_once"]
 		watch_paths: [
 			"common/storybook/.storybook-enact/**",
@@ -64,28 +74,8 @@ pipeline: components: {
 				}
 				tasks: [{name: "Build Storybook", command: "showcase/scripts/run_storybook_tests.sh --build", timeout: "30m"}]
 			}
-			test: {
-				name:      "Test"
-				needs:     ["build"]
-				recorder:  "own"
-				shards:    16
-				resources: {cpus: 2.0, memory_mb: 4096}
-				tasks: [
-					{name: "Build products", command: "showcase/scripts/build_quill.sh && showcase/scripts/build_hogvm.sh && showcase/scripts/build_products.sh"},
-					{name: "Run Tests", command: "showcase/scripts/run_storybook_tests.sh {shard_index} {shard_total} {targets}", timeout: "45m"},
-				]
-			}
-			webkit: {
-				name:      "WebKit"
-				needs:     ["build"]
-				recorder:  "own"
-				shards:    4
-				resources: {cpus: 2.0, memory_mb: 4096}
-				tasks: [
-					{name: "Build products", command: "showcase/scripts/build_quill.sh && showcase/scripts/build_hogvm.sh && showcase/scripts/build_products.sh"},
-					{name: "Run Tests", command: "showcase/scripts/run_storybook_tests.sh --browser webkit {shard_index} {shard_total} {targets}", timeout: "45m"},
-				]
-			}
+			test:   _storybookTestJob & {name: "Test", shards: 16}
+			webkit: _storybookTestJob & {name: "WebKit", shards: 4, _args: "--browser webkit "}
 		}
 		target_scope: {
 			fallback: "all"

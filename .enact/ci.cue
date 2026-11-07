@@ -1,6 +1,7 @@
 package replay
 
 import (
+	"list"
 	"strings"
 	"enact.dev/schema"
 )
@@ -52,7 +53,7 @@ pipeline: schema.#Pipeline & {
 		redis:            {name: "redis", enact: kind: schema.#ServiceKind.Redis}
 		clickhouse:       {name: "clickhouse", enact: kind: schema.#ServiceKind.ClickHouse}
 		kafka:            {name: "kafka", enact: kind: schema.#ServiceKind.Kafka}
-		seaweedfs:        {name: "seaweedfs", enact: kind: schema.#ServiceKind.ObjectStorage}
+		seaweedfs:        {name: "seaweedfs", enact: {kind: schema.#ServiceKind.ObjectStorage, buckets: ["posthog", "ducklake-dev", "ai-blobs"]}}
 		"seaweedfs-open": {name: "seaweedfs-open", enact: buckets: ["posthog"]}
 		temporal:         {name: "temporal", enact: kind: schema.#ServiceKind.Temporal}
 		etcd:             name: "etcd"
@@ -68,7 +69,7 @@ pipeline: schema.#Pipeline & {
 			key:          [_hogvmNativeKey]
 			restore_keys: [_hogvmNativeKey]
 			used_by: {
-				components: ["nodejs", "nodejs_base", "nodejs_ingestion_core", "nodejs_ingestion", "nodejs_cdp", "nodejs_replay", "nodejs_logs", "nodejs_servers", "e2e"]
+				components: list.Concat([_nodejsSuites, ["e2e"]])
 				jobs:       [J.build, J.test, J.rust_ingestion_e2e]
 			}
 		}
@@ -82,11 +83,11 @@ pipeline: schema.#Pipeline & {
 			version: "4"
 			scope:   "shared"
 			used_by: {
-				components: [
-					"base", "products", "dagster", "nodejs", "nodejs_base", "nodejs_ingestion_core",
-					"nodejs_ingestion", "nodejs_replay", "nodejs_cdp", "nodejs_logs", "nodejs_servers",
-					"rust_services", "flags_integration", "e2e", "mcp_integration",
-				]
+				components: list.Concat([
+					["base", "products", "dagster"],
+					_nodejsSuites,
+					["rust_services", "flags_integration", "e2e", "mcp_integration"],
+				])
 				jobs: [J.test, J.audit, J.rust_ingestion_e2e]
 			}
 		}

@@ -13,16 +13,22 @@ _nodejsServices: [
 	{protocol: schema.#Protocol.Http, target: pipeline.services.clickhouse},
 ]
 
+_nodejsSuites: [
+	"nodejs", "nodejs_base", "nodejs_ingestion_core", "nodejs_ingestion",
+	"nodejs_replay", "nodejs_cdp", "nodejs_logs", "nodejs_servers",
+]
+
 _nodejsArea: {
 	technology: ["typescript", "python"]
 	root:       "."
 	cargo: workspace: "rust"
-	jobs: test: {
-		name:        "Test"
-		recorder:    "own_linux"
-		recorded_by: ["enact-node"]
-		resources:   {cpus: 4, memory_mb: 6144}
-		tasks: [{name: "Run Tests", command: "showcase/scripts/run_nodejs_tests.sh {targets}", timeout: "90m"}]
+	shards:      int | *1
+	recorder:    "own_linux"
+	recorded_by: ["enact-node"]
+	resources:   {cpus: 4, memory_mb: 6144}
+	test: {
+		command: "showcase/scripts/run_nodejs_tests.sh {targets}"
+		timeout: "90m"
 	}
 	uses: _nodejsServices
 }
@@ -77,7 +83,6 @@ pipeline: components: {
 			"nodejs/tests/helpers/{clickhouse,database-guard,database-guard.test,event-headers,expectations,hog-invocation-results,kafka-message,kafka,metrics,mock-ingestion-outputs,person,pipeline-event,plugin-event,promises,raw-event,redis,service-process,snapshots,snapshots.test,sql,team,tls,truth}.ts",
 			"nodejs/tests/helpers/mocks/{consumer.mock,date.mock,producer.mock,producer.spy,request.mock}.ts",
 		]
-		jobs: test: shards: 1
 		target_scope: {
 			tests: [
 				"nodejs/src/common/**/*.test.ts",
@@ -110,7 +115,6 @@ pipeline: components: {
 			"nodejs/tests/ingestion/{framework,common}/**",
 			"nodejs/tests/helpers/{ingestion-e2e,mock-pipeline,tophog}.ts",
 		]
-		jobs: test: shards: 1
 		target_scope: {
 			tests: ["nodejs/src/ingestion/{framework,common}/**/*.test.ts", "nodejs/tests/ingestion/{framework,common}/**/*.test.ts"]
 			handoff: [
@@ -133,7 +137,6 @@ pipeline: components: {
 			"nodejs/tests/helpers/ingestion-outputs.ts",
 			".github/workflows/update-ai-costs.yml",
 		]
-		jobs: test: shards: 1
 		target_scope: {
 			tests: [
 				"nodejs/src/ingestion/*.test.ts",
@@ -167,7 +170,7 @@ pipeline: components: {
 			"nodejs/tests/ingestion/pipelines/sessionreplay/**",
 			"nodejs/tests/helpers/ml-mirror-staged-batch.ts",
 		]
-		jobs: test: shards: 2
+		shards: 2
 		target_scope: {
 			tests: [
 				"nodejs/src/session-replay/**/*.test.ts",
@@ -195,7 +198,7 @@ pipeline: components: {
 			"nodejs/tests/helpers/cdp.ts",
 			"nodejs/tests/helpers/mocks/job-queue.mock.ts",
 		]
-		jobs: test: shards: 2
+		shards: 2
 		target_scope: {
 			tests:   ["nodejs/src/{cdp,ai-observability}/**/*.test.ts"]
 			handoff: [{to: "nodejs_servers", tests: ["nodejs/src/cdp/hog-transformations/hog-transformer.service.test.ts"]}]
@@ -207,7 +210,6 @@ pipeline: components: {
 		title:       "PostHog Node.js logs ingestion"
 		depends_on:  ["nodejs_cdp"]
 		watch_paths: ["nodejs/src/logs/**", "nodejs/tests/logs/**"]
-		jobs: test: shards: 1
 		target_scope: {
 			tests:          ["nodejs/{src,tests}/logs/**/*.test.ts"]
 			default_target: "nodejs/src/logs nodejs/tests/logs"
@@ -218,7 +220,6 @@ pipeline: components: {
 		title:       "PostHog Node.js servers & ingestion e2e"
 		depends_on:  ["nodejs_cdp", "nodejs_logs", "nodejs_ingestion", "nodejs_replay"]
 		watch_paths: ["nodejs/src/servers/**", "nodejs/src/{index,server}.ts", "nodejs/tests/*.serial.test.ts"]
-		jobs: test: shards: 1
 		target_scope: tests: ["nodejs/src/servers/**/*.test.ts", "nodejs/tests/*.serial.test.ts"]
 	}
 	"nodejs": {
@@ -253,7 +254,11 @@ pipeline: components: {
 				tasks: [{command: "../showcase/scripts/run_nodejs_tests.sh --rust-ingestion-e2e {targets}", timeout: "45m"}]
 			}
 		}
-		build: "cd .. && showcase/scripts/build_hogvm.sh && showcase/scripts/exclusive.sh nodejs-build bin/turbo --filter=@posthog/nodejs prepare && pnpm --filter=@posthog/nodejs build"
+		build: {
+			dir:     "."
+			lock:    "nodejs-build"
+			command: "showcase/scripts/build_hogvm.sh && showcase/scripts/exclusive.sh nodejs-build bin/turbo --filter=@posthog/nodejs prepare && pnpm --filter=@posthog/nodejs build"
+		}
 		uses:  _nodejsServices
 	}
 }

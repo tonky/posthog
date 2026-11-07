@@ -110,7 +110,6 @@ _storybookConfig: [
 	"common/storybook/.storybook/plugins/vite-{frontend-resolve,module-graph,sql-raw}-plugin.ts",
 ]
 
-_ownHome:   "h=$(mktemp -d) && mkdir -p \"$h/.hogli/bin\" \"$h/.local/bin\" && printf '#!/bin/sh\\necho 0.18.1\\n' >\"$h/.hogli/bin/mutagen\" && printf '#!/bin/sh\\nexit 0\\n' >\"$h/.local/bin/ssh\" && chmod +x \"$h/.hogli/bin/mutagen\" \"$h/.local/bin/ssh\" && trap 'p=$(lsof -t +D \"$h\" 2>/dev/null | sort -u); [ -z \"$p\" ] || { echo \"own HOME: ending leftover pids $p\" >&2; kill $p; }; rm -rf \"$h\"' EXIT && PATH=\"$PATH:$h/.local/bin\" HOME=$h XDG_CONFIG_HOME=$h/.config XDG_DATA_HOME=$h/.local/share XDG_STATE_HOME=$h/.local/state"
 _tsgoCache: ".enact/state/tsgo"
 
 _rustCrates: ["rust/*/**/Cargo.toml"]
@@ -160,6 +159,46 @@ _pytestErrors: [2, 3, 4]
 // clickhouse-client, create_test_kafka_topics.py's librdkafka): no test footprint names them.
 _pytestSetupServices: ["postgres", "clickhouse", "kafka"]
 
+_harness: {
+	root:       "."
+	depends_on: [...string] | *["root"]
+}
+
+_pytestRunTask: {
+	command:          string | *"bash showcase/scripts/run_sharded_pytest.sh {targets}"
+	timeout:          "90m"
+	error_exit_codes: _pytestErrors
+	services:         _pytestSetupServices
+}
+
+_djangoSuite: {
+	kind:       "service"
+	domain:     "analytics"
+	technology: "python"
+	root:       "."
+	fmt: {
+		command: "uv run --no-sync ruff format --check {changed_files}"
+		filter:  include: ["**/*.py"]
+	}
+	lint: {
+		command: "uv run --no-sync ruff check {changed_files}"
+		filter:  include: ["**/*.py"]
+	}
+	recorder: "own"
+	target_scope: fallback: "none"
+}
+
+_mcpVitestJob: {
+	recorder:    "trace"
+	recorded_by: ["enact-node"]
+	needs:       _mcpUiAppsNeeds
+}
+
+_rustTestScopeRules: [
+	{match: ["rust/**"], engine: "reach"},
+	{match: ["showcase/scripts/{run_rust_release_build.sh,rust_affected_crates.sh}"], action: "ignore"},
+]
+
 pipeline: schema.#Pipeline & {
 	name:        "posthog-platform"
 	description: "PostHog Analytics Platform: Accelerated CI/CD Pipeline (enact + enve)"
@@ -199,44 +238,44 @@ pipeline: schema.#Pipeline & {
 			root:        "."
 			watch_paths: ["enve.cue", "enve.lock", ".enact/*", "cue.mod/**", ".github/workflows/ci.yml", "showcase/scripts/exclusive.sh", "bin/linux-x86_64/**", "bin/linux-aarch64/**", "bin/macos-aarch64/**", "bin/enact", "bin/enve"]
 		}
-		"build_once": {
+		"build_once": _harness & {
 			name: "build_once", title: "Build-once helper", technology: ["python", "typescript"]
-			root: ".", depends_on: ["root"], watch_paths: ["showcase/scripts/build_once.sh"]
+			watch_paths: ["showcase/scripts/build_once.sh"]
 		}
-		"vitest_marker": {
+		"vitest_marker": _harness & {
 			name: "vitest_marker", title: "vitest runner and recorder marker"
-			root: ".", depends_on: ["root"], watch_paths: [".enact/vitest/**"]
+			watch_paths: [".enact/vitest/**"]
 		}
-		"js-root": {
-			name: "js-root", title: "pnpm workspace root", technology: "typescript", root: ".", depends_on: ["root"]
+		"js-root": _harness & {
+			name: "js-root", title: "pnpm workspace root", technology: "typescript"
 			watch_paths: [
 				"package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml", "turbo.json",
 				"tsconfig.json", "tsconfig.*.json", ".oxfmtrc.json", ".oxlintrc.json",
 				".prettierignore", ".stylelintrc.js", ".stylelintignore", ".nvmrc", "patches/**",
 			]
 		}
-		"test_quarantine": {
+		"test_quarantine": _harness & {
 			name: "test_quarantine", title: "Test quarantine", technology: ["python", "typescript"]
-			root: ".", depends_on: ["root"], watch_paths: [".test_quarantine.json", "frontend/jest.quarantine.ts", ".github/scripts/jest-retries.cjs"]
+			watch_paths: [".test_quarantine.json", "frontend/jest.quarantine.ts", ".github/scripts/jest-retries.cjs"]
 		}
-		"py-root": {
-			name: "py-root", title: "uv project root", technology: "python", root: ".", depends_on: ["root", "test_quarantine"]
+		"py-root": _harness & {
+			name: "py-root", title: "uv project root", technology: "python", depends_on: ["root", "test_quarantine"]
 			workspace_scope: include: _py_cone
 			watch_paths: ["pyproject.toml", "uv.lock", "conftest.py", "pytest.ini", "pytest_boot_gc.py", "showcase/scripts/setup.sh", "showcase/scripts/backend_runtime.py"]
 		}
-		"pytest_plugins": {
+		"pytest_plugins": _harness & {
 			name: "pytest_plugins", title: "pytest plugins", technology: "python"
-			root: ".", depends_on: ["py-root"], watch_paths: ["showcase/pytest_plugins/**"]
+			depends_on: ["py-root"], watch_paths: ["showcase/pytest_plugins/**"]
 		}
-		"pytest_runner": {
+		"pytest_runner": _harness & {
 			name: "pytest_runner", title: "pytest runner", technology: "python"
-			root: ".", depends_on: ["py-root", "pytest_plugins", "test_env", "geoip"]
+			depends_on: ["py-root", "pytest_plugins", "test_env", "geoip"]
 			watch_paths: ["showcase/scripts/run_sharded_pytest.sh", "showcase/scripts/product_pytest.py"]
 		}
-		"test_env": {
+		"test_env": _harness & {
 			name: "test_env", title: "Shared test databases & services"
 			description: "Service configuration and the helpers forking and seeding test databases"
-			technology: "python", root: ".", depends_on: ["root"], workspace_scope: include: ["infra", "docker"]
+			technology: "python", workspace_scope: include: ["infra", "docker"]
 			watch_paths: [
 				"infra/clickhouse/config.xml", "infra/clickhouse/start.sh",
 				"infra/clickhouse/users.d/**", "infra/clickhouse/build_host_udfs.sh",
@@ -245,9 +284,9 @@ pipeline: schema.#Pipeline & {
 				"showcase/scripts/create_test_kafka_topics.py", "showcase/scripts/seaweedfs_setup.sh", "showcase/.gitignore",
 			]
 		}
-		"geoip": {
+		"geoip": _harness & {
 			name: "geoip", title: "GeoIP database installer"
-			root: ".", depends_on: ["root"], watch_paths: ["bin/download-mmdb"]
+			watch_paths: ["bin/download-mmdb"]
 		}
 		"helper_tests": {
 			name:            "helper_tests"
@@ -272,14 +311,10 @@ pipeline: schema.#Pipeline & {
 				default_target: "discover -s showcase/scripts/tests -t showcase/scripts/tests"
 			}
 		}
-		"base": {
+		"base": _djangoSuite & {
 			name:        "base"
 			title:       "PostHog Core Django API & Analytics Backend"
 			description: "Django ASGI server, models, HogQL, REST endpoints and ClickHouse queries"
-			kind:        "service"
-			domain:      "analytics"
-			technology:  "python"
-			root:        "."
 			depends_on:  ["py-root", "pytest_plugins", "pytest_runner", "test_env", "build_once"]
 			tags:        ["backend", "django", "api"]
 			// ee/hogai/test/test_llm.py reads the settings scene's ids (SETTINGS_MAP_PATH).
@@ -299,14 +334,10 @@ pipeline: schema.#Pipeline & {
 				"showcase/scripts/fetch_test_durations.sh",
 				"showcase/scripts/repo_invariants.sh",
 			], _baseData])
-			fmt: {
-				command: "uv run --no-sync ruff format --check {changed_files}"
-				filter: {include: ["**/*.py"], exclude: ["products/**"]}
-			}
-			lint: {
-				command: "uv run --no-sync ruff check {changed_files}"
-				filter: {include: ["**/*.py"], exclude: ["products/**"]}
-			}
+			fmt: filter: exclude:  ["products/**"]
+			lint: filter: exclude: ["products/**"]
+			max_shards: 12
+			shards:     4
 			jobs: {
 				audit: {
 					name:      "Audit"
@@ -325,16 +356,13 @@ pipeline: schema.#Pipeline & {
 					}]
 				}
 				test: {
-					name:       "Test"
-					max_shards: 12
-					shards:     4
-					recorder:   "own"
+					name: "Test"
 					// Nightly peaks per shard: 1.8-3.8 GB (a 10.9 GB shard was the warehouse-URL hook's
 					// absence: test_groups_revenue_analytics' s3() reads retried at upstream's bucket).
 					resources: {cpus: 0.75, memory_mb: 4096}
 					tasks: [
 						{name: "Build plugin transpiler", command: "showcase/scripts/build_plugin_transpiler.sh", timeout: "15m"},
-						{name: "Run Tests", command: "bash showcase/scripts/run_sharded_pytest.sh {targets}", timeout: "90m", error_exit_codes: _pytestErrors, services: _pytestSetupServices},
+						_pytestRunTask & {name: "Run Tests"},
 					]
 				}
 			}
@@ -343,7 +371,6 @@ pipeline: schema.#Pipeline & {
 				service_markers: ["django_db", "BaseTest", "APITestCase", "ClickhouseTestMixin", "NonDeterministicDatabaseTestMixin", "posthog.test"]
 			}
 			target_scope: {
-				fallback: "none"
 				rules: [
 					{match: ["posthog/dags/**", "products/*/dags/**"], action: "ignore"},
 					{
@@ -367,14 +394,10 @@ pipeline: schema.#Pipeline & {
 			}
 			uses: _backendServices
 		}
-		"products": {
+		"products": _djangoSuite & {
 			name:            "products"
 			title:           "PostHog Product Backends"
 			description:     "Each product's Django app, Dagster assets and evaluation harnesses"
-			kind:            "service"
-			domain:          "analytics"
-			technology:      "python"
-			root:            "."
 			depends_on:      ["base", "py-root", "test_env"]
 			// messaging's test_message_preference_styles reads the compiled stylesheet (STYLESHEET).
 			workspace_scope: {include_dependencies: false, include: list.Concat([_python_monolith_include, ["frontend/public/message-preferences.css"]])}
@@ -386,14 +409,6 @@ pipeline: schema.#Pipeline & {
 				"products/stamphog/packages/**", "packages/agent/agent-shadow/**",
 				".stamphog/**", "dagster_cloud.yaml", ".dagster_home/**",
 			]
-			fmt: {
-				command: "uv run --no-sync ruff format --check {changed_files}"
-				filter: include: ["**/*.py"]
-			}
-			lint: {
-				command: "uv run --no-sync ruff check {changed_files}"
-				filter: include: ["**/*.py"]
-			}
 			jobs: typecheck: {
 				direct:    true
 				services:  false
@@ -416,7 +431,6 @@ pipeline: schema.#Pipeline & {
 				service_markers: ["django_db", "BaseTest", "APITestCase", "ClickhouseTestMixin", "NonDeterministicDatabaseTestMixin", "posthog.test"]
 			}
 			target_scope: {
-				fallback: "none"
 				rules: [
 					{match: ["posthog/dags/**", "products/*/dags/**"], action: "ignore"},
 					{
@@ -435,34 +449,18 @@ pipeline: schema.#Pipeline & {
 				]
 				tests: [for f in _pytestFiles {"products/*/backend/**/\(f)"}]
 			}
-			recorder: "own"
-			test: {
-				command:          "showcase/scripts/build_once.sh canvas-builder-deps products/canvas/packages/canvas_builder/node_modules/.enact-build-key products/canvas/packages/canvas_builder/package.json products/canvas/packages/canvas_builder/package-lock.json -- npm ci --ignore-scripts --omit=dev --no-audit --no-fund --prefix products/canvas/packages/canvas_builder && bash showcase/scripts/run_sharded_pytest.sh {targets}"
-				timeout:          "90m"
-				error_exit_codes: _pytestErrors
-				services:         _pytestSetupServices
+			test: _pytestRunTask & {
+				command: "showcase/scripts/build_once.sh canvas-builder-deps products/canvas/packages/canvas_builder/node_modules/.enact-build-key products/canvas/packages/canvas_builder/package.json products/canvas/packages/canvas_builder/package-lock.json -- npm ci --ignore-scripts --omit=dev --no-audit --no-fund --prefix products/canvas/packages/canvas_builder && bash showcase/scripts/run_sharded_pytest.sh {targets}"
 			}
 			uses: _backendServices
 		}
-		"dagster": {
+		"dagster": _djangoSuite & {
 			name:            "dagster"
 			title:           "Dagster jobs"
 			description:     "Dagster assets and jobs of core and the products"
-			kind:            "service"
-			domain:          "analytics"
-			technology:      "python"
-			root:            "."
 			depends_on:      ["base", "products", "py-root", "test_env"]
 			workspace_scope: {include_dependencies: false, include: _python_monolith_include}
 			watch_paths:     ["posthog/dags/**", "products/*/dags/**", "dagster_cloud.yaml", ".dagster_home/**"]
-			fmt: {
-				command: "uv run --no-sync ruff format --check {changed_files}"
-				filter: include: ["**/*.py"]
-			}
-			lint: {
-				command: "uv run --no-sync ruff check {changed_files}"
-				filter: include: ["**/*.py"]
-			}
 			jobs: typecheck: {
 				direct:    true
 				services:  false
@@ -473,14 +471,14 @@ pipeline: schema.#Pipeline & {
 					timeout: "15m"
 				}]
 			}
-			shards:          3
-			resources:       {cpus: 2.0, memory_mb: 5120}
+			shards:            3
+			service_instances: "per_shard"
+			resources:         {cpus: 2.0, memory_mb: 5120}
 			scoping: {
 				domain_roots:    ["posthog", "products"]
 				service_markers: ["django_db", "BaseTest", "ClickhouseTestMixin", "posthog.test"]
 			}
 			target_scope: {
-				fallback: "none"
 				rules: [{
 					match: [
 						"posthog/**/*.{py,ambr}", "ee/**/*.py", "common/**/*.py",
@@ -490,14 +488,8 @@ pipeline: schema.#Pipeline & {
 				}]
 				tests: [for root in ["posthog/dags", "products/*/dags"] for f in _pytestFiles {"\(root)/**/\(f)"}]
 			}
-			recorder:         "own"
 			record_resources: resources
-			test: {
-				command:          "bash showcase/scripts/run_sharded_pytest.sh {targets}"
-				timeout:          "90m"
-				error_exit_codes: _pytestErrors
-				services:         _pytestSetupServices
-			}
+			test:             _pytestRunTask
 			uses: [
 				{protocol: schema.#Protocol.Sql, target: pipeline.services.postgres, title: "Reads & writes app metadata"},
 				{protocol: schema.#Protocol.Redis, target: pipeline.services.redis, title: "Caches sessions & flags"},
@@ -540,8 +532,11 @@ pipeline: schema.#Pipeline & {
 				"services/mcp/schema/exec-command-reference.md",
 				"showcase/scripts/no_drift.sh",
 			]
-			schema_check: "showcase/scripts/no_drift.sh bash -c './bin/hogli build:openapi && pnpm --filter=@posthog/mcp run scaffold-yaml -- --sync-all'"
-			resources:    {cpus: 1.0, memory_mb: 2400}
+			schema_check: {
+				command:         "./bin/hogli build:openapi && pnpm --filter=@posthog/mcp run scaffold-yaml -- --sync-all"
+				expect_no_drift: true
+			}
+			resources: {cpus: 1.0, memory_mb: 2400}
 		}
 		"frontend": {
 			name:        "frontend"
@@ -597,21 +592,25 @@ pipeline: schema.#Pipeline & {
 					needs:     ["quill:build"]
 					tasks: [
 						{
-							name:    "Build products"
-							command: "showcase/scripts/build_quill.sh && showcase/scripts/build_hogvm.sh && pnpm exec turbo --filter=@posthog/frontend prepare && showcase/scripts/build_products.sh && git diff --exit-code -- frontend/src/products.tsx frontend/src/products.json"
+							name:            "Build products"
+							command:         "showcase/scripts/build_quill.sh && showcase/scripts/build_hogvm.sh && pnpm exec turbo --filter=@posthog/frontend prepare && showcase/scripts/build_products.sh && git diff --exit-code -- frontend/src/products.tsx frontend/src/products.json"
+							expect_no_drift: ["frontend/src/products.tsx", "frontend/src/products.json"]
 						},
 						{
 							name:    "Kea typegen"
-							command: "NODE_OPTIONS=--max-old-space-size=8192 frontend/node_modules/.bin/kea-typegen write --delete --show-ts-errors"
+							command: "frontend/node_modules/.bin/kea-typegen write --delete --show-ts-errors"
+							env: NODE_OPTIONS: "--max-old-space-size=8192"
 						},
 						{
 							name:    "tsgo"
-							command: "GOMEMLIMIT=10GiB pnpm --filter=@posthog/frontend exec tsgo --noEmit false --emitDeclarationOnly --outDir ../\(_tsgoCache)/out --rootDir .. --tsBuildInfoFile ../\(_tsgoCache)/frontend.tsbuildinfo --checkers 1"
+							command: "pnpm --filter=@posthog/frontend exec tsgo --noEmit false --emitDeclarationOnly --outDir ../\(_tsgoCache)/out --rootDir .. --tsBuildInfoFile ../\(_tsgoCache)/frontend.tsbuildinfo --checkers 1"
+							env: GOMEMLIMIT: "10GiB"
 							timeout: "20m"
 						},
 						{
-							name:    "Schema drift"
-							command: "pnpm --filter=@posthog/frontend schema:build:json && git diff --exit-code -- frontend/src/queries/schema.json frontend/src/queries/validators.js && NODE_OPTIONS=--max-old-space-size=8192 pnpm --filter=@posthog/frontend mobile-replay:schema:build:json && git diff --exit-code -- frontend/src/scenes/session-recordings/mobile-replay/schema/web/rr-web-schema.json frontend/src/scenes/session-recordings/mobile-replay/schema/mobile/rr-mobile-schema.json"
+							name:            "Schema drift"
+							command:         "pnpm --filter=@posthog/frontend schema:build:json && git diff --exit-code -- frontend/src/queries/schema.json frontend/src/queries/validators.js && NODE_OPTIONS=--max-old-space-size=8192 pnpm --filter=@posthog/frontend mobile-replay:schema:build:json && git diff --exit-code -- frontend/src/scenes/session-recordings/mobile-replay/schema/web/rr-web-schema.json frontend/src/scenes/session-recordings/mobile-replay/schema/mobile/rr-mobile-schema.json"
+							expect_no_drift: ["frontend/src/queries/schema.json", "frontend/src/queries/validators.js", "frontend/src/scenes/session-recordings/mobile-replay/schema/web/rr-web-schema.json", "frontend/src/scenes/session-recordings/mobile-replay/schema/mobile/rr-mobile-schema.json"]
 							filter: include: [
 								"**/*.{ts,tsx,js,jsx,mjs,cjs,mts,cts}", "**/tsconfig*.json", "**/package.json",
 								"frontend/src/queries/schema.json", "frontend/src/scenes/session-recordings/mobile-replay/schema/**",
@@ -710,7 +709,10 @@ pipeline: schema.#Pipeline & {
 				}
 				tasks: [{command: "rm -f packages/quill/dist/.enact-build-key && ../../showcase/scripts/build_quill.sh"}]
 			}
-			lint: "cd ../.. && pnpm exec oxlint --no-error-on-unmatched-pattern {changed_files} --quiet"
+			lint: {
+				dir:     "."
+				command: "pnpm exec oxlint --no-error-on-unmatched-pattern {changed_files} --quiet"
+			}
 		}
 		"agent": {
 			name:        "agent"
@@ -721,14 +723,27 @@ pipeline: schema.#Pipeline & {
 			technology:  "typescript"
 			root:        "packages/agent"
 			depends_on:  ["root", "build_once", "vitest_marker"]
-			build:       "../../showcase/scripts/exclusive.sh agent-node-modules pnpm install --frozen-lockfile && pnpm run build"
+			build: {
+				lock:    "agent-node-modules"
+				command: "pnpm install --frozen-lockfile && pnpm run build"
+			}
 			jobs: test: {
 				name:        "Test"
 				shards:      1
 				recorder:    "trace"
 				recorded_by: ["enact-node"]
 				tasks: [
-					{name: "Build", command: "cd ../.. && showcase/scripts/build_once.sh agent-node-modules packages/agent/node_modules/.enact-build-key packages/agent/package.json packages/agent/pnpm-lock.yaml packages/agent/pnpm-workspace.yaml 'packages/agent/packages/*/package.json' -- pnpm --dir packages/agent install --frozen-lockfile && cd packages/agent && pnpm exec turbo run build --filter='!@posthog/agent'"},
+					{
+						name: "Build"
+						dir:  "."
+						lock: "agent-node-modules"
+						once: {
+							key:     "agent-node-modules"
+							inputs:  ["packages/agent/package.json", "packages/agent/pnpm-lock.yaml", "packages/agent/pnpm-workspace.yaml", "packages/agent/packages/*/package.json"]
+							outputs: ["packages/agent/node_modules"]
+						}
+						command: "showcase/scripts/build_once.sh agent-node-modules packages/agent/node_modules/.enact-build-key packages/agent/package.json packages/agent/pnpm-lock.yaml packages/agent/pnpm-workspace.yaml 'packages/agent/packages/*/package.json' -- pnpm --dir packages/agent install --frozen-lockfile && cd packages/agent && pnpm exec turbo run build --filter='!@posthog/agent'"
+					},
 					{name: "Run Tests", command: "../../showcase/scripts/agent_vitest.sh {relative_targets}"},
 				]
 			}
@@ -780,12 +795,9 @@ pipeline: schema.#Pipeline & {
 					tasks: [{command: "../showcase/scripts/run_rust_tests.sh {targets}", timeout: "75m"}]
 					target_scope: {
 						fallback: "none"
-						rules: [
-							{match: ["rust/**"], engine: "reach"},
-							{match: ["showcase/scripts/{run_rust_release_build.sh,rust_affected_crates.sh}"], action: "ignore"},
-						]
-						tests:   [for dir in ["rust/*", "rust/{common,deltalite,hogql}/*"] for f in ["src/lib.rs", "src/main.rs", "src/bin/*.rs", "tests/*.rs"] {"\(dir)/\(f)"}]
-						exclude: _rustIgnoredBinaries
+						rules:    _rustTestScopeRules
+						tests:    [for dir in ["rust/*", "rust/{common,deltalite,hogql}/*"] for f in ["src/lib.rs", "src/main.rs", "src/bin/*.rs", "tests/*.rs"] {"\(dir)/\(f)"}]
+						exclude:  _rustIgnoredBinaries
 						not_run: [
 							{
 								tests:  ["rust/common/k8s-awareness/tests/k3s_integration.rs", "rust/kafka-assigner/tests/k3s_integration.rs", "rust/personhog-coordination/tests/k3s_integration.rs"]
@@ -805,11 +817,8 @@ pipeline: schema.#Pipeline & {
 					tasks: [{command: "../showcase/scripts/run_rust_tests.sh --ignored {targets}", timeout: "45m"}]
 					target_scope: {
 						fallback: "none"
-						rules: [
-							{match: ["rust/**"], engine: "reach"},
-							{match: ["showcase/scripts/{run_rust_release_build.sh,rust_affected_crates.sh}"], action: "ignore"},
-						]
-						tests: list.Concat([["rust/cymbal/src/modes/processing/stages/rate_limiting/limiter.rs"], _rustIgnoredBinaries])
+						rules:    _rustTestScopeRules
+						tests:    list.Concat([["rust/cymbal/src/modes/processing/stages/rate_limiting/limiter.rs"], _rustIgnoredBinaries])
 					}
 				}
 				build: {
@@ -863,28 +872,19 @@ pipeline: schema.#Pipeline & {
 				}
 			}
 		}
-		"livestream": {
+		"livestream": _goModule & {
 			name:             "livestream"
 			title:            "PostHog Livestream & Realtime Event Gateway"
 			kind:             "service"
 			domain:           "ingestion"
-			technology:       "go"
 			root:             "livestream"
-			depends_on:       ["root"]
 			workspace_scope:  include: ["livestream", "products/web_analytics"]
-			watch_paths:      ["livestream/**", "showcase/scripts/run_go_tests.sh"]
 			lint:             _golangciLint
 			test:             "../showcase/scripts/run_go_tests.sh --all . {targets}"
-			recorder:         "trace"
-			record_resources: _recordGo
-			target_scope: {
-				tests: ["livestream/**/*_test.go"]
-				not_run: [{
-					tests:  ["livestream/*/**/*_test.go"]
-					reason: "ci-livestream.yml runs the root package's tests only (`go test -v`): events' TestSessionStats_CleanupEmptyCounters fails on every run (TTL eviction timing)"
-				}]
-				rules: [{match: ["livestream/**"], engine: "reach"}]
-			}
+			target_scope: not_run: [{
+				tests:  ["livestream/*/**/*_test.go"]
+				reason: "ci-livestream.yml runs the root package's tests only (`go test -v`): events' TestSessionStats_CleanupEmptyCounters fails on every run (TTL eviction timing)"
+			}]
 		}
 		"proto": {
 			name:            "proto"
@@ -896,7 +896,10 @@ pipeline: schema.#Pipeline & {
 			depends_on:      ["root"]
 			workspace_scope: include: ["bin", "nodejs"]
 			watch_paths:     ["proto/**", "packages/personhog-proto/**", "bin/generate_personhog_proto.sh"]
-			lint:            "buf lint proto/ && buf breaking proto/ --against '../.git#ref=HEAD,subdir=proto' && UV_PROJECT_ENVIRONMENT=.enact/state/proto-venv uv sync --frozen --no-install-project --only-group proto-codegen && PATH=\"$(realpath ../.enact/state/proto-venv)/bin:$PATH\" bash ../bin/generate_personhog_proto.sh && git add -N ../packages/personhog-proto/ && git diff --exit-code -- ../packages/personhog-proto/ && pnpm --dir ../nodejs run generate:personhog-proto && pnpm --dir ../nodejs run generate:ingestion-worker-proto && git add -N ../nodejs/src/common/generated/personhog/ ../nodejs/src/common/generated/ingestion-worker/ && git diff --exit-code -- ../nodejs/src/common/generated/personhog/ ../nodejs/src/common/generated/ingestion-worker/"
+			lint: {
+				command:         "buf lint proto/ && buf breaking proto/ --against '../.git#ref=HEAD,subdir=proto' && UV_PROJECT_ENVIRONMENT=.enact/state/proto-venv uv sync --frozen --no-install-project --only-group proto-codegen && PATH=\"$(realpath ../.enact/state/proto-venv)/bin:$PATH\" bash ../bin/generate_personhog_proto.sh && git add -N ../packages/personhog-proto/ && git diff --exit-code -- ../packages/personhog-proto/ && pnpm --dir ../nodejs run generate:personhog-proto && pnpm --dir ../nodejs run generate:ingestion-worker-proto && git add -N ../nodejs/src/common/generated/personhog/ ../nodejs/src/common/generated/ingestion-worker/ && git diff --exit-code -- ../nodejs/src/common/generated/personhog/ ../nodejs/src/common/generated/ingestion-worker/"
+				expect_no_drift: ["packages/personhog-proto/**", "nodejs/src/common/generated/personhog/**", "nodejs/src/common/generated/ingestion-worker/**"]
+			}
 		}
 		"workflows": {
 			name:       "workflows"
@@ -948,22 +951,16 @@ pipeline: schema.#Pipeline & {
 				}]
 			}
 			jobs: {
-				test: {
-					name:        "Test"
-					shards:      1
-					recorder:    "trace"
-					recorded_by: ["enact-node"]
-					needs:       _mcpUiAppsNeeds
+				test: _mcpVitestJob & {
+					name:   "Test"
+					shards: 1
 					tasks: [
 						{name: "Build", command: _mcpPrebuild},
 						{name: "Run Tests", command: "../../.enact/vitest/vitest.sh run {relative_targets}"},
 					]
 				}
-				test_hono: {
-					name:        "Test (Hono)"
-					recorder:    "trace"
-					recorded_by: ["enact-node"]
-					needs:       _mcpUiAppsNeeds
+				test_hono: _mcpVitestJob & {
+					name: "Test (Hono)"
 					tasks: [
 						{name: "Build", command: _mcpPrebuild},
 						{name: "Run Tests", command: "../../.enact/vitest/vitest.sh run --config vitest.hono.config.mts {relative_targets}"},
@@ -992,8 +989,8 @@ pipeline: schema.#Pipeline & {
 				schema_check: {
 					services: false
 					tasks: [
-						{name: "Check MCP schema is up to date", command: "pnpm exec tsx scripts/generate-tool-schema.ts && pnpm exec oxfmt schema/tool-inputs.json && git diff --exit-code schema/tool-inputs.json"},
-						{name: "Check generated UI apps are up to date", command: "pnpm run generate:ui-apps && git diff --exit-code -- src/ui-apps/apps/generated/ src/resources/ui-apps.generated.ts"},
+						{name: "Check MCP schema is up to date", command: "pnpm exec tsx scripts/generate-tool-schema.ts && pnpm exec oxfmt schema/tool-inputs.json && git diff --exit-code schema/tool-inputs.json", expect_no_drift: ["services/mcp/schema/tool-inputs.json"]},
+						{name: "Check generated UI apps are up to date", command: "pnpm run generate:ui-apps && git diff --exit-code -- src/ui-apps/apps/generated/ src/resources/ui-apps.generated.ts", expect_no_drift: ["services/mcp/src/ui-apps/apps/generated/**", "services/mcp/src/resources/ui-apps.generated.ts"]},
 						{name: "Lint tool names", command: "pnpm lint-tool-names"},
 						{name: "Build API CLI release bundle", command: "trap 'rm -f ../../cli/lib/posthog-api-cli.mjs; rmdir ../../cli/lib ../../cli 2>/dev/null || true' EXIT && pnpm run build:cli:release && test -s ../../cli/lib/posthog-api-cli.mjs"},
 					]
@@ -1004,19 +1001,17 @@ pipeline: schema.#Pipeline & {
 				}
 			}
 		}
-		"live_harness": {
+		"live_harness": _harness & {
 			name:        "live_harness"
 			title:       "Live PostHog stack"
 			technology:  ["python", "typescript"]
-			root:        "."
 			depends_on:  ["test_env", "geoip"]
 			watch_paths: ["showcase/scripts/live_posthog.sh", "showcase/scripts/rust_ci_env.sh", "bin/celery-queues.env"]
 		}
-		"e2e_harness": {
+		"e2e_harness": _harness & {
 			name:        "e2e_harness"
 			title:       "Playwright E2E runner"
 			technology:  ["python", "typescript"]
-			root:        "."
 			depends_on:  ["live_harness", "build_once"]
 			watch_paths: ["showcase/scripts/run_e2e_tests.sh", "showcase/scripts/build_e2e.sh"]
 		}
@@ -1106,7 +1101,11 @@ pipeline: schema.#Pipeline & {
 				"bin/[!cde]*", "bin/e[!n]*", "bin/en[!av]*", "bin/c[!e]*", "bin/d[!o]*", "bin/do[!w]*",
 				"bin/download-[!m]*", "bin/{helpers,sandbox-shims,test}/**",
 			]
-			test:             "cd ../.. && \(_ownHome) uv run --no-sync pytest {targets}"
+			test: {
+				dir:          "."
+				isolate_home: true
+				command:      "mkdir -p \"$HOME/.hogli/bin\" \"$HOME/.local/bin\" && printf '#!/bin/sh\\necho 0.18.1\\n' >\"$HOME/.hogli/bin/mutagen\" && printf '#!/bin/sh\\nexit 0\\n' >\"$HOME/.local/bin/ssh\" && chmod +x \"$HOME/.hogli/bin/mutagen\" \"$HOME/.local/bin/ssh\" && PATH=\"$PATH:$HOME/.local/bin\" uv run --no-sync pytest {targets}"
+			}
 			recorder:         "trace"
 			record_resources: _recordPy
 			target_scope: {
