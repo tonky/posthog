@@ -254,7 +254,7 @@ jobs:
         fi
         printf 'cache-hit=%s\n' "$hit" >> "$GITHUB_OUTPUT"
       env:
-        ENACT_OUTPUTS_KEY: enact-outputs-${{ matrix.output_slug }}-${{ runner.os }}${{ matrix.output_arch_independent && '' || format('-{0}', runner.arch) }}-${{ matrix.output_key }}
+        ENACT_OUTPUTS_KEY: enact-outputs-${{ matrix.output_slug }}-${{ runner.os }}${{ !matrix.output_arch_independent && format('-{0}', runner.arch) || '' }}-${{ matrix.output_key }}
         ENACT_OUTPUTS_PATHS: ${{ matrix.output_paths }}
     - name: Look Up Built Outputs
       id: outputs-lookup
@@ -262,7 +262,7 @@ jobs:
       continue-on-error: true
       uses: actions/cache/restore@v6
       with:
-        key: enact-outputs-${{ matrix.output_slug }}-${{ runner.os }}${{ matrix.output_arch_independent && '' || format('-{0}', runner.arch) }}-${{ matrix.output_key }}
+        key: enact-outputs-${{ matrix.output_slug }}-${{ runner.os }}${{ !matrix.output_arch_independent && format('-{0}', runner.arch) || '' }}-${{ matrix.output_key }}
         lookup-only: "true"
         path: ${{ matrix.output_paths }}
     - name: Skip on Built Outputs Found
@@ -281,7 +281,7 @@ jobs:
       continue-on-error: true
       run: enact ci host-outputs restore-build
       env:
-        ENACT_OUTPUTS_KEY: enact-outputs-${{ matrix.output_slug }}-${{ runner.os }}${{ matrix.output_arch_independent && '' || format('-{0}', runner.arch) }}-${{ matrix.output_key }}
+        ENACT_OUTPUTS_KEY: enact-outputs-${{ matrix.output_slug }}-${{ runner.os }}${{ !matrix.output_arch_independent && format('-{0}', runner.arch) || '' }}-${{ matrix.output_key }}
         ENACT_OUTPUTS_PATHS: ${{ matrix.output_paths }}
     - name: Restore history Handoff
       id: history-host
@@ -954,7 +954,7 @@ jobs:
       continue-on-error: true
       run: enact ci host-outputs save
       env:
-        ENACT_OUTPUTS_KEY: enact-outputs-${{ matrix.output_slug }}-${{ runner.os }}${{ matrix.output_arch_independent && '' || format('-{0}', runner.arch) }}-${{ matrix.output_key }}
+        ENACT_OUTPUTS_KEY: enact-outputs-${{ matrix.output_slug }}-${{ runner.os }}${{ !matrix.output_arch_independent && format('-{0}', runner.arch) || '' }}-${{ matrix.output_key }}
         ENACT_OUTPUTS_PATHS: ${{ matrix.output_paths }}
     - name: Copy Host-Cached Outputs for GitHub's Cache
       id: outputs-publish
@@ -1042,7 +1042,7 @@ jobs:
                 ;;
         esac
       env:
-        ENACT_OUTPUTS_KEY: enact-outputs-${{ matrix.output_slug }}-${{ runner.os }}${{ matrix.output_arch_independent && '' || format('-{0}', runner.arch) }}-${{ matrix.output_key }}
+        ENACT_OUTPUTS_KEY: enact-outputs-${{ matrix.output_slug }}-${{ runner.os }}${{ !matrix.output_arch_independent && format('-{0}', runner.arch) || '' }}-${{ matrix.output_key }}
         ENACT_OUTPUTS_MODE: restore
         ENACT_OUTPUTS_PATHS: ${{ matrix.output_paths }}
     - name: Cache Built Outputs
@@ -1050,7 +1050,7 @@ jobs:
       continue-on-error: true
       uses: actions/cache/save@v6
       with:
-        key: enact-outputs-${{ matrix.output_slug }}-${{ runner.os }}${{ matrix.output_arch_independent && '' || format('-{0}', runner.arch) }}-${{ matrix.output_key }}
+        key: enact-outputs-${{ matrix.output_slug }}-${{ runner.os }}${{ !matrix.output_arch_independent && format('-{0}', runner.arch) || '' }}-${{ matrix.output_key }}
         path: ${{ matrix.output_paths }}
     - name: Upload Built Outputs Artifact
       if: ${{ success() && (!steps.skip.outputs.hit || steps.outputs-publish.outputs.cache-hit == 'true') && matrix.output_key != '' }}
@@ -1059,6 +1059,6 @@ jobs:
       with:
         if-no-files-found: error
         include-hidden-files: "true"
-        name: enact-outputs-${{ matrix.output_slug }}-${{ runner.os }}${{ matrix.output_arch_independent && '' || format('-{0}', runner.arch) }}
+        name: enact-outputs-${{ matrix.output_slug }}-${{ runner.os }}${{ !matrix.output_arch_independent && format('-{0}', runner.arch) || '' }}
         path: ${{ matrix.output_paths }}
         retention-days: "1"

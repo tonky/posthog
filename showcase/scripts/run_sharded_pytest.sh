@@ -263,8 +263,14 @@ for run in "${RUNS[@]}"; do
     else
         (
             [ -z "$PRODUCT_OBJECT_STORAGE_ENDPOINT" ] || export OBJECT_STORAGE_ENDPOINT="$PRODUCT_OBJECT_STORAGE_ENDPOINT"
-            ENACT_PYTEST_GROUP="$group" exec python3 showcase/scripts/backend_runtime.py exec \
-                uv run --no-sync --directory "$dir" pytest "${PLUGINS[@]}" "${LEFT_OUT[@]}" -o pythonhashseed=0 "${REUSE_DB_ARG[@]}" "${args[@]}"
+            if [ "$group" = "signals" ]; then
+                # Avoid scout_report <-> scout_harness circular import when shards collect test_report_embeddings before test_billing.
+                PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}" ENACT_PYTEST_GROUP="$group" exec python3 showcase/scripts/backend_runtime.py exec \
+                    uv run --no-sync --directory "$dir" python -c 'import sys, pytest, products.signals.backend.scout_harness.tools.emit; raise SystemExit(pytest.main(sys.argv[1:]))' "${PLUGINS[@]}" "${LEFT_OUT[@]}" -o pythonhashseed=0 "${REUSE_DB_ARG[@]}" "${args[@]}"
+            else
+                ENACT_PYTEST_GROUP="$group" exec python3 showcase/scripts/backend_runtime.py exec \
+                    uv run --no-sync --directory "$dir" pytest "${PLUGINS[@]}" "${LEFT_OUT[@]}" -o pythonhashseed=0 "${REUSE_DB_ARG[@]}" "${args[@]}"
+            fi
         )
     fi
     code=$?

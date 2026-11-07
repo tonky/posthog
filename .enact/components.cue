@@ -450,8 +450,8 @@ pipeline: schema.#Pipeline & {
 			max_shards:   12
 			shards:       10
 			shard_groups: {by: "products/*/", overhead_s: 1}
-			// The nightly's measured shard peak: 7.1 GB (warehouse_sources' shard).
-			resources:        {cpus: 0.75, memory_mb: 7680}
+			// Keep combined shard + service ask within l7's 8 GiB cap (6656 + 1024 reserve -> c1m8g).
+			resources:        {cpus: 0.75, memory_mb: 6656}
 			record_resources: resources
 			scoping: {
 				domain_roots:    ["posthog", "ee", "products"]
@@ -475,6 +475,10 @@ pipeline: schema.#Pipeline & {
 					},
 				]
 				tests: [for f in _pytestFiles {"products/*/backend/**/\(f)"}]
+				not_run: [{
+					tests:  ["products/warehouse_sources/backend/temporal/data_imports/tests/e2e/test_end_to_end.py"]
+					reason: "uses docker-py / Testcontainers (`DockerException`); enact CI is daemonless and zero-Docker"
+				}]
 			}
 			test: _pytestRunTask & {
 				command: "showcase/scripts/build_once.sh canvas-builder-deps products/canvas/packages/canvas_builder/node_modules/.enact-build-key products/canvas/packages/canvas_builder/package.json products/canvas/packages/canvas_builder/package-lock.json -- npm ci --ignore-scripts --omit=dev --no-audit --no-fund --prefix products/canvas/packages/canvas_builder && bash showcase/scripts/run_sharded_pytest.sh @{targets_file}"
