@@ -2,8 +2,8 @@
   "platforms": {
     "aarch64-darwin": {
       "binding": {
-        "environment_sha256": "22e25755e307fad8f3d2a838450ba2fe96a29d0a5743eb417edef3b340d7495d",
-        "inventory_sha256": "d680465e63bfc7fca42241106a3b0569df92723e13517c2e667b5fd905198ea5",
+        "environment_sha256": "b69d31873b1117f6bb473a5e53b2521c8eb091a0d36b0cc9bd5dade453cc3659",
+        "inventory_sha256": "f17a65a3eaa583a84aef5e7a218d6aecf7c06a91d67dbf53d27cf695e5fc8687",
         "profile": null,
         "version": 2
       },
@@ -3508,7 +3508,7 @@
           }
         },
         "lockSourcePath": "enve.lock",
-        "projectSha256": "609b5504445fc5437016b4ab4500bf05d493d1f5557f25de81f096d8f89c35e4"
+        "projectSha256": "a4301588973ec114352c337dd43a4e1daea54f8eb915d6691d2cb82ad7602ef4"
       },
       "environment": {
         "AWS_ENDPOINT_URL": "http://127.0.0.1:${ENVE_SERVICE_SEAWEEDFS_PORT}",
@@ -3612,6 +3612,7 @@
         "MAILDEV_URL": "http://127.0.0.1:1080",
         "NOTEBOOKS_FRAME_STORE_S3_ENDPOINT": "http://127.0.0.1:${ENVE_SERVICE_SEAWEEDFS_PORT}",
         "NO_PROXY": "127.0.0.1,localhost,::1",
+        "NPM_CONFIG_MANAGE_PACKAGE_MANAGER_VERSIONS": "false",
         "OBJECT_STORAGE_ACCESS_KEY_ID": "object_storage_root_user",
         "OBJECT_STORAGE_ENABLED": "True",
         "OBJECT_STORAGE_ENDPOINT": "http://localhost:${ENVE_SERVICE_SEAWEEDFS_PORT}",
@@ -4462,8 +4463,8 @@
     },
     "aarch64-linux": {
       "binding": {
-        "environment_sha256": "22e25755e307fad8f3d2a838450ba2fe96a29d0a5743eb417edef3b340d7495d",
-        "inventory_sha256": "f549ebb40b9c270e2ca5a42dc33c360b19df49400d674a8594e6d4adaf1683f8",
+        "environment_sha256": "b69d31873b1117f6bb473a5e53b2521c8eb091a0d36b0cc9bd5dade453cc3659",
+        "inventory_sha256": "f7e6916ee62557454afbb02990ac4b516535190690db06b91285b62eceeb700b",
         "profile": null,
         "version": 2
       },
@@ -5923,9 +5924,6 @@
           ]
         },
         {
-          "hash_name": "75s2nh5c7g0hy4gi2flq4dv8h8vginjd-playwright-browsers-1.60.0"
-        },
-        {
           "hash_name": "75w7w1lclaylyr85sg8865hwsanvhz2h-attr-2.6.0",
           "nar_hash": "sha256:087ifgshxlgihdbmj33jh4xx90irfm17wpv27c95lmq1yd4376pz",
           "nar_size": 133240,
@@ -6839,6 +6837,9 @@
             "hx9wvdx2l59iahwf9nmrx7rwkm6cymgs-glibc-2.44-25",
             "na9inwswsrgxxqpqrz3ms78qn7pyxg44-gcc-16.2.0-lib"
           ]
+        },
+        {
+          "hash_name": "b3n377nvpzd1gpwh3551ba0hxim6igz5-playwright-browsers-1.60.0"
         },
         {
           "hash_name": "b472j18jwlz0xqzdb0a85ywc5ifryipq-shared-mime-info-2.5.1",
@@ -8845,6 +8846,12 @@
           "references": [
             "hx9wvdx2l59iahwf9nmrx7rwkm6cymgs-glibc-2.44-25"
           ]
+        },
+        {
+          "hash_name": "l41bn8rq8lg0k94amsi0pikr063995c8-noto-fonts-color-emoji-2.051",
+          "nar_hash": "sha256:0rl6hp9x3lj5bywdpypw0a4g32048bg3kh9k6h8xbypq0bilmcl2",
+          "nar_size": 10674080,
+          "references": []
         },
         {
           "hash_name": "l57s8hy0nd1sli77jn8ybvd3b5jqabab-gstreamer-1.28.7",
@@ -13501,6 +13508,34 @@
             },
             {
               "constraint": {
+                "attr": "noto-fonts-color-emoji",
+                "context": "profiles.dev",
+                "output": null,
+                "system": "aarch64-linux",
+                "version": null
+              },
+              "package": {
+                "attr_path": "noto-fonts-color-emoji",
+                "name": "noto-fonts-color-emoji",
+                "origin": {
+                  "Channel": {
+                    "build": 347166221,
+                    "evaluation": 1829922,
+                    "release": "nixpkgs/nixpkgs-26.11pre1086972.7dd199b0e299/"
+                  }
+                },
+                "outputs": {
+                  "out": "/nix/store/l41bn8rq8lg0k94amsi0pikr063995c8-noto-fonts-color-emoji-2.051"
+                },
+                "rev": "7dd199b0e2993e37b4775ed66b1c291699608c9f",
+                "store_paths": [
+                  "/nix/store/l41bn8rq8lg0k94amsi0pikr063995c8-noto-fonts-color-emoji-2.051"
+                ],
+                "version": "2.051"
+              }
+            },
+            {
+              "constraint": {
                 "attr": "nspr",
                 "context": "profiles.dev",
                 "output": null,
@@ -14350,7 +14385,7 @@
           }
         },
         "lockSourcePath": "enve.lock",
-        "projectSha256": "609b5504445fc5437016b4ab4500bf05d493d1f5557f25de81f096d8f89c35e4"
+        "projectSha256": "a4301588973ec114352c337dd43a4e1daea54f8eb915d6691d2cb82ad7602ef4"
       },
       "environment": {
         "AWS_ENDPOINT_URL": "http://127.0.0.1:${ENVE_SERVICE_SEAWEEDFS_PORT}",
@@ -14442,7 +14477,7 @@
         "ETCD_HOST": "127.0.0.1",
         "ETCD_PORT": "2379",
         "ETCD_URL": "http://127.0.0.1:2379",
-        "FONTCONFIG_FILE": "$ENVE_STORE_DIR/75s2nh5c7g0hy4gi2flq4dv8h8vginjd-playwright-browsers-1.60.0/fonts.conf",
+        "FONTCONFIG_FILE": "$ENVE_STORE_DIR/b3n377nvpzd1gpwh3551ba0hxim6igz5-playwright-browsers-1.60.0/fonts.conf",
         "IDENTITY_MATCHING_S3_ENDPOINT": "http://127.0.0.1:${ENVE_SERVICE_SEAWEEDFS_PORT}",
         "KAFKA_BROKERS": "127.0.0.1:9092",
         "KAFKA_HOST": "127.0.0.1",
@@ -14455,6 +14490,7 @@
         "MAILDEV_URL": "http://127.0.0.1:1080",
         "NOTEBOOKS_FRAME_STORE_S3_ENDPOINT": "http://127.0.0.1:${ENVE_SERVICE_SEAWEEDFS_PORT}",
         "NO_PROXY": "127.0.0.1,localhost,::1",
+        "NPM_CONFIG_MANAGE_PACKAGE_MANAGER_VERSIONS": "false",
         "OBJECT_STORAGE_ACCESS_KEY_ID": "object_storage_root_user",
         "OBJECT_STORAGE_ENABLED": "True",
         "OBJECT_STORAGE_ENDPOINT": "http://localhost:${ENVE_SERVICE_SEAWEEDFS_PORT}",
@@ -14465,7 +14501,7 @@
         "PGPORT": "${ENVE_SERVICE_POSTGRES_PORT}",
         "PGTZ": "UTC",
         "PGUSER": "posthog",
-        "PLAYWRIGHT_BROWSERS_PATH": "$ENVE_STORE_DIR/75s2nh5c7g0hy4gi2flq4dv8h8vginjd-playwright-browsers-1.60.0",
+        "PLAYWRIGHT_BROWSERS_PATH": "$ENVE_STORE_DIR/b3n377nvpzd1gpwh3551ba0hxim6igz5-playwright-browsers-1.60.0",
         "PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS": "1",
         "POSTGRES_HOST": "127.0.0.1",
         "POSTGRES_PORT": "5432",
@@ -15148,6 +15184,7 @@
             "kamv6nii5127y32pyprqnfk8kc824x02-libx11-1.8.13",
             "kgnsbgqd6wbfkk0w9ggsfmaphhfycdpw-nghttp2-1.70.0",
             "kw0mkd9znldi5l0s4jygygdh4p9sms8r-sqlite-3.53.3-bin",
+            "l41bn8rq8lg0k94amsi0pikr063995c8-noto-fonts-color-emoji-2.051",
             "ln5hhryzflhaw80774ak29kl93r83w1g-libjpeg-turbo-3.1.4.1-dev",
             "ls39nkriqxsvrm358mpw6fx3zxxvwv4a-libepoxy-1.5.10-dev",
             "m64pfzf9yxpyranl4ypkgamzn5zh87s6-libxdamage-1.1.7",
@@ -15188,7 +15225,7 @@
             "zvslra1w3iwm9hvrmnyrz85dvsj5bkgl-systemd-minimal-libs-261.3-dev",
             "zxxlg1hpnbpzl5lrmaxc0qdnw72pz5i5-libtasn1-4.21.0"
           ],
-          "closure": "75s2nh5c7g0hy4gi2flq4dv8h8vginjd-playwright-browsers-1.60.0",
+          "closure": "b3n377nvpzd1gpwh3551ba0hxim6igz5-playwright-browsers-1.60.0",
           "version": "1.60.0"
         },
         "pnpm": {
@@ -15451,8 +15488,8 @@
     },
     "x86_64-linux": {
       "binding": {
-        "environment_sha256": "22e25755e307fad8f3d2a838450ba2fe96a29d0a5743eb417edef3b340d7495d",
-        "inventory_sha256": "d363001c990b9809233aaf4f631b34290e35bd6baae4ff90b28d65e578d399b4",
+        "environment_sha256": "b69d31873b1117f6bb473a5e53b2521c8eb091a0d36b0cc9bd5dade453cc3659",
+        "inventory_sha256": "985a6537dd5c1a21f141aa4d1239af76f2678bb7ef67930113a424d928e8b905",
         "profile": null,
         "version": 2
       },
@@ -17393,6 +17430,9 @@
           ]
         },
         {
+          "hash_name": "9gllzrcm5icvvnki696zw8hba95vp9pb-playwright-browsers-1.60.0"
+        },
+        {
           "hash_name": "9ia7882m3hhvdk6qi4p3p650pfhxg75r-nghttp2-1.70.0-dev",
           "nar_hash": "sha256:0v8nmhkpiw0kx0fiwpb6qxfsavinnd0hbpxh1ps9s71y5iqhigmj",
           "nar_size": 247368,
@@ -18671,9 +18711,6 @@
           ]
         },
         {
-          "hash_name": "i8h7bqibqnm2sjmdnr383smh5wmz2dml-playwright-browsers-1.60.0"
-        },
-        {
           "hash_name": "i9ral2pmk2sg94mcc2c0zlqy54zljvlk-libebur128-1.2.6",
           "nar_hash": "sha256:1pfb7qwjdi2s7z6afhca8w5zxkzgdblf1sgyiqkaw1z1675vvvca",
           "nar_size": 55512,
@@ -19819,6 +19856,12 @@
           "hash_name": "n8fqcpnr5ni28l3i9svqa70wz46798v9-tzdata-2026d",
           "nar_hash": "sha256:0fpbm1mh5nz93q58m0gz9ikcslhdc5i6kldr4146x16cq1ss862s",
           "nar_size": 2131536,
+          "references": []
+        },
+        {
+          "hash_name": "na15wi41vvq97gam0yvixvm8gl0jq51k-noto-fonts-color-emoji-2.051",
+          "nar_hash": "sha256:101ibfvnq7fm71bvd6ns2md0rbv182q9qd6mbrf9gqvixvnzmc5p",
+          "nar_size": 10674096,
           "references": []
         },
         {
@@ -24466,6 +24509,34 @@
             },
             {
               "constraint": {
+                "attr": "noto-fonts-color-emoji",
+                "context": "profiles.dev",
+                "output": null,
+                "system": "x86_64-linux",
+                "version": null
+              },
+              "package": {
+                "attr_path": "noto-fonts-color-emoji",
+                "name": "noto-fonts-color-emoji",
+                "origin": {
+                  "Channel": {
+                    "build": 347166224,
+                    "evaluation": 1829922,
+                    "release": "nixpkgs/nixpkgs-26.11pre1086972.7dd199b0e299/"
+                  }
+                },
+                "outputs": {
+                  "out": "/nix/store/na15wi41vvq97gam0yvixvm8gl0jq51k-noto-fonts-color-emoji-2.051"
+                },
+                "rev": "7dd199b0e2993e37b4775ed66b1c291699608c9f",
+                "store_paths": [
+                  "/nix/store/na15wi41vvq97gam0yvixvm8gl0jq51k-noto-fonts-color-emoji-2.051"
+                ],
+                "version": "2.051"
+              }
+            },
+            {
+              "constraint": {
                 "attr": "nspr",
                 "context": "profiles.dev",
                 "output": null,
@@ -25315,7 +25386,7 @@
           }
         },
         "lockSourcePath": "enve.lock",
-        "projectSha256": "609b5504445fc5437016b4ab4500bf05d493d1f5557f25de81f096d8f89c35e4"
+        "projectSha256": "a4301588973ec114352c337dd43a4e1daea54f8eb915d6691d2cb82ad7602ef4"
       },
       "environment": {
         "AWS_ENDPOINT_URL": "http://127.0.0.1:${ENVE_SERVICE_SEAWEEDFS_PORT}",
@@ -25407,7 +25478,7 @@
         "ETCD_HOST": "127.0.0.1",
         "ETCD_PORT": "2379",
         "ETCD_URL": "http://127.0.0.1:2379",
-        "FONTCONFIG_FILE": "$ENVE_STORE_DIR/i8h7bqibqnm2sjmdnr383smh5wmz2dml-playwright-browsers-1.60.0/fonts.conf",
+        "FONTCONFIG_FILE": "$ENVE_STORE_DIR/9gllzrcm5icvvnki696zw8hba95vp9pb-playwright-browsers-1.60.0/fonts.conf",
         "IDENTITY_MATCHING_S3_ENDPOINT": "http://127.0.0.1:${ENVE_SERVICE_SEAWEEDFS_PORT}",
         "KAFKA_BROKERS": "127.0.0.1:9092",
         "KAFKA_HOST": "127.0.0.1",
@@ -25420,6 +25491,7 @@
         "MAILDEV_URL": "http://127.0.0.1:1080",
         "NOTEBOOKS_FRAME_STORE_S3_ENDPOINT": "http://127.0.0.1:${ENVE_SERVICE_SEAWEEDFS_PORT}",
         "NO_PROXY": "127.0.0.1,localhost,::1",
+        "NPM_CONFIG_MANAGE_PACKAGE_MANAGER_VERSIONS": "false",
         "OBJECT_STORAGE_ACCESS_KEY_ID": "object_storage_root_user",
         "OBJECT_STORAGE_ENABLED": "True",
         "OBJECT_STORAGE_ENDPOINT": "http://localhost:${ENVE_SERVICE_SEAWEEDFS_PORT}",
@@ -25430,7 +25502,7 @@
         "PGPORT": "${ENVE_SERVICE_POSTGRES_PORT}",
         "PGTZ": "UTC",
         "PGUSER": "posthog",
-        "PLAYWRIGHT_BROWSERS_PATH": "$ENVE_STORE_DIR/i8h7bqibqnm2sjmdnr383smh5wmz2dml-playwright-browsers-1.60.0",
+        "PLAYWRIGHT_BROWSERS_PATH": "$ENVE_STORE_DIR/9gllzrcm5icvvnki696zw8hba95vp9pb-playwright-browsers-1.60.0",
         "PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS": "1",
         "POSTGRES_HOST": "127.0.0.1",
         "POSTGRES_PORT": "5432",
@@ -26110,6 +26182,7 @@
             "mchygl2mjg11xsx9bs386rpkbap0xp6d-gst-plugins-bad-1.28.7-dev",
             "mqxjifyyqbgjs66hvghd1zw26sdf5hw1-freetype-2.14.3-dev",
             "myxks6jifgvsgbwjlc1qb748w487knb3-opus-1.5.2",
+            "na15wi41vvq97gam0yvixvm8gl0jq51k-noto-fonts-color-emoji-2.051",
             "nd2z8al52qmai3qqqk2sfn1l01jdcm39-woff2-1.0.2-lib",
             "nkx77vqznw5sb8ybi698zcd73zwxmr4l-cups-2.4.19-lib",
             "nvrv5w6rhc39h8snrsw03nqs679cf7rh-libxkbcommon-1.13.2",
@@ -26153,7 +26226,7 @@
             "znrm90algr0fvnnnp130am1qfg59nl1f-libx11-1.8.13",
             "zrkqwk0989k5wa1gn3cjb76jfga3d8i3-expat-2.8.5"
           ],
-          "closure": "i8h7bqibqnm2sjmdnr383smh5wmz2dml-playwright-browsers-1.60.0",
+          "closure": "9gllzrcm5icvvnki696zw8hba95vp9pb-playwright-browsers-1.60.0",
           "version": "1.60.0"
         },
         "pnpm": {

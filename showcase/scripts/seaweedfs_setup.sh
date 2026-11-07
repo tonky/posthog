@@ -5,6 +5,8 @@
 # every signed request is refused (AccessDenied; data-warehouse tests, exports, recordings).
 # `weed shell` exits 0 whenever the master answers, so this checks the persisted state.
 set -uo pipefail
+# `weed shell` spawns `git describe --dirty`; keep it out of the repo tree so eBPF traces stay lean.
+cd "${DATA_DIR:-${TMPDIR:-/tmp}}" && export GIT_CEILING_DIRECTORIES="${PWD%/*}"
 # The master's port slots (enve.cue), as this postStart hook sees them: `host:port.grpcPort`, since
 # `weed shell` otherwise dials the master's port + 10000, which a named instance's free ports aren't.
 master="127.0.0.1:${PORT_MASTER:?the master port slot}.${PORT_MASTER_GRPC:?the master gRPC port slot}"

@@ -8,7 +8,9 @@
 # anywhere.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/../.."
+export CI=true
+export COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 exec showcase/scripts/build_once.sh plugin-transpiler common/plugin_transpiler/dist/.enact-build-key \
     common/plugin_transpiler common/esbuilder package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json -- \
     showcase/scripts/exclusive.sh node-modules bash -c \
-    'pnpm --filter=@posthog/plugin-transpiler... install --frozen-lockfile && bin/turbo --filter=@posthog/plugin-transpiler build'
+    'CI=true COREPACK_ENABLE_DOWNLOAD_PROMPT=0 pnpm --filter=@posthog/plugin-transpiler... install --frozen-lockfile --config.confirmModulesPurge=false && bin/turbo --filter=@posthog/plugin-transpiler build'

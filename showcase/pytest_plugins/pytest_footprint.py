@@ -204,24 +204,14 @@ def patch_pytest() -> None:
     fixtures.FixtureDef.finish = finish_fixture
 
 
-def map_targets(entries) -> tuple[dict, dict]:
-    """The map's targets from `core`'s entries, with their outcomes, and the opaque ones'
-    reasons."""
-    targets, opaque = {}, {}
-    for target, (entry, why) in sorted(entries.items()):
-        if target not in entry["files"]:
-            entry["files"] = sorted({*entry["files"], target})
-            entry["functions"].setdefault(target, [])
-        if why:
-            opaque[target] = why
-        if target in failed or finished.get(target, 0) < collected.get(target, 0):
-            entry["outcome"] = {"incomplete": {"exit": 1}}
-        elif why:
-            entry["outcome"] = "partial"
-        if target in skipped:
-            entry["skipped_on"] = [PLATFORM]
-        targets[target] = entry
-    return targets, opaque
+def _outcomes_and_skipped(targets) -> tuple[dict, dict[str, list[str]]]:
+    outcomes = {
+        target: {"incomplete": {"exit": 1}}
+        for target in targets
+        if target in failed or finished.get(target, 0) < collected.get(target, 0)
+    }
+    skipped_dict = {target: [PLATFORM] for target in targets if target in skipped}
+    return outcomes, skipped_dict
 
 
 def map_prefix() -> str:
@@ -237,13 +227,18 @@ def checkpoint() -> None:
     done = [key for key in core.footprints if key != core.SHARED and key not in checkpointed
             and finished.get(key, 0) >= collected.get(key, 0)]
     try:
-        snapshot = core.checkpoint(done)
-        if snapshot is not None:
-            shared, entries, order = snapshot
-            targets, _ = map_targets(entries)
-            if targets:
-                checkpoint_paths.append(core.write_map(os.path.abspath(OUT_DIR), map_prefix(), shared, targets, order=order))
-                checkpointed.update(targets)
+        outcomes, skipped_dict = _outcomes_and_skipped(done)
+        res = core.write_checkpoint_v2(
+            os.path.abspath(OUT_DIR),
+            map_prefix(),
+            done,
+            outcomes=outcomes,
+            skipped=skipped_dict,
+        )
+        if res is not None:
+            path, written = res
+            checkpoint_paths.append(path)
+            checkpointed.update(written)
     except Exception as e:  # recording goes on; the end writes the whole map
         core.count(f"checkpoint_error:{type(e).__name__}")
     took = time.monotonic() - began
@@ -254,11 +249,7 @@ def write() -> None:
     targets = {k for k in core.footprints if k != core.SHARED}
     if not targets:
         return
-    outcomes = {}
-    for target in targets:
-        if target in failed or finished.get(target, 0) < collected.get(target, 0):
-            outcomes[target] = {"incomplete": {"exit": 1}}
-    skipped_dict = {target: [PLATFORM] for target in (skipped & targets)}
+    outcomes, skipped_dict = _outcomes_and_skipped(targets)
     out = core.write_raw_v2(
         os.path.abspath(OUT_DIR),
         map_prefix(),

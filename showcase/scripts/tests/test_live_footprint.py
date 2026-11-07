@@ -38,21 +38,22 @@ class ChildRecorderProvenanceTest(unittest.TestCase):
         current = core.Footprint.load({"recorders": ["enact-trace/2"]}, native=True)
         merged = core.Footprint.load(old.copy().dump())
         merged.update(current)
-        entry = merged.entry(0, {})
-        self.assertEqual(set(entry["recorders"]), {core.RECORDER, "enact-trace/1", "enact-trace/2", "custom/7"})
-        self.assertIn("child.txt", entry["files"])
+        entry = core._raw_target_v2(merged)
+        self.assertEqual(set(entry["recorders"]), {"enact-trace/1", "enact-trace/2", "custom/7"})
+        self.assertIn("child.txt", entry["reads"])
         self.assertFalse(merged.opaque)
 
     def test_a_legacy_native_record_without_provenance_is_incomplete(self):
         child = core.Footprint.load({"reads": ["child.txt"]}, native=True)
         self.assertTrue(any("kernel recorder provenance" in why for why in child.opaque))
-        self.assertIn("child.txt", child.entry(0, {})["files"])
-        self.assertNotIn("enact-trace/2", child.entry(0, {})["recorders"])
+        entry = core._raw_target_v2(child)
+        self.assertIn("child.txt", entry["reads"])
+        self.assertNotIn("enact-trace/2", entry.get("recorders", ()))
 
     def test_python_children_do_not_invent_native_coverage(self):
         child = core.Footprint.load({"reads": ["python.txt"]})
         self.assertFalse(child.opaque)
-        self.assertEqual(child.entry(0, {})["recorders"], [core.RECORDER])
+        self.assertNotIn("recorders", core._raw_target_v2(child))
 
     def test_socket_connect_attributes_loopback_services_and_emits_target_service_deps(self):
         fp = core.footprints.setdefault("api/test_db.py", core.Footprint())
@@ -68,15 +69,9 @@ class ChildRecorderProvenanceTest(unittest.TestCase):
         finally:
             core.current = prev
         self.assertEqual(fp.services, {"postgres", "redis", "kafka"})
-        entry = fp.entry(0, {}, shared=core.shared)
+        entry = core._raw_target_v2(fp, is_shared=False)
         self.assertEqual(entry.get("duration_ms"), 250)
         with tempfile.TemporaryDirectory() as tmp:
-            path = core.write_map(tmp, "svc-", {}, {"api/test_db.py": entry})
-            written = json.loads(Path(path).read_text())
-            self.assertEqual(
-                written.get("target_service_deps"),
-                {"api/test_db.py": ["kafka", "postgres", "redis"]},
-            )
             v2_path = core.write_raw_v2(tmp, "v2-")
             raw_v2 = json.loads(Path(v2_path).read_text())
             self.assertEqual(raw_v2.get("version"), 2)

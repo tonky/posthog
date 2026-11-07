@@ -35,9 +35,10 @@ rust_e2e_test=nodejs/tests/service-e2e/rust-ingestion-consumer.serial.test.ts
 if [ "${1:-}" = "--rust-ingestion-e2e" ]; then
     suite=rust-ingestion-e2e
     shift
-    # Its one test, given relative to the caller's directory (nodejs/, as enact does).
+    # Its one test, passed either relative to the caller's directory (nodejs/) or repo root.
     for target in "$@"; do
-        dir="$(cd "$caller" && cd "$(dirname "$target")" 2>/dev/null && pwd -P)" || dir=""
+        dir="$(cd "$caller" && cd "$(dirname "$target")" 2>/dev/null && pwd -P)" ||
+            dir="$(cd "$(dirname "$target")" 2>/dev/null && pwd -P)" || dir=""
         [ "${dir#"$(pwd -P)"/}/$(basename "$target")" = "$rust_e2e_test" ] || {
             echo "✗ run_nodejs_tests.sh: --rust-ingestion-e2e runs $rust_e2e_test, not $target" >&2
             exit 64
@@ -346,8 +347,12 @@ log="$PWD/.enact/state/nodejs/$instance.services.log"
 mkdir -p "$(dirname "$log")"
 echo "[$shard] jest in service instance $instance (its services' log: $log)" >&2
 status=0
+isolation_flag=()
+if [ "${ENACT_NO_ISOLATE:-}" = 1 ] || [ "${ENACT_NO_ISOLATE:-}" = true ] || [ -n "${ENACT_SERVICES_ACTIVE:-}" ]; then
+    isolation_flag=(--isolation=host)
+fi
 NODEJS_SHARD_INSTANCE="$instance" NODEJS_LANES="$lanes" NODEJS_SUITE="$suite" \
-    enve run --locked --instance "$instance" --wait=10m --no-deps --with-services=postgres,redis,clickhouse,kafka,seaweedfs,seaweedfs-open,valkey-cluster,dynamodb,maildev \
+    enve run --locked ${isolation_flag[@]+"${isolation_flag[@]}"} --instance "$instance" --wait=10m --no-deps --with-services=postgres,redis,clickhouse,kafka,seaweedfs,seaweedfs-open,valkey-cluster,dynamodb,maildev \
     -- bash showcase/scripts/run_nodejs_tests.sh "$@" 3>&1 4>&2 >"$log" 2>&1 || status=$?
 if [ "$status" -ne 0 ]; then
     echo "[$shard] failed ($status); complete instance $instance service log: $log" >&2

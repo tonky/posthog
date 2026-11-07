@@ -108,7 +108,9 @@ def runs(targets: list[str]) -> list[tuple[str, str, list[str]]]:
 
 
 def main() -> None:
-    for group, directory, args in runs(sys.argv[1:]):
+    raw = sys.argv[1:]
+    targets = [line.strip() for line in sys.stdin if line.strip()] if raw == ["-"] else raw
+    for group, directory, args in runs(targets):
         print(f"{group}\t{directory}\t{shlex.join(args)}")
 
 

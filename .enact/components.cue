@@ -165,10 +165,10 @@ _harness: {
 }
 
 _pytestRunTask: {
-	command:          string | *"bash showcase/scripts/run_sharded_pytest.sh {targets}"
+	command:          string | *"bash showcase/scripts/run_sharded_pytest.sh @{targets_file}"
 	timeout:          "90m"
 	error_exit_codes: _pytestErrors
-	services:         _pytestSetupServices
+	services:         [...string] | *_pytestSetupServices
 }
 
 _djangoSuite: {
@@ -221,7 +221,7 @@ pipeline: schema.#Pipeline & {
 			".agents/**", "**/.claude/**", ".codex/**", ".cursor/**", ".cursorignore", ".cursorrules",
 			".posthog-code/**", ".mcp.json", ".coderabbit.yaml", "**/.greptile/**",
 			".interface-design/**", ".config/**", "**/.editorconfig", ".envrc", ".easignore",
-			".flox/**", ".git-blame-ignore-revs", ".github/ISSUE_TEMPLATE/**", ".husky/**",
+			".flox/**", ".git-blame-ignore-revs", ".github/ISSUE_TEMPLATE/**", ".github/upstream-workflows/**", ".husky/**",
 			".idea/**", ".run/**", ".trunk/**", "**/.vscode/**", ".watchmanconfig",
 			".worktreeinclude", ".worktreelink", ".zed/**",
 		]
@@ -452,7 +452,7 @@ pipeline: schema.#Pipeline & {
 				tests: [for f in _pytestFiles {"products/*/backend/**/\(f)"}]
 			}
 			test: _pytestRunTask & {
-				command: "showcase/scripts/build_once.sh canvas-builder-deps products/canvas/packages/canvas_builder/node_modules/.enact-build-key products/canvas/packages/canvas_builder/package.json products/canvas/packages/canvas_builder/package-lock.json -- npm ci --ignore-scripts --omit=dev --no-audit --no-fund --prefix products/canvas/packages/canvas_builder && bash showcase/scripts/run_sharded_pytest.sh {targets}"
+				command: "showcase/scripts/build_once.sh canvas-builder-deps products/canvas/packages/canvas_builder/node_modules/.enact-build-key products/canvas/packages/canvas_builder/package.json products/canvas/packages/canvas_builder/package-lock.json -- npm ci --ignore-scripts --omit=dev --no-audit --no-fund --prefix products/canvas/packages/canvas_builder && bash showcase/scripts/run_sharded_pytest.sh @{targets_file}"
 			}
 			uses: _backendServices
 		}
@@ -474,7 +474,12 @@ pipeline: schema.#Pipeline & {
 				}]
 			}
 			shards:    3
-			resources: {cpus: 0.75, memory_mb: 2048}
+			resources: {cpus: 0.75, memory_mb: 1360}
+			resource_forecast: {
+				mode: "bounded"
+				min: {cpus: 0.75, memory_mb: 1024}
+				max: {cpus: 2.0, memory_mb: 4096}
+			}
 			scoping: {
 				domain_roots:    ["posthog", "products"]
 				service_markers: ["django_db", "BaseTest", "ClickhouseTestMixin", "posthog.test"]
@@ -490,7 +495,7 @@ pipeline: schema.#Pipeline & {
 				tests: [for root in ["posthog/dags", "products/*/dags"] for f in _pytestFiles {"\(root)/**/\(f)"}]
 			}
 			record_resources: resources
-			test:             _pytestRunTask
+			test:             _pytestRunTask & {services: ["postgres", "clickhouse"]}
 			uses: [
 				{protocol: schema.#Protocol.Sql, target: pipeline.services.postgres, title: "Reads & writes app metadata"},
 				{protocol: schema.#Protocol.Redis, target: pipeline.services.redis, title: "Caches sessions & flags"},
@@ -1053,7 +1058,7 @@ pipeline: schema.#Pipeline & {
 					fallback: "all"
 					tests:    ["playwright/e2e/**/*.spec.ts", "products/*/frontend/e2e/**/*.spec.ts"]
 					rules: [
-						{match: ["posthog/dags/**", "products/*/dags/**"], action: "ignore"},
+						{match: ["posthog/dags/**", "products/*/dags/**", "frontend/snapshots.yml", "playwright/snapshots.yml"], action: "ignore"},
 						{
 							match: [
 								"playwright/**/*.ts", "products/*/frontend/e2e/**/*.ts",

@@ -4,7 +4,6 @@ import "list"
 
 _storybookTestJob: {
 	needs:     ["build"]
-	recorder:  "own"
 	resources: {cpus: 2.0, memory_mb: 4096}
 	_args:     string | *""
 	tasks: [
@@ -25,6 +24,31 @@ pipeline: components: {
 			"common/storybook/.storybook/plugins/vite-enact-chunks-plugin.ts",
 			"showcase/scripts/run_storybook_tests.sh",
 			"showcase/scripts/storybook_footprint.mjs",
+		]
+	}
+	_scope: {
+		fallback: "all"
+		tests: [
+			"frontend/src/**/*.stories.{js,jsx,ts,tsx}",
+			"products/**/frontend/**/*.stories.{js,jsx,ts,tsx}",
+			"products/**/mcp/apps/**/*.stories.{js,jsx,ts,tsx}",
+			"services/mcp/src/ui-apps/**/*.stories.{js,jsx,ts,tsx}",
+			"packages/quill/packages/charts/src/**/*.stories.{js,jsx,ts,tsx}",
+		]
+		rules: [
+			{
+				match: [
+					"frontend/**/*.{ts,tsx,js,jsx,mjs}", "products/**/*.{ts,tsx,js,jsx,mjs}",
+					"ee/frontend/**/*.{ts,tsx,js,jsx}", "services/mcp/src/ui-apps/**/*.{ts,tsx}",
+					"packages/quill/**/*.{ts,tsx}",
+				]
+				engine:      "typescript"
+				granularity: "file"
+			},
+			{
+				match:  ["frontend/snapshots.yml", "common/hogvm/typescript/src/**/*.test.ts", "common/hogvm/typescript/src/**/__tests__/**"]
+				action: "ignore"
+			},
 		]
 	}
 	"storybook": {
@@ -74,33 +98,14 @@ pipeline: components: {
 				}
 				tasks: [{name: "Build Storybook", command: "showcase/scripts/run_storybook_tests.sh --build", timeout: "30m"}]
 			}
-			test:   _storybookTestJob & {name: "Test", shards: 16}
-			webkit: _storybookTestJob & {name: "WebKit", shards: 4, _args: "--browser webkit "}
+			test:   _storybookTestJob & {name: "Test", shards: 16, recorder: "own"}
+			webkit: _storybookTestJob & {
+				name:         "WebKit"
+				shards:       4
+				_args:        "--browser webkit "
+				target_scope: _scope & {footprints_from: "storybook:test"}
+			}
 		}
-		target_scope: {
-			fallback: "all"
-			tests: [
-				"frontend/src/**/*.stories.{js,jsx,ts,tsx}",
-				"products/**/frontend/**/*.stories.{js,jsx,ts,tsx}",
-				"products/**/mcp/apps/**/*.stories.{js,jsx,ts,tsx}",
-				"services/mcp/src/ui-apps/**/*.stories.{js,jsx,ts,tsx}",
-				"packages/quill/packages/charts/src/**/*.stories.{js,jsx,ts,tsx}",
-			]
-			rules: [
-				{
-					match: [
-						"frontend/**/*.{ts,tsx,js,jsx,mjs}", "products/**/*.{ts,tsx,js,jsx,mjs}",
-						"ee/frontend/**/*.{ts,tsx,js,jsx}", "services/mcp/src/ui-apps/**/*.{ts,tsx}",
-						"packages/quill/**/*.{ts,tsx}",
-					]
-					engine:      "typescript"
-					granularity: "file"
-				},
-				{
-					match:  ["frontend/snapshots.yml", "common/hogvm/typescript/src/**/*.test.ts", "common/hogvm/typescript/src/**/__tests__/**"]
-					action: "ignore"
-				},
-			]
-		}
+		target_scope: _scope
 	}
 }

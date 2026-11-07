@@ -118,7 +118,7 @@ class ProductRunsTest(unittest.TestCase):
         self.assertTrue(
             alpha.startswith(
                 "pytest -p pytest_timings -p pytest_snapshot_worker -p pytest_fail_early"
-                " -p pytest_unmarked_db_setup -o pythonhashseed=0 "
+                " -p pytest_unmarked_db_setup -p pytest_query_tags -o pythonhashseed=0 "
             ),
             alpha,
         )
@@ -277,10 +277,29 @@ class ProductRunsTest(unittest.TestCase):
         # It once printed "Skipping pytest" and passed: a whole-suite call with no targets
         # (or an empty targets file) passed without running a test.
         self.write("targets.txt", "\n")
-        for targets in ((), ("",), ("@targets.txt",)):
+        for targets in ((), ("",), ("@",), ("@missing.txt",), ("@targets.txt",)):
             code, runs = self.run_shard(*targets)
             self.assertEqual(1, code, targets)
             self.assertEqual([], runs, targets)
+
+    def test_argfile_with_ten_thousand_product_targets_avoids_e2big(self) -> None:
+        # ~1.3 MB of target ids across 40 products exceeds macOS's 1 MiB ARG_MAX if passed on
+        # `run_sharded_pytest.sh` or `product_pytest.py` argv (ISSUES S55).
+        lines = []
+        for idx in range(40):
+            prod = f"prod_{idx:02d}"
+            self.write(f"products/{prod}/package.json", json.dumps({"scripts": {"backend:test": "pytest backend -v"}}))
+            for t in range(250):
+                lines.append(
+                    f"products/{prod}/backend/hogql_queries/tests/test_runner_case_{t:04d}.py"
+                    f"::TestProductQueryExecutionSuite::test_executes_parameterized_case_{t:04d}"
+                )
+        payload = "\n".join(lines) + "\n"
+        self.assertGreater(len(payload), 1_200_000)
+        self.write("large-targets.txt", payload)
+        code, runs = self.run_shard("@large-targets.txt")
+        self.assertEqual(0, code)
+        self.assertEqual(40, len(runs))
 
 
 if __name__ == "__main__":

@@ -111,7 +111,7 @@ pipeline: schema.#Pipeline & {
 			labels:          ["rerun", "showcase"]
 			branch_prefixes: ["showcase/"]
 		}
-		concurrency: max_parallel_jobs: 16
+		concurrency: max_parallel_jobs: 24
 		kept_workflows: [
 			".github/workflows/cd-sandbox-base-image.yml", ".github/workflows/ci-backend.yml",
 			".github/workflows/ci-python.yml", ".github/workflows/ci-security.yaml",
@@ -119,13 +119,21 @@ pipeline: schema.#Pipeline & {
 		]
 		remote_cache: {
 			secrets: {bucket: "R2_BUCKET", access_key_id: "R2_ACCESS_KEY_ID", secret_access_key: "R2_SECRET_ACCESS_KEY"}
-			public_url: "https://pub-30fd937eb7634039b8c49d49bfec91a9.r2.dev"
+			public_url: "https://cache.tonky.dev"
 			public_key: "enve-r2-1:ckHPTeWVef6mba+1AwWHjKYCsUWKPfP9IXPm5YXNoHg="
 			repo:       "tonky/posthog"
 			branch:     "perf/ci-showcase"
 		}
 		budget: {enforce: true, untraced_tests: 10, wall_minutes: 30}
 		workers: {
+			github: {
+				// Standard public capacity; one declared image shares the account quota.
+				preset: "github-public", labels: ["ubuntu-24.04"]
+				tier: "on_demand", available: 20, cost_per_min: 0
+				// Calibrated from measured ~80s cold preparation on ubuntu-24.04.
+				setup_overhead_sec: 80
+				timeout_minutes: 90
+			}
 			"mac1": {
 				labels:          ["self-hosted", "Linux", "ARM64", "tonky-ci", "mac1"]
 				host_id:         "mac1"
@@ -170,18 +178,18 @@ pipeline: schema.#Pipeline & {
 				}
 			}
 			l7: {
-				// A second X64 host (8c/14G), limited to 4c/8G allocations.
+				// A second X64 host (16t, ~13 GiB free), up to 6c/13G allocations when idle.
 				// A gate lane holding l7 drains its dispatcher to zero.
 				labels: ["self-hosted", "Linux", "X64", "tonky-ci"], host_id: "l7", tier: "dedicated", available: 1, cost_per_min: 0.006, timeout_minutes: 90
 				pool: {
-					cpus: 8, memory_mb: 12288
+					cpus: 16, memory_mb: 13312
 					quantization: {
 						label_prefix:       "tonky-ci"
 						cpu_step:           1
 						memory_step_mb:     1024
 						runtime_reserve_mb: 2048
 						min: {cpus: 1, memory_mb: 4096}
-						max: {cpus: 4, memory_mb: 8192}
+						max: {cpus: 6, memory_mb: 13312}
 						control: {cpus: 2, memory_mb: 4096}
 					}
 				}
@@ -190,7 +198,12 @@ pipeline: schema.#Pipeline & {
 	}
 
 	workflows: {
-		ci:    {layout: "staged", services: "on_demand", stages: [_preflightStage & {runner: "mac1"}, _testStage]}
+		ci: {
+			layout:      "staged"
+			services:    "on_demand"
+			concurrency: {scope: "branch", cancel_in_progress: true}
+			stages:      [_preflightStage, _testStage]
+		}
 		local: {layout: "staged", services: "on_demand", stages: [_preflightStage, _testStage]}
 	}
 }

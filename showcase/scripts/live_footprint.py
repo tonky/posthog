@@ -371,10 +371,52 @@ def map_built(fp: core.Footprint, frontend: Frontend) -> None:
             fp.reads.update(sources)
 
 
+def _collapse_probes(fp: core.Footprint) -> None:
+    kinds: dict[str, str | None] = {}
+    parents: dict[str, str | None] = {}
+    collapsed: set[str] = set()
+    for probe in fp.probes:
+        parent, sep, _ = probe.rpartition("/")
+        if not sep:
+            collapsed.add(probe)
+            continue
+        if parent not in parents:
+            found = None
+            parts = parent.split("/")
+            for i in range(1, len(parts) + 1):
+                prefix = "/".join(parts[:i])
+                kind = kinds.get(prefix, False)
+                if kind is False:
+                    kind = kinds.setdefault(prefix, core._kind(core.root + prefix) or "missing")
+                if kind in ("missing", "file"):
+                    found = prefix
+                    break
+            parents[parent] = found
+        collapsed.add(parents[parent] or probe)
+    fp.probes = collapsed
+
+
 def entry(fp: core.Footprint, shared: core.Footprint | None = None) -> dict:
-    fp.collapse_probes({})
-    result = fp.entry(0, {}, (), shared)
-    result["recorders"] = sorted(set(result["recorders"]) | {RECORDER})
+    fp.flush_codes()
+    _collapse_probes(fp)
+    files = set(fp.code) | fp.reads | fp.present
+    functions = {
+        file: sorted(called)
+        for file, called in sorted(fp.code.items())
+        if file not in fp.reads and (shared is None or file not in shared.reads)
+    }
+    probes = fp.probes - files - (set(shared.code) | shared.reads | shared.present if shared else set())
+    result = {
+        "files": sorted(files),
+        "functions": functions,
+        "probes": core._grouped(probes),
+        "dirs": sorted(fp.dirs),
+        "loaded_through": 0,
+        "loaded": sorted(fp.loaded),
+        "recorders": sorted(fp.recorders | {core.RECORDER, RECORDER}),
+    }
+    if shared is not None and fp.duration_sec > 0.0:
+        result["duration_ms"] = max(1, round(fp.duration_sec * 1000))
     return result
 
 

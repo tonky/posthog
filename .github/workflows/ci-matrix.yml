@@ -15,17 +15,18 @@ on:
       warm_reach:
         type: string
         required: false
+permissions:
+  contents: read
 env:
   ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: "true"
   CARGO_INCREMENTAL: "0"
   COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
-  ENACT_OUTPUTS_PRODUCERS: "{\"frontend--build\":{\"job\":\"frontend:build\",\"paths\":\"frontend/dist\\n.enact/state/outputs/frontend--build.key\"},\"mcp--ui_apps\":{\"job\":\"mcp:ui_apps\",\"paths\":\"services/mcp/public/ui-apps\\n.enact/state/outputs/mcp--ui_apps.key\"},\"quill--build\":{\"job\":\"quill:build\",\"paths\":\"packages/quill/packages/quill/dist\\npackages/quill/packages/tokens/dist\\npackages/quill/packages/primitives/dist\\npackages/quill/packages/components/dist\\npackages/quill/packages/charts/dist\\npackages/quill/packages/blocks/dist\\npackages/quill/packages/quill/dist/.enact-build-key\\n.enact/state/outputs/quill--build.key\"},\"storybook--build\":{\"job\":\"storybook:build\",\"paths\":\"common/storybook/dist\\ncommon/hogvm/typescript/dist\\nfrontend/.cache/products.hash\\n.enact/state/outputs/storybook--build.key\"}}"
   ENACT_REMOTE_SAVE_EVENT: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
   ENACT_SAVE_EVENT: ${{ github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' }}
   ENVE_CACHE_PUBLIC_KEY: enve-r2-1:ckHPTeWVef6mba+1AwWHjKYCsUWKPfP9IXPm5YXNoHg=
   ENVE_SERVICE_GID: "1000"
   ENVE_SERVICE_UID: "1000"
-  ENVE_SUBSTITUTERS: https://pub-30fd937eb7634039b8c49d49bfec91a9.r2.dev,https://cache.nixos.org
+  ENVE_SUBSTITUTERS: https://cache.tonky.dev,https://cache.nixos.org
   ENVE_TRUSTED_PUBLIC_KEYS: enve-r2-1:ckHPTeWVef6mba+1AwWHjKYCsUWKPfP9IXPm5YXNoHg=
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
   GOCACHE: /tmp/go-build
@@ -36,11 +37,15 @@ jobs:
   entry:
     name: ${{ matrix.component }}${{ matrix.env.ENACT_SCHEDULING_HINT }}
     env:
+      ENACT_ENVIRONMENT_FILE: ${{ matrix.environment_file || '' }}
       ENACT_OBSERVATIONS_ENABLED: "1"
+    permissions:
+      actions: read
+      contents: read
     if: ${{ inputs.matrix != '{"include":[]}' && inputs.matrix != '[]' && inputs.matrix != '' }}
     strategy:
       fail-fast: false
-      max-parallel: 16
+      max-parallel: 24
       matrix: ${{ fromJson(inputs.matrix) }}
     runs-on: ${{ matrix.runs_on }}
     timeout-minutes: 90
@@ -62,56 +67,19 @@ jobs:
         echo "ENACT_HOST_CACHE=$host" >> "$GITHUB_ENV"
         printf 'host=%s\n' "$host" >> "$GITHUB_OUTPUT"
         printf 'Host cache: %s\n' "${host:-none}"
-    - name: Look Up Built Outputs in the Host Cache
-      id: outputs-host-lookup
-      if: ${{ steps.runner_caches.outputs.host != '' && matrix.output_key != '' }}
-      continue-on-error: true
-      run: |
-        set -euo pipefail
-        store="${ENACT_OUTPUTS_CACHE:-}"
-        entry="$store/${GITHUB_REPOSITORY:-repo}/$ENACT_OUTPUTS_KEY"
-        hit=false
-        if [ -n "$store" ] && [ -f "$entry/.enact-ready" ]; then
-            hit=true
-            while IFS= read -r pattern; do
-                [ -n "$pattern" ] || continue
-                # shellcheck disable=SC2086 # glob pattern from outputs.paths
-                for src in "$entry"/$pattern; do
-                    [ -e "$src" ] || [ -L "$src" ] || { hit=false; break 2; }
-                done
-            done <<<"$ENACT_OUTPUTS_PATHS"
-        fi
-        if [ "$hit" = true ]; then
-            touch "$entry/.enact-ready" 2>/dev/null || true
-        fi
-        printf 'cache-hit=%s\n' "$hit" >> "$GITHUB_OUTPUT"
-      env:
-        ENACT_OUTPUTS_KEY: enact-outputs-${{ matrix.output_slug }}-${{ runner.os }}-${{ runner.arch }}-${{ matrix.output_key }}
-        ENACT_OUTPUTS_PATHS: ${{ matrix.output_paths }}
-    - name: Look Up Built Outputs
-      id: outputs-lookup
-      if: ${{ matrix.output_key != '' }}
-      continue-on-error: true
-      uses: actions/cache/restore@v6
-      with:
-        key: enact-outputs-${{ matrix.output_slug }}-${{ runner.os }}-${{ runner.arch }}-${{ matrix.output_key }}
-        lookup-only: "true"
-        path: ${{ matrix.output_paths }}
-    - name: Skip on Built Outputs Found
-      id: skip
-      if: ${{ matrix.output_key != '' }}
-      run: "[ \"$HIT\" != true ] || echo hit=true >> \"$GITHUB_OUTPUT\""
-      env:
-        HIT: ${{ steps.outputs-host-lookup.outputs.cache-hit == 'true' || steps.outputs-lookup.outputs.cache-hit == 'true' }}
     - name: Checkout Repository (sparse) from the Host Mirror
       id: host_checkout
-      if: ${{ (steps.runner_caches.outputs.host != '') && !steps.skip.outputs.hit }}
+      if: ${{ steps.runner_caches.outputs.host != '' }}
       continue-on-error: true
       run: |
         set -euo pipefail
-        git config --global --add safe.directory "*"
         url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY"
         mirror="$ENACT_GIT_MIRROR"
+        export GIT_CONFIG_COUNT=2
+        export GIT_CONFIG_KEY_0=safe.directory
+        export GIT_CONFIG_VALUE_0="$GITHUB_WORKSPACE"
+        export GIT_CONFIG_KEY_1=safe.directory
+        export GIT_CONFIG_VALUE_1="$mirror"
         header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$ENACT_GIT_TOKEN" | base64 | tr -d '\n')"
         refs=("+refs/heads/*:refs/heads/*")
         case "$GITHUB_REF" in
@@ -160,7 +128,7 @@ jobs:
         ENACT_GIT_TOKEN: ${{ github.token }}
         ENACT_SPARSE_CONE: ${{ matrix.sparse_checkout }}
     - name: Checkout Repository (sparse)
-      if: ${{ (matrix.sparse_checkout != '' && (steps.runner_caches.outputs.host == '' || steps.host_checkout.outcome == 'failure')) && !steps.skip.outputs.hit }}
+      if: ${{ matrix.sparse_checkout != '' && (steps.runner_caches.outputs.host == '' || steps.host_checkout.outcome == 'failure') }}
       uses: actions/checkout@v7
       with:
         fetch-depth: "1"
@@ -171,7 +139,7 @@ jobs:
         sparse-checkout-cone-mode: "true"
         submodules: "false"
     - name: Checkout Repository (full)
-      if: ${{ (matrix.sparse_checkout == '' && (steps.runner_caches.outputs.host == '' || steps.host_checkout.outcome == 'failure')) && !steps.skip.outputs.hit }}
+      if: ${{ matrix.sparse_checkout == '' && (steps.runner_caches.outputs.host == '' || steps.host_checkout.outcome == 'failure') }}
       uses: actions/checkout@v7
       with:
         fetch-depth: "1"
@@ -180,7 +148,6 @@ jobs:
         show-progress: "false"
         submodules: "false"
     - name: Install committed enact & enve builds
-      if: ${{ !steps.skip.outputs.hit }}
       run: |
         P="$(uname -s | tr '[:upper:]' '[:lower:]' | sed 's/^darwin$/macos/')-$(uname -m | sed 's/^arm64$/aarch64/')"
         E="${GITHUB_WORKSPACE:-$PWD}/bin/$P/enact"
@@ -189,32 +156,106 @@ jobs:
         chmod +x "$E" 2>/dev/null || true
         "$E" --version >/dev/null 2>&1 || { echo "::error title=No enact for $P::$E does not run on this $P runner; commit its build as bin/$P/enact"; exit 1; }
         "$E" ci install-binaries
+    - name: Look Up Built Outputs in the Host Cache
+      id: outputs-host-lookup
+      if: ${{ steps.runner_caches.outputs.host != '' && matrix.output_key != '' }}
+      continue-on-error: true
+      run: |
+        set -euo pipefail
+        store="${ENACT_OUTPUTS_CACHE:-}"
+        entry="$store/${GITHUB_REPOSITORY:-repo}/$ENACT_OUTPUTS_KEY"
+        hit=false
+        if [ -n "$store" ] && [ -f "$entry/.enact-ready" ] && \
+            ENACT_OUTPUTS_VERIFY_ROOT="$entry" "${ENACT_OUTPUTS_VERIFIER:-enact}" ci host-outputs verify >/dev/null 2>&1; then
+            hit=true
+            while IFS= read -r pattern; do
+                [ -n "$pattern" ] || continue
+                # shellcheck disable=SC2086 # glob pattern from outputs.paths
+                for src in "$entry"/$pattern; do
+                    [ -e "$src" ] || [ -L "$src" ] || { hit=false; break 2; }
+                done
+            done <<<"$ENACT_OUTPUTS_PATHS"
+        fi
+        if [ "$hit" = true ]; then
+            touch "$entry/.enact-ready" 2>/dev/null || true
+        fi
+        printf 'cache-hit=%s\n' "$hit" >> "$GITHUB_OUTPUT"
+      env:
+        ENACT_OUTPUTS_KEY: enact-outputs-${{ matrix.output_slug }}-${{ runner.os }}-${{ runner.arch }}-${{ matrix.output_key }}
+        ENACT_OUTPUTS_PATHS: ${{ matrix.output_paths }}
+    - name: Look Up Built Outputs
+      id: outputs-lookup
+      if: ${{ matrix.output_key != '' }}
+      continue-on-error: true
+      uses: actions/cache/restore@v6
+      with:
+        key: enact-outputs-${{ matrix.output_slug }}-${{ runner.os }}-${{ runner.arch }}-${{ matrix.output_key }}
+        lookup-only: "true"
+        path: ${{ matrix.output_paths }}
+    - name: Skip on Built Outputs Found
+      id: skip
+      if: ${{ matrix.output_key != '' }}
+      run: "[ \"$HIT\" != true ] || echo hit=true >> \"$GITHUB_OUTPUT\""
+      env:
+        HIT: ${{ steps.outputs-host-lookup.outputs.cache-hit == 'true' || steps.outputs-lookup.outputs.cache-hit == 'true' }}
     - name: Ensure enve & enact CLI on PATH
+      id: setup-runner
       if: ${{ !steps.skip.outputs.hit }}
       run: enact ci setup-runner
+    - name: Recover Built Outputs with the Installed CLI
+      id: outputs-host-recover
+      if: ${{ success() && steps.runner_caches.outputs.host != '' && !steps.skip.outputs.hit && matrix.output_key != '' }}
+      continue-on-error: true
+      run: enact ci host-outputs restore-build
+      env:
+        ENACT_OUTPUTS_KEY: enact-outputs-${{ matrix.output_slug }}-${{ runner.os }}-${{ runner.arch }}-${{ matrix.output_key }}
+        ENACT_OUTPUTS_PATHS: ${{ matrix.output_paths }}
+    - name: Restore history Handoff
+      id: history-host
+      if: ${{ !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
+      continue-on-error: true
+      run: enact ci handoff history --artifact "$ENACT_HANDOFF_ARTIFACT" --directory "$RUNNER_TEMP/enact-history-input"
+      env:
+        ENACT_HANDOFF_ARTIFACT: ${{ inputs.history_input_artifact }}
+        GH_TOKEN: ${{ github.token }}
     - name: Download the Selected CI History
-      if: ${{ !steps.skip.outputs.hit }}
+      if: ${{ (steps.history-host.outputs.ready != 'true') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
       uses: actions/download-artifact@v8
       with:
         name: ${{ inputs.history_input_artifact }}
         path: ${{ runner.temp }}/enact-history-input
     - name: Import the Selected CI History
-      if: ${{ !steps.skip.outputs.hit }}
+      if: ${{ !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
       run: |-
         export ENACT_HISTORY_DIR="$RUNNER_TEMP/enact-history"
         printf 'ENACT_HISTORY_DIR=%s\n' "$ENACT_HISTORY_DIR" >> "$GITHUB_ENV"
         enact ci history import --input "$RUNNER_TEMP/enact-history-input/snapshot.json" --manifest "$RUNNER_TEMP/enact-history-input/snapshot.manifest.json" --output "$ENACT_HISTORY_DIR"
+    - name: Cache history Handoff on the Receiving Host
+      if: ${{ !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
+      continue-on-error: true
+      run: enact ci handoff history --publish --artifact "$ENACT_HANDOFF_ARTIFACT" --directory "$RUNNER_TEMP/enact-history-input"
+      env:
+        ENACT_HANDOFF_ARTIFACT: ${{ inputs.history_input_artifact }}
+    - name: Write the Build Outputs Producers
+      if: ${{ (toJson(matrix.output_keys) != 'null') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
+      run: |-
+        cat > "$ENACT_OUTPUTS_PRODUCERS_FILE" <<'PRODUCERS_JSON'
+        {"frontend--build":{"job":"frontend:build","paths":"frontend/dist\n.enact/state/outputs/frontend--build.key\n.enact/state/outputs/frontend--build.manifest-v1.json"},"mcp--ui_apps":{"job":"mcp:ui_apps","paths":"services/mcp/public/ui-apps\n.enact/state/outputs/mcp--ui_apps.key\n.enact/state/outputs/mcp--ui_apps.manifest-v1.json"},"quill--build":{"job":"quill:build","paths":"packages/quill/packages/quill/dist\npackages/quill/packages/tokens/dist\npackages/quill/packages/primitives/dist\npackages/quill/packages/components/dist\npackages/quill/packages/charts/dist\npackages/quill/packages/blocks/dist\npackages/quill/packages/quill/dist/.enact-build-key\n.enact/state/outputs/quill--build.key\n.enact/state/outputs/quill--build.manifest-v1.json"},"storybook--build":{"job":"storybook:build","paths":"common/storybook/dist\ncommon/hogvm/typescript/dist\nfrontend/.cache/products.hash\n.enact/state/outputs/storybook--build.key\n.enact/state/outputs/storybook--build.manifest-v1.json"}}
+        PRODUCERS_JSON
+      env:
+        ENACT_OUTPUTS_PRODUCERS_FILE: ${{ runner.temp }}/enact-outputs-producers.json
     - name: Restore Built Outputs from the Host Cache
       id: outputs-host
-      if: ${{ (steps.runner_caches.outputs.host != '' && toJson(matrix.output_keys) != 'null') && !steps.skip.outputs.hit }}
+      if: ${{ (steps.runner_caches.outputs.host != '' && toJson(matrix.output_keys) != 'null') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
       continue-on-error: true
       run: enact ci host-outputs restore
       env:
         ENACT_OUTPUTS_NEEDED: ${{ toJson(matrix.output_keys) }}
         ENACT_OUTPUTS_PLATFORM: ${{ runner.os }}-${{ runner.arch }}
+        ENACT_OUTPUTS_PRODUCERS_FILE: ${{ runner.temp }}/enact-outputs-producers.json
     - name: Restore Built Outputs (frontend:build)
       id: outputs-frontend--build
-      if: ${{ (matrix.output_keys['frontend--build'] != '' && steps.outputs-host.outputs['frontend--build'] != 'true') && !steps.skip.outputs.hit }}
+      if: ${{ (matrix.output_keys['frontend--build'] != '' && steps.outputs-host.outputs['frontend--build'] != 'true') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
       continue-on-error: true
       uses: actions/cache/restore@v6
       with:
@@ -222,9 +263,10 @@ jobs:
         path: |-
           frontend/dist
           .enact/state/outputs/frontend--build.key
+          .enact/state/outputs/frontend--build.manifest-v1.json
     - name: Restore Built Outputs (mcp:ui_apps)
       id: outputs-mcp--ui_apps
-      if: ${{ (matrix.output_keys['mcp--ui_apps'] != '' && steps.outputs-host.outputs['mcp--ui_apps'] != 'true') && !steps.skip.outputs.hit }}
+      if: ${{ (matrix.output_keys['mcp--ui_apps'] != '' && steps.outputs-host.outputs['mcp--ui_apps'] != 'true') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
       continue-on-error: true
       uses: actions/cache/restore@v6
       with:
@@ -232,9 +274,10 @@ jobs:
         path: |-
           services/mcp/public/ui-apps
           .enact/state/outputs/mcp--ui_apps.key
+          .enact/state/outputs/mcp--ui_apps.manifest-v1.json
     - name: Restore Built Outputs (quill:build)
       id: outputs-quill--build
-      if: ${{ (matrix.output_keys['quill--build'] != '' && steps.outputs-host.outputs['quill--build'] != 'true') && !steps.skip.outputs.hit }}
+      if: ${{ (matrix.output_keys['quill--build'] != '' && steps.outputs-host.outputs['quill--build'] != 'true') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
       continue-on-error: true
       uses: actions/cache/restore@v6
       with:
@@ -248,9 +291,10 @@ jobs:
           packages/quill/packages/blocks/dist
           packages/quill/packages/quill/dist/.enact-build-key
           .enact/state/outputs/quill--build.key
+          .enact/state/outputs/quill--build.manifest-v1.json
     - name: Restore Built Outputs (storybook:build)
       id: outputs-storybook--build
-      if: ${{ (matrix.output_keys['storybook--build'] != '' && steps.outputs-host.outputs['storybook--build'] != 'true') && !steps.skip.outputs.hit }}
+      if: ${{ (matrix.output_keys['storybook--build'] != '' && steps.outputs-host.outputs['storybook--build'] != 'true') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
       continue-on-error: true
       uses: actions/cache/restore@v6
       with:
@@ -260,26 +304,19 @@ jobs:
           common/hogvm/typescript/dist
           frontend/.cache/products.hash
           .enact/state/outputs/storybook--build.key
+          .enact/state/outputs/storybook--build.manifest-v1.json
     - name: Require Built Outputs
-      if: ${{ (toJson(matrix.output_keys) != 'null') && !steps.skip.outputs.hit }}
+      if: ${{ (toJson(matrix.output_keys) != 'null') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
       run: enact ci host-outputs require
       env:
         ENACT_OUTPUTS_NEEDED: ${{ toJson(matrix.output_keys) }}
         ENACT_OUTPUTS_PLATFORM: ${{ runner.os }}-${{ runner.arch }}
+        ENACT_OUTPUTS_PRODUCERS_FILE: ${{ runner.temp }}/enact-outputs-producers.json
         ENACT_OUTPUTS_STEPS: ${{ toJson(steps) }}
     - parallel:
-      - name: Restore enact Task CAS Cache
-        id: enact-tasks-cache
-        if: ${{ !steps.skip.outputs.hit }}
-        continue-on-error: true
-        uses: actions/cache/restore@v6
-        with:
-          key: ${{ runner.os }}-enact-tasks-${{ github.sha }}
-          path: .enact/state/cache
-          restore-keys: ${{ runner.os }}-enact-tasks-
       - name: Restore Python build & venv cache
         id: python_l1_cache
-        if: ${{ (hashFiles('**/uv.lock', '**/pyproject.toml', '**/requirements.txt', '**/poetry.lock') != '' && contains(matrix.technology, 'python') && steps.runner_caches.outputs.host == '') && !steps.skip.outputs.hit }}
+        if: ${{ (contains(matrix.technology, 'python') && steps.runner_caches.outputs.host == '' && hashFiles('**/uv.lock', '**/pyproject.toml', '**/requirements.txt', '**/poetry.lock') != '') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
         continue-on-error: true
         uses: actions/cache/restore@v6
         with:
@@ -290,7 +327,7 @@ jobs:
           restore-keys: ${{ runner.os }}-python-
       - name: Restore Go build cache
         id: go_l1_cache
-        if: ${{ (hashFiles('**/go.mod', '**/go.sum') != '' && contains(matrix.technology, 'go') && steps.runner_caches.outputs.host == '') && !steps.skip.outputs.hit }}
+        if: ${{ (contains(matrix.technology, 'go') && steps.runner_caches.outputs.host == '' && hashFiles('**/go.mod', '**/go.sum') != '') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
         continue-on-error: true
         uses: actions/cache/restore@v6
         with:
@@ -303,7 +340,7 @@ jobs:
             ${{ runner.os }}-go-
       - name: Restore Rust target & cargo cache [cli/target]
         id: rust_l1_cache_cli_target
-        if: ${{ (hashFiles('cli/Cargo.lock', 'cli/**/Cargo.toml') != '' && contains(format(',{0},', matrix.cargo_targets), ',cli/target,') && steps.runner_caches.outputs.host == '') && !steps.skip.outputs.hit }}
+        if: ${{ (contains(format(',{0},', matrix.cargo_targets), ',cli/target,') && hashFiles('cli/Cargo.lock', 'cli/**/Cargo.toml') != '' && steps.runner_caches.outputs.host == '') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
         continue-on-error: true
         uses: actions/cache/restore@v6
         with:
@@ -317,7 +354,7 @@ jobs:
             ${{ runner.os }}-rust-cli_target-${{ hashFiles('enve.lock', 'cli/rust-toolchain.toml', 'cli/rust-toolchain', 'cli/enve.lock') }}-${{ matrix.cargo_cache }}-${{ hashFiles('cli/Cargo.lock', 'cli/**/Cargo.toml') }}-
             ${{ runner.os }}-rust-cli_target-${{ hashFiles('enve.lock', 'cli/rust-toolchain.toml', 'cli/rust-toolchain', 'cli/enve.lock') }}-${{ matrix.cargo_cache }}-
       - name: Restore Rust target & cargo cache [cli/target] from the Host Cache
-        if: ${{ (hashFiles('cli/Cargo.lock', 'cli/**/Cargo.toml') != '' && contains(format(',{0},', matrix.cargo_targets), ',cli/target,') && steps.runner_caches.outputs.host != '') && !steps.skip.outputs.hit }}
+        if: ${{ (contains(format(',{0},', matrix.cargo_targets), ',cli/target,') && hashFiles('cli/Cargo.lock', 'cli/**/Cargo.toml') != '' && steps.runner_caches.outputs.host != '') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
         continue-on-error: true
         run: |-
           src="$ENACT_HOST_CACHE/repo/cargo-target/$ENACT_RUST_HOST_KEY"
@@ -334,7 +371,7 @@ jobs:
           ENACT_RUST_TARGET: cli/target
       - name: Restore Rust target & cargo cache [funnel-udf/target]
         id: rust_l1_cache_funnel_udf_target
-        if: ${{ (hashFiles('funnel-udf/Cargo.lock', 'funnel-udf/**/Cargo.toml') != '' && contains(format(',{0},', matrix.cargo_targets), ',funnel-udf/target,') && steps.runner_caches.outputs.host == '') && !steps.skip.outputs.hit }}
+        if: ${{ (contains(format(',{0},', matrix.cargo_targets), ',funnel-udf/target,') && hashFiles('funnel-udf/Cargo.lock', 'funnel-udf/**/Cargo.toml') != '' && steps.runner_caches.outputs.host == '') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
         continue-on-error: true
         uses: actions/cache/restore@v6
         with:
@@ -348,7 +385,7 @@ jobs:
             ${{ runner.os }}-rust-funnel_udf_target-${{ hashFiles('enve.lock', 'funnel-udf/rust-toolchain.toml', 'funnel-udf/rust-toolchain', 'funnel-udf/enve.lock') }}-${{ matrix.cargo_cache }}-${{ hashFiles('funnel-udf/Cargo.lock', 'funnel-udf/**/Cargo.toml') }}-
             ${{ runner.os }}-rust-funnel_udf_target-${{ hashFiles('enve.lock', 'funnel-udf/rust-toolchain.toml', 'funnel-udf/rust-toolchain', 'funnel-udf/enve.lock') }}-${{ matrix.cargo_cache }}-
       - name: Restore Rust target & cargo cache [funnel-udf/target] from the Host Cache
-        if: ${{ (hashFiles('funnel-udf/Cargo.lock', 'funnel-udf/**/Cargo.toml') != '' && contains(format(',{0},', matrix.cargo_targets), ',funnel-udf/target,') && steps.runner_caches.outputs.host != '') && !steps.skip.outputs.hit }}
+        if: ${{ (contains(format(',{0},', matrix.cargo_targets), ',funnel-udf/target,') && hashFiles('funnel-udf/Cargo.lock', 'funnel-udf/**/Cargo.toml') != '' && steps.runner_caches.outputs.host != '') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
         continue-on-error: true
         run: |-
           src="$ENACT_HOST_CACHE/repo/cargo-target/$ENACT_RUST_HOST_KEY"
@@ -365,7 +402,7 @@ jobs:
           ENACT_RUST_TARGET: funnel-udf/target
       - name: Restore Rust target & cargo cache [rust/target]
         id: rust_l1_cache_rust_target
-        if: ${{ (hashFiles('rust/Cargo.lock', 'rust/**/Cargo.toml') != '' && contains(format(',{0},', matrix.cargo_targets), ',rust/target,') && steps.runner_caches.outputs.host == '') && !steps.skip.outputs.hit }}
+        if: ${{ (contains(format(',{0},', matrix.cargo_targets), ',rust/target,') && hashFiles('rust/Cargo.lock', 'rust/**/Cargo.toml') != '' && steps.runner_caches.outputs.host == '') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
         continue-on-error: true
         uses: actions/cache/restore@v6
         with:
@@ -379,7 +416,7 @@ jobs:
             ${{ runner.os }}-rust-rust_target-${{ hashFiles('enve.lock', 'rust/rust-toolchain.toml', 'rust/rust-toolchain', 'rust/enve.lock') }}-${{ matrix.cargo_cache }}-${{ hashFiles('rust/Cargo.lock', 'rust/**/Cargo.toml') }}-
             ${{ runner.os }}-rust-rust_target-${{ hashFiles('enve.lock', 'rust/rust-toolchain.toml', 'rust/rust-toolchain', 'rust/enve.lock') }}-${{ matrix.cargo_cache }}-
       - name: Restore Rust target & cargo cache [rust/target] from the Host Cache
-        if: ${{ (hashFiles('rust/Cargo.lock', 'rust/**/Cargo.toml') != '' && contains(format(',{0},', matrix.cargo_targets), ',rust/target,') && steps.runner_caches.outputs.host != '') && !steps.skip.outputs.hit }}
+        if: ${{ (contains(format(',{0},', matrix.cargo_targets), ',rust/target,') && hashFiles('rust/Cargo.lock', 'rust/**/Cargo.toml') != '' && steps.runner_caches.outputs.host != '') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
         continue-on-error: true
         run: |-
           src="$ENACT_HOST_CACHE/repo/cargo-target/$ENACT_RUST_HOST_KEY"
@@ -396,20 +433,18 @@ jobs:
           ENACT_RUST_TARGET: rust/target
       - name: Restore Node dependency cache
         id: node_l1_cache
-        if: ${{ ((contains(matrix.technology, 'typescript') || contains(matrix.technology, 'javascript') || contains(matrix.technology, 'node')) && steps.runner_caches.outputs.host == '') && !steps.skip.outputs.hit }}
+        if: ${{ ((contains(matrix.technology, 'typescript') || contains(matrix.technology, 'javascript') || contains(matrix.technology, 'node')) && steps.runner_caches.outputs.host == '') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
         continue-on-error: true
         uses: actions/cache/restore@v6
         with:
-          key: ${{ runner.os }}-${{ runner.arch }}-node-v2-${{ matrix.task_id }}-${{ hashFiles('package.json', 'pnpm-lock.yaml', 'enve.lock', 'pnpm-workspace.yaml') }}
+          key: ${{ runner.os }}-${{ runner.arch }}-node-v3-${{ hashFiles('package.json', 'pnpm-lock.yaml', 'enve.lock', 'pnpm-workspace.yaml') }}
           path: |-
             .enact/state/pnpm-store
             node_modules/.cache
-          restore-keys: |-
-            ${{ runner.os }}-${{ runner.arch }}-node-v2-${{ matrix.task_id }}-
-            ${{ runner.os }}-${{ runner.arch }}-node-v2-
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-node-v3-
       - name: Restore Cache [Backend database templates]
         id: cache_backend_templates
-        if: ${{ (contains(format(',{0},', matrix.caches), ',backend-templates,')) && !steps.skip.outputs.hit }}
+        if: ${{ (contains(format(',{0},', matrix.caches), ',backend-templates,')) && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
         continue-on-error: true
         uses: actions/cache/restore@v6
         with:
@@ -418,7 +453,7 @@ jobs:
           restore-keys: backend-templates-4-${{ runner.os }}-
       - name: Restore Cache [frontend tsgo declaration-emit cache]
         id: cache_frontend_tsgo
-        if: ${{ (contains(format(',{0},', matrix.caches), ',frontend-tsgo,')) && !steps.skip.outputs.hit }}
+        if: ${{ (contains(format(',{0},', matrix.caches), ',frontend-tsgo,')) && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
         continue-on-error: true
         uses: actions/cache/restore@v6
         with:
@@ -427,7 +462,7 @@ jobs:
           restore-keys: frontend-tsgo-${{ runner.os }}-
       - name: Restore Cache [Standalone HogVM native target]
         id: cache_hogvm_native
-        if: ${{ (contains(format(',{0},', matrix.caches), ',hogvm-native,')) && !steps.skip.outputs.hit }}
+        if: ${{ (contains(format(',{0},', matrix.caches), ',hogvm-native,')) && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
         continue-on-error: true
         uses: actions/cache/restore@v6
         with:
@@ -436,7 +471,7 @@ jobs:
           restore-keys: hogvm-native-v1-${{ runner.os }}-${{ runner.arch }}-${{ matrix.task_id }}-${{ hashFiles('enve.lock', 'enve.cue', 'rust/Cargo.toml', '.cargo/config*', 'rust/.cargo/config*', 'rust/common/.cargo/config*', 'rust/common/hogvm/.cargo/config*', 'rust/common/hogvm/node/.cargo/config*', 'rust-toolchain*', 'rust/rust-toolchain*', 'rust/common/hogvm/Cargo.toml', 'rust/common/hogvm/build.rs', 'rust/common/hogvm/src/**', 'rust/common/hogvm/node/Cargo.toml', 'rust/common/hogvm/node/Cargo.lock', 'rust/common/hogvm/node/build.rs', 'rust/common/hogvm/node/src/**', 'rust/common/hogvm/node/package.json', 'rust/common/hogvm/node/turbo.json', 'turbo.json', '.enact/*.cue', 'showcase/scripts/run_nodejs_tests.sh', 'showcase/scripts/build_hogvm.sh', 'showcase/scripts/rust_ci_env.sh') }}
       - name: Restore Cache [mypy fine-grained cache]
         id: cache_mypy
-        if: ${{ (contains(format(',{0},', matrix.caches), ',mypy,')) && !steps.skip.outputs.hit }}
+        if: ${{ (contains(format(',{0},', matrix.caches), ',mypy,')) && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
         continue-on-error: true
         uses: actions/cache/restore@v6
         with:
@@ -444,7 +479,7 @@ jobs:
           path: .mypy_cache
           restore-keys: mypy-${{ runner.os }}-
     - name: Record Restored Package Caches
-      if: ${{ (steps.runner_caches.outputs.host == '' || contains(format(',{0},', matrix.caches), ',backend-templates,')) && !steps.skip.outputs.hit }}
+      if: ${{ ((steps.runner_caches.outputs.host == '' || contains(format(',{0},', matrix.caches), ',backend-templates,')) && github.event_name != 'pull_request') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
       continue-on-error: true
       run: enact ci cache-delta record
       env:
@@ -455,39 +490,56 @@ jobs:
           node_l1_cache node_modules/.cache
           cache_backend_templates ~/.cache/enact/snapshots/v3
     - name: Require Seeded Cache [frontend tsgo declaration-emit cache]
-      if: ${{ (contains(format(',{0},', matrix.caches), ',frontend-tsgo,') && !(github.event_name == 'workflow_dispatch' && inputs.seed_caches == 'true') && steps.cache_frontend_tsgo.outputs.cache-matched-key == '') && !steps.skip.outputs.hit }}
+      if: ${{ (contains(format(',{0},', matrix.caches), ',frontend-tsgo,') && !(github.event_name == 'workflow_dispatch' && inputs.seed_caches == 'true') && steps.cache_frontend_tsgo.outputs.cache-matched-key == '') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
       run: |-
         echo "::error title=Cache seed needed::$ENACT_SEED_MESSAGE"
         exit 1
       env:
         ENACT_SEED_MESSAGE: "cache 'frontend tsgo declaration-emit cache' needs a seed: its jobs never start cold. Run workflow '${{ github.workflow }}' on the default branch by workflow_dispatch with seed_caches=true, then rerun this one."
     - name: Require Seeded Cache [mypy fine-grained cache]
-      if: ${{ (contains(format(',{0},', matrix.caches), ',mypy,') && !(github.event_name == 'workflow_dispatch' && inputs.seed_caches == 'true') && steps.cache_mypy.outputs.cache-matched-key == '') && !steps.skip.outputs.hit }}
+      if: ${{ (contains(format(',{0},', matrix.caches), ',mypy,') && !(github.event_name == 'workflow_dispatch' && inputs.seed_caches == 'true') && steps.cache_mypy.outputs.cache-matched-key == '') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
       run: |-
         echo "::error title=Cache seed needed::$ENACT_SEED_MESSAGE"
         exit 1
       env:
         ENACT_SEED_MESSAGE: "cache 'mypy fine-grained cache' needs a seed: its jobs never start cold. Run workflow '${{ github.workflow }}' on the default branch by workflow_dispatch with seed_caches=true, then rerun this one."
+    - name: Restore reach Handoff
+      id: reach-native
+      if: ${{ (toJSON(matrix.needs_reach) != 'false') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
+      continue-on-error: true
+      run: enact ci handoff reach --artifact "$ENACT_HANDOFF_ARTIFACT" --directory "$RUNNER_TEMP/enact-reach"
+      env:
+        ENACT_HANDOFF_ARTIFACT: enact-reach-map
+        GH_TOKEN: ${{ github.token }}
     - name: Download the Reach Map
-      if: ${{ !steps.skip.outputs.hit }}
+      if: ${{ (toJSON(matrix.needs_reach) != 'false' && (steps.reach-native.outputs.ready != 'true')) && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
       continue-on-error: true
       uses: actions/download-artifact@v8
       with:
         name: enact-reach-map
         path: ${{ runner.temp }}/enact-reach
+    - name: Cache reach Handoff on the Receiving Host
+      id: reach-verified
+      if: ${{ (toJSON(matrix.needs_reach) != 'false') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
+      continue-on-error: true
+      run: enact ci handoff reach --publish --artifact "$ENACT_HANDOFF_ARTIFACT" --directory "$RUNNER_TEMP/enact-reach"
+      env:
+        ENACT_HANDOFF_ARTIFACT: enact-reach-map
     - name: Plan with the Detected Reach Map
-      if: ${{ !steps.skip.outputs.hit }}
+      id: reach-pin
+      if: ${{ !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
       run: |-
         if [ -n "${GITHUB_HEAD_SHA:-}" ] && [ -z "$(git rev-list -n1 --no-walk --ignore-missing --missing=allow-any "$GITHUB_HEAD_SHA" -- 2>/dev/null)" ]; then
-          git fetch --no-tags --depth=1 --filter=blob:none origin "$GITHUB_HEAD_SHA" 2>/dev/null || true
+          git fetch --no-tags --depth=1 --filter=blob:none origin "$GITHUB_HEAD_SHA" 2>/dev/null
         fi
-        if [ -f "$RUNNER_TEMP/enact-reach/map.bin" ]; then
+        if [ "$ENACT_HANDOFF_READY" = true ] && [ -f "$RUNNER_TEMP/enact-reach/map.bin" ]; then
           echo "ENACT_REACH_FILE=$RUNNER_TEMP/enact-reach/map.bin" >> "$GITHUB_ENV"
         fi
       env:
+        ENACT_HANDOFF_READY: ${{ steps.reach-verified.outputs.ready }}
         GITHUB_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
     - name: Fetch the Revisions Selection Ages By
-      if: ${{ (matrix.selects_in_job) && !steps.skip.outputs.hit }}
+      if: ${{ (matrix.selects_in_job) && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
       continue-on-error: true
       run: |-
         FETCH="git fetch --no-tags --depth=1 --filter=blob:none origin"
@@ -501,32 +553,36 @@ jobs:
       env:
         ENACT_SELECT_BASE: ${{ matrix.select_base }}
     - name: Pull Dependencies via enve
-      if: ${{ !steps.skip.outputs.hit }}
+      if: ${{ !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
       run: enact ci deps pull --component --remote signed
       env:
         AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID || env.R2_ACCESS_KEY_ID }}
         AWS_REGION: auto
         AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY || env.R2_SECRET_ACCESS_KEY }}
         ENACT_COMPONENT_DIR: ${{ matrix.component_dir }}
+        ENACT_ENVIRONMENT_FILE: ${{ matrix.environment_file || '' }}
+        ENACT_JOB_SERVICES: ${{ matrix.services }}
+        ENACT_PREPARE_ENVIRONMENT_FILES: ${{ toJSON(matrix.preparation_environment_files || fromJSON('[]')) }}
         ENACT_R2_BUCKET: ${{ secrets.R2_BUCKET || env.R2_BUCKET }}
         ENVE_CACHE_CONCURRENCY: "16"
     - name: Check enve Stores into the Host Cache
-      if: ${{ (steps.runner_caches.outputs.host != '') && !steps.skip.outputs.hit }}
+      if: ${{ (steps.runner_caches.outputs.host != '') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
       run: enact ci check-store
     - name: Install Project Dependencies
-      if: ${{ (hashFiles('package.json') != '' && (contains(matrix.technology, 'typescript') || contains(matrix.technology, 'javascript') || contains(matrix.technology, 'node'))) && !steps.skip.outputs.hit }}
+      if: ${{ (hashFiles('package.json') != '' && (contains(matrix.technology, 'typescript') || contains(matrix.technology, 'javascript') || contains(matrix.technology, 'node'))) && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
       run: enact ci deps install node --manager pnpm --filters
       env:
+        ENACT_ENVIRONMENT_FILE: enve.cue
         ENACT_MATRIX_FILTER_ARGS: ${{ matrix.filter_args }}
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     - name: Install Python Dependencies
       id: python_install
-      if: ${{ (hashFiles('pyproject.toml', 'requirements.txt') != '' && contains(matrix.technology, 'python')) && !steps.skip.outputs.hit }}
+      if: ${{ (hashFiles('pyproject.toml', 'requirements.txt') != '' && contains(matrix.technology, 'python')) && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
       run: enact ci deps install python --manager uv
       env:
+        ENACT_ENVIRONMENT_FILE: enve.cue
         ENACT_PYTHON_INSTALL: bash showcase/scripts/setup.sh backend
     - name: Execute Component Task
-      if: ${{ !steps.skip.outputs.hit }}
+      if: ${{ !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
       run: eval "$ENACT_MATRIX_COMMAND"
       env:
         AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID || env.R2_ACCESS_KEY_ID }}
@@ -534,6 +590,7 @@ jobs:
         AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY || env.R2_SECRET_ACCESS_KEY }}
         CI_COMPONENT: ${{ matrix.component }}
         ENACT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        ENACT_ENVIRONMENT_FILE: ${{ matrix.environment_file || '' }}
         ENACT_MATRIX_COMMAND: ${{ matrix.command }}
         ENACT_MAX_PARALLEL: ${{ matrix.max_parallel }}
         ENACT_PREEMPTION_NOTICE_SEC: ${{ matrix.preemption_notice_sec }}
@@ -544,7 +601,7 @@ jobs:
         ENACT_SAME_REPO_PR: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref != github.event.repository.default_branch }}
         ENACT_TOPOLOGY: ${{ matrix.topology }}
     - name: Push Updated Dependencies to the Remote Cache
-      if: ${{ (success() && env.ENACT_REMOTE_SAVE_EVENT == 'true') && !steps.skip.outputs.hit }}
+      if: ${{ (success() && env.ENACT_REMOTE_SAVE_EVENT == 'true') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
       continue-on-error: true
       run: enact ci deps push --signed
       env:
@@ -552,10 +609,13 @@ jobs:
         AWS_REGION: auto
         AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY || env.R2_SECRET_ACCESS_KEY }}
         ENACT_COMPONENT_DIR: ${{ matrix.component_dir }}
+        ENACT_ENVIRONMENT_FILE: ${{ matrix.environment_file || '' }}
+        ENACT_JOB_SERVICES: ${{ matrix.services }}
+        ENACT_PREPARE_ENVIRONMENT_FILES: ${{ toJSON(matrix.preparation_environment_files || fromJSON('[]')) }}
         ENACT_R2_BUCKET: ${{ secrets.R2_BUCKET || env.R2_BUCKET }}
         ENVE_CACHE_CONCURRENCY: "16"
     - name: Upload Execution Telemetry & Workflow Dashboard
-      if: ${{ (always()) && !steps.skip.outputs.hit }}
+      if: ${{ (always()) && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
       continue-on-error: true
       uses: actions/upload-artifact@v7
       with:
@@ -568,7 +628,7 @@ jobs:
           .enact/state/nodejs/*.services.log
         retention-days: "1"
     - name: Upload Recorded Footprints
-      if: ${{ (always() && (github.event_name == 'push' && github.ref_name == github.event.repository.default_branch || github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref != github.event.repository.default_branch || github.event_name == 'workflow_dispatch' && inputs.warm_reach == 'true' && github.ref_name == github.event.repository.default_branch)) && !steps.skip.outputs.hit }}
+      if: ${{ (always() && (github.event_name == 'push' && github.ref_name == github.event.repository.default_branch || github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref != github.event.repository.default_branch || github.event_name == 'workflow_dispatch' && inputs.warm_reach == 'true' && github.ref_name == github.event.repository.default_branch)) && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
       continue-on-error: true
       uses: actions/upload-artifact@v7
       with:
@@ -578,7 +638,7 @@ jobs:
         retention-days: "1"
     - name: Check Package Caches for New Entries
       id: cache_delta
-      if: ${{ (!cancelled() && (steps.runner_caches.outputs.host == '' || contains(format(',{0},', matrix.caches), ',backend-templates,')) && env.ENACT_SAVE_EVENT == 'true' && (matrix.shard_index == '' || matrix.shard_index == 1 || matrix.shard_index == '1')) && !steps.skip.outputs.hit }}
+      if: ${{ (!cancelled() && (steps.runner_caches.outputs.host == '' || contains(format(',{0},', matrix.caches), ',backend-templates,')) && env.ENACT_SAVE_EVENT == 'true' && (matrix.shard_index == '' || matrix.shard_index == 1 || matrix.shard_index == '1') && github.event_name != 'pull_request') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
       continue-on-error: true
       run: enact ci cache-delta check
       env:
@@ -588,9 +648,9 @@ jobs:
           node_l1_cache .enact/state/pnpm-store
           node_l1_cache node_modules/.cache
           cache_backend_templates ~/.cache/enact/snapshots/v3
-        ENACT_UV_PRUNE: "true"
+        ENACT_UV_PRUNE: ${{ contains(matrix.technology, 'python') }}
     - name: Save Python build & venv cache
-      if: ${{ ((!cancelled() && (success() || steps.python_install.outcome == 'success') && (env.ENACT_SAVE_EVENT == 'true' && hashFiles('**/uv.lock', '**/pyproject.toml', '**/requirements.txt', '**/poetry.lock') != '' && contains(matrix.technology, 'python') && steps.runner_caches.outputs.host == '' && (matrix.shard_index == '' || matrix.shard_index == 1 || matrix.shard_index == '1') && steps.cache_delta.outputs.python_l1_cache == 'true')) && steps.python_l1_cache.outputs.cache-hit != 'true') && !steps.skip.outputs.hit }}
+      if: ${{ ((!cancelled() && (success() || steps.python_install.outcome == 'success') && (env.ENACT_SAVE_EVENT == 'true' && contains(matrix.technology, 'python') && steps.runner_caches.outputs.host == '' && hashFiles('**/uv.lock', '**/pyproject.toml', '**/requirements.txt', '**/poetry.lock') != '' && (matrix.shard_index == '' || matrix.shard_index == 1 || matrix.shard_index == '1') && steps.cache_delta.outputs.python_l1_cache == 'true')) && github.event_name != 'pull_request' && steps.python_l1_cache.outputs.cache-hit != 'true') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
       continue-on-error: true
       uses: actions/cache/save@v6
       with:
@@ -600,21 +660,22 @@ jobs:
           /tmp/.cache/pip
     - name: Verify Cache publication [Backend database templates]
       id: cache_backend_templates_publication
-      if: ${{ (!cancelled() && env.ENACT_SAVE_EVENT == 'true' && contains(format(',{0},', matrix.caches), ',backend-templates,') && steps.cache_backend_templates.outputs.cache-hit != 'true') && !steps.skip.outputs.hit }}
+      if: ${{ (!cancelled() && env.ENACT_SAVE_EVENT == 'true' && contains(format(',{0},', matrix.caches), ',backend-templates,') && github.event_name != 'pull_request' && steps.cache_backend_templates.outputs.cache-hit != 'true') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
       continue-on-error: true
       run: |-
         RUN_PREFIX=""
-        if command -v enve >/dev/null 2>&1 && [ -f "enve.lock" ]; then
-          RUN_PREFIX="enve run --locked -- "
+        ENACT_ENV_FILE=${ENACT_ENVIRONMENT_FILE:-enve.cue}
+        if command -v enve >/dev/null 2>&1 && [ -f "${ENACT_ENV_FILE%enve.cue}enve.lock" ]; then
+          RUN_PREFIX="enve run --locked -f $ENACT_ENV_FILE -- "
         fi
         $RUN_PREFIX python3 showcase/scripts/template_publications.py "$HOME/.cache/enact/snapshots/v3"
     - name: Prune Rust caches before saving
-      if: ${{ (env.ENACT_SAVE_EVENT == 'true' && matrix.cargo_targets != '' && (matrix.shard_index == '' || matrix.shard_index == 1 || matrix.shard_index == '1')) && !steps.skip.outputs.hit }}
+      if: ${{ (env.ENACT_SAVE_EVENT == 'true' && matrix.cargo_targets != '' && (matrix.shard_index == '' || matrix.shard_index == 1 || matrix.shard_index == '1')) && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
       continue-on-error: true
       run: enact cache prune-cargo --pipeline .enact
     - parallel:
       - name: Save Go build cache
-        if: ${{ (((env.ENACT_SAVE_EVENT == 'true' && hashFiles('**/go.mod', '**/go.sum') != '' && contains(matrix.technology, 'go') && steps.runner_caches.outputs.host == '' && (matrix.shard_index == '' || matrix.shard_index == 1 || matrix.shard_index == '1')) && (github.event_name == 'schedule' || github.event_name != 'pull_request' && github.ref_name == github.event.repository.default_branch || !startsWith(steps.go_l1_cache.outputs.cache-matched-key, format('{0}-go-{1}-', runner.os, hashFiles('**/go.mod', '**/go.sum'))))) && steps.go_l1_cache.outputs.cache-hit != 'true') && !steps.skip.outputs.hit }}
+        if: ${{ (((env.ENACT_SAVE_EVENT == 'true' && contains(matrix.technology, 'go') && steps.runner_caches.outputs.host == '' && hashFiles('**/go.mod', '**/go.sum') != '' && (matrix.shard_index == '' || matrix.shard_index == 1 || matrix.shard_index == '1')) && (github.event_name == 'schedule' || github.event_name != 'pull_request' && github.ref_name == github.event.repository.default_branch || !startsWith(steps.go_l1_cache.outputs.cache-matched-key, format('{0}-go-{1}-', runner.os, hashFiles('**/go.mod', '**/go.sum'))))) && github.event_name != 'pull_request' && steps.go_l1_cache.outputs.cache-hit != 'true') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
         continue-on-error: true
         uses: actions/cache/save@v6
         with:
@@ -623,7 +684,7 @@ jobs:
             /tmp/go-build
             /tmp/go/pkg/mod
       - name: Save Rust target & cargo cache [cli/target]
-        if: ${{ (((env.ENACT_SAVE_EVENT == 'true' && hashFiles('cli/Cargo.lock', 'cli/**/Cargo.toml') != '' && contains(format(',{0},', matrix.cargo_targets), ',cli/target,') && (matrix.shard_index == '' || matrix.shard_index == 1 || matrix.shard_index == '1') && steps.runner_caches.outputs.host == '') && (github.event_name == 'schedule' || github.event_name != 'pull_request' && github.ref_name == github.event.repository.default_branch || !startsWith(steps.rust_l1_cache_cli_target.outputs.cache-matched-key, format('{0}-rust-cli_target-{1}-{2}-{3}-', runner.os, hashFiles('enve.lock', 'cli/rust-toolchain.toml', 'cli/rust-toolchain', 'cli/enve.lock'), matrix.cargo_cache, hashFiles('cli/Cargo.lock', 'cli/**/Cargo.toml'))))) && steps.rust_l1_cache_cli_target.outputs.cache-hit != 'true') && !steps.skip.outputs.hit }}
+        if: ${{ (((env.ENACT_SAVE_EVENT == 'true' && contains(format(',{0},', matrix.cargo_targets), ',cli/target,') && hashFiles('cli/Cargo.lock', 'cli/**/Cargo.toml') != '' && (matrix.shard_index == '' || matrix.shard_index == 1 || matrix.shard_index == '1') && steps.runner_caches.outputs.host == '') && (github.event_name == 'schedule' || github.event_name != 'pull_request' && github.ref_name == github.event.repository.default_branch || !startsWith(steps.rust_l1_cache_cli_target.outputs.cache-matched-key, format('{0}-rust-cli_target-{1}-{2}-{3}-', runner.os, hashFiles('enve.lock', 'cli/rust-toolchain.toml', 'cli/rust-toolchain', 'cli/enve.lock'), matrix.cargo_cache, hashFiles('cli/Cargo.lock', 'cli/**/Cargo.toml'))))) && github.event_name != 'pull_request' && steps.rust_l1_cache_cli_target.outputs.cache-hit != 'true') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
         continue-on-error: true
         uses: actions/cache/save@v6
         with:
@@ -634,7 +695,7 @@ jobs:
             ~/.cargo/git/db
             cli/target
       - name: Save Rust target & cargo cache [cli/target] to the Host Cache
-        if: ${{ (env.ENACT_SAVE_EVENT == 'true' && hashFiles('cli/Cargo.lock', 'cli/**/Cargo.toml') != '' && contains(format(',{0},', matrix.cargo_targets), ',cli/target,') && (matrix.shard_index == '' || matrix.shard_index == 1 || matrix.shard_index == '1') && steps.runner_caches.outputs.host != '') && !steps.skip.outputs.hit }}
+        if: ${{ (env.ENACT_SAVE_EVENT == 'true' && contains(format(',{0},', matrix.cargo_targets), ',cli/target,') && hashFiles('cli/Cargo.lock', 'cli/**/Cargo.toml') != '' && (matrix.shard_index == '' || matrix.shard_index == 1 || matrix.shard_index == '1') && steps.runner_caches.outputs.host != '') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
         continue-on-error: true
         run: |-
           [ -d "$ENACT_RUST_TARGET" ] || exit 0
@@ -651,7 +712,7 @@ jobs:
           ENACT_RUST_HOST_KEY: ${{ runner.os }}-rust-cli_target-${{ hashFiles('enve.lock', 'cli/rust-toolchain.toml', 'cli/rust-toolchain', 'cli/enve.lock') }}-${{ matrix.cargo_cache }}
           ENACT_RUST_TARGET: cli/target
       - name: Save Rust target & cargo cache [funnel-udf/target]
-        if: ${{ (((env.ENACT_SAVE_EVENT == 'true' && hashFiles('funnel-udf/Cargo.lock', 'funnel-udf/**/Cargo.toml') != '' && contains(format(',{0},', matrix.cargo_targets), ',funnel-udf/target,') && (matrix.shard_index == '' || matrix.shard_index == 1 || matrix.shard_index == '1') && steps.runner_caches.outputs.host == '') && (github.event_name == 'schedule' || github.event_name != 'pull_request' && github.ref_name == github.event.repository.default_branch || !startsWith(steps.rust_l1_cache_funnel_udf_target.outputs.cache-matched-key, format('{0}-rust-funnel_udf_target-{1}-{2}-{3}-', runner.os, hashFiles('enve.lock', 'funnel-udf/rust-toolchain.toml', 'funnel-udf/rust-toolchain', 'funnel-udf/enve.lock'), matrix.cargo_cache, hashFiles('funnel-udf/Cargo.lock', 'funnel-udf/**/Cargo.toml'))))) && steps.rust_l1_cache_funnel_udf_target.outputs.cache-hit != 'true') && !steps.skip.outputs.hit }}
+        if: ${{ (((env.ENACT_SAVE_EVENT == 'true' && contains(format(',{0},', matrix.cargo_targets), ',funnel-udf/target,') && hashFiles('funnel-udf/Cargo.lock', 'funnel-udf/**/Cargo.toml') != '' && (matrix.shard_index == '' || matrix.shard_index == 1 || matrix.shard_index == '1') && steps.runner_caches.outputs.host == '') && (github.event_name == 'schedule' || github.event_name != 'pull_request' && github.ref_name == github.event.repository.default_branch || !startsWith(steps.rust_l1_cache_funnel_udf_target.outputs.cache-matched-key, format('{0}-rust-funnel_udf_target-{1}-{2}-{3}-', runner.os, hashFiles('enve.lock', 'funnel-udf/rust-toolchain.toml', 'funnel-udf/rust-toolchain', 'funnel-udf/enve.lock'), matrix.cargo_cache, hashFiles('funnel-udf/Cargo.lock', 'funnel-udf/**/Cargo.toml'))))) && github.event_name != 'pull_request' && steps.rust_l1_cache_funnel_udf_target.outputs.cache-hit != 'true') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
         continue-on-error: true
         uses: actions/cache/save@v6
         with:
@@ -662,7 +723,7 @@ jobs:
             ~/.cargo/git/db
             funnel-udf/target
       - name: Save Rust target & cargo cache [funnel-udf/target] to the Host Cache
-        if: ${{ (env.ENACT_SAVE_EVENT == 'true' && hashFiles('funnel-udf/Cargo.lock', 'funnel-udf/**/Cargo.toml') != '' && contains(format(',{0},', matrix.cargo_targets), ',funnel-udf/target,') && (matrix.shard_index == '' || matrix.shard_index == 1 || matrix.shard_index == '1') && steps.runner_caches.outputs.host != '') && !steps.skip.outputs.hit }}
+        if: ${{ (env.ENACT_SAVE_EVENT == 'true' && contains(format(',{0},', matrix.cargo_targets), ',funnel-udf/target,') && hashFiles('funnel-udf/Cargo.lock', 'funnel-udf/**/Cargo.toml') != '' && (matrix.shard_index == '' || matrix.shard_index == 1 || matrix.shard_index == '1') && steps.runner_caches.outputs.host != '') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
         continue-on-error: true
         run: |-
           [ -d "$ENACT_RUST_TARGET" ] || exit 0
@@ -679,7 +740,7 @@ jobs:
           ENACT_RUST_HOST_KEY: ${{ runner.os }}-rust-funnel_udf_target-${{ hashFiles('enve.lock', 'funnel-udf/rust-toolchain.toml', 'funnel-udf/rust-toolchain', 'funnel-udf/enve.lock') }}-${{ matrix.cargo_cache }}
           ENACT_RUST_TARGET: funnel-udf/target
       - name: Save Rust target & cargo cache [rust/target]
-        if: ${{ (((env.ENACT_SAVE_EVENT == 'true' && hashFiles('rust/Cargo.lock', 'rust/**/Cargo.toml') != '' && contains(format(',{0},', matrix.cargo_targets), ',rust/target,') && (matrix.shard_index == '' || matrix.shard_index == 1 || matrix.shard_index == '1') && steps.runner_caches.outputs.host == '') && (github.event_name == 'schedule' || github.event_name != 'pull_request' && github.ref_name == github.event.repository.default_branch || !startsWith(steps.rust_l1_cache_rust_target.outputs.cache-matched-key, format('{0}-rust-rust_target-{1}-{2}-{3}-', runner.os, hashFiles('enve.lock', 'rust/rust-toolchain.toml', 'rust/rust-toolchain', 'rust/enve.lock'), matrix.cargo_cache, hashFiles('rust/Cargo.lock', 'rust/**/Cargo.toml'))))) && steps.rust_l1_cache_rust_target.outputs.cache-hit != 'true') && !steps.skip.outputs.hit }}
+        if: ${{ (((env.ENACT_SAVE_EVENT == 'true' && contains(format(',{0},', matrix.cargo_targets), ',rust/target,') && hashFiles('rust/Cargo.lock', 'rust/**/Cargo.toml') != '' && (matrix.shard_index == '' || matrix.shard_index == 1 || matrix.shard_index == '1') && steps.runner_caches.outputs.host == '') && (github.event_name == 'schedule' || github.event_name != 'pull_request' && github.ref_name == github.event.repository.default_branch || !startsWith(steps.rust_l1_cache_rust_target.outputs.cache-matched-key, format('{0}-rust-rust_target-{1}-{2}-{3}-', runner.os, hashFiles('enve.lock', 'rust/rust-toolchain.toml', 'rust/rust-toolchain', 'rust/enve.lock'), matrix.cargo_cache, hashFiles('rust/Cargo.lock', 'rust/**/Cargo.toml'))))) && github.event_name != 'pull_request' && steps.rust_l1_cache_rust_target.outputs.cache-hit != 'true') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
         continue-on-error: true
         uses: actions/cache/save@v6
         with:
@@ -690,7 +751,7 @@ jobs:
             ~/.cargo/git/db
             rust/target
       - name: Save Rust target & cargo cache [rust/target] to the Host Cache
-        if: ${{ (env.ENACT_SAVE_EVENT == 'true' && hashFiles('rust/Cargo.lock', 'rust/**/Cargo.toml') != '' && contains(format(',{0},', matrix.cargo_targets), ',rust/target,') && (matrix.shard_index == '' || matrix.shard_index == 1 || matrix.shard_index == '1') && steps.runner_caches.outputs.host != '') && !steps.skip.outputs.hit }}
+        if: ${{ (env.ENACT_SAVE_EVENT == 'true' && contains(format(',{0},', matrix.cargo_targets), ',rust/target,') && hashFiles('rust/Cargo.lock', 'rust/**/Cargo.toml') != '' && (matrix.shard_index == '' || matrix.shard_index == 1 || matrix.shard_index == '1') && steps.runner_caches.outputs.host != '') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
         continue-on-error: true
         run: |-
           [ -d "$ENACT_RUST_TARGET" ] || exit 0
@@ -707,28 +768,28 @@ jobs:
           ENACT_RUST_HOST_KEY: ${{ runner.os }}-rust-rust_target-${{ hashFiles('enve.lock', 'rust/rust-toolchain.toml', 'rust/rust-toolchain', 'rust/enve.lock') }}-${{ matrix.cargo_cache }}
           ENACT_RUST_TARGET: rust/target
       - name: Save Cache [Backend database templates]
-        if: ${{ ((!cancelled() && env.ENACT_SAVE_EVENT == 'true' && contains(format(',{0},', matrix.caches), ',backend-templates,') && (github.event_name == 'schedule' || github.event_name != 'pull_request' && github.ref_name == github.event.repository.default_branch || !startsWith(steps.cache_backend_templates.outputs.cache-matched-key, format('backend-templates-4-{0}-', runner.os)) || steps.cache_delta.outputs.cache_backend_templates == 'true') && steps.cache_backend_templates_publication.outputs.eligible == 'true' && steps.cache_backend_templates_publication.outcome == 'success') && steps.cache_backend_templates.outputs.cache-hit != 'true') && !steps.skip.outputs.hit }}
+        if: ${{ ((!cancelled() && env.ENACT_SAVE_EVENT == 'true' && contains(format(',{0},', matrix.caches), ',backend-templates,') && (matrix.shard_index == '' || matrix.shard_index == 1 || matrix.shard_index == '1') && (github.event_name == 'schedule' || github.event_name != 'pull_request' && github.ref_name == github.event.repository.default_branch || !startsWith(steps.cache_backend_templates.outputs.cache-matched-key, format('backend-templates-4-{0}-', runner.os)) || steps.cache_delta.outputs.cache_backend_templates == 'true') && steps.cache_backend_templates_publication.outputs.eligible == 'true' && steps.cache_backend_templates_publication.outcome == 'success') && github.event_name != 'pull_request' && steps.cache_backend_templates.outputs.cache-hit != 'true') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
         continue-on-error: true
         uses: actions/cache/save@v6
         with:
           key: ${{ steps.cache_backend_templates.outputs.cache-primary-key }}
           path: ~/.cache/enact/snapshots/v3
       - name: Save Cache [frontend tsgo declaration-emit cache]
-        if: ${{ ((env.ENACT_SAVE_EVENT == 'true' && contains(format(',{0},', matrix.caches), ',frontend-tsgo,') && (github.event_name == 'schedule' || github.event_name != 'pull_request' && github.ref_name == github.event.repository.default_branch || !startsWith(steps.cache_frontend_tsgo.outputs.cache-matched-key, format('frontend-tsgo-{0}-', runner.os)))) && steps.cache_frontend_tsgo.outputs.cache-hit != 'true') && !steps.skip.outputs.hit }}
+        if: ${{ ((env.ENACT_SAVE_EVENT == 'true' && contains(format(',{0},', matrix.caches), ',frontend-tsgo,') && (matrix.shard_index == '' || matrix.shard_index == 1 || matrix.shard_index == '1') && (github.event_name == 'schedule' || github.event_name != 'pull_request' && github.ref_name == github.event.repository.default_branch || !startsWith(steps.cache_frontend_tsgo.outputs.cache-matched-key, format('frontend-tsgo-{0}-', runner.os)))) && github.event_name != 'pull_request' && steps.cache_frontend_tsgo.outputs.cache-hit != 'true') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
         continue-on-error: true
         uses: actions/cache/save@v6
         with:
           key: ${{ steps.cache_frontend_tsgo.outputs.cache-primary-key }}
           path: .enact/state/tsgo
       - name: Save Cache [Standalone HogVM native target]
-        if: ${{ ((env.ENACT_SAVE_EVENT == 'true' && contains(format(',{0},', matrix.caches), ',hogvm-native,')) && steps.cache_hogvm_native.outputs.cache-hit != 'true') && !steps.skip.outputs.hit }}
+        if: ${{ ((env.ENACT_SAVE_EVENT == 'true' && contains(format(',{0},', matrix.caches), ',hogvm-native,') && (matrix.shard_index == '' || matrix.shard_index == 1 || matrix.shard_index == '1')) && github.event_name != 'pull_request' && steps.cache_hogvm_native.outputs.cache-hit != 'true') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
         continue-on-error: true
         uses: actions/cache/save@v6
         with:
           key: ${{ steps.cache_hogvm_native.outputs.cache-primary-key }}
           path: rust/common/hogvm/node/target
       - name: Save Cache [mypy fine-grained cache]
-        if: ${{ ((env.ENACT_SAVE_EVENT == 'true' && contains(format(',{0},', matrix.caches), ',mypy,') && (github.event_name == 'schedule' || github.event_name != 'pull_request' && github.ref_name == github.event.repository.default_branch || !startsWith(steps.cache_mypy.outputs.cache-matched-key, format('mypy-{0}-', runner.os)))) && steps.cache_mypy.outputs.cache-hit != 'true') && !steps.skip.outputs.hit }}
+        if: ${{ ((env.ENACT_SAVE_EVENT == 'true' && contains(format(',{0},', matrix.caches), ',mypy,') && (matrix.shard_index == '' || matrix.shard_index == 1 || matrix.shard_index == '1') && (github.event_name == 'schedule' || github.event_name != 'pull_request' && github.ref_name == github.event.repository.default_branch || !startsWith(steps.cache_mypy.outputs.cache-matched-key, format('mypy-{0}-', runner.os)))) && github.event_name != 'pull_request' && steps.cache_mypy.outputs.cache-hit != 'true') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
         continue-on-error: true
         uses: actions/cache/save@v6
         with:
@@ -749,6 +810,9 @@ jobs:
         set -euo pipefail
         store="${ENACT_OUTPUTS_CACHE:-}"
         entry="$store/${GITHUB_REPOSITORY:-repo}/$ENACT_OUTPUTS_KEY"
+        verify_outputs() {
+            ENACT_OUTPUTS_VERIFY_ROOT="$1" "${ENACT_OUTPUTS_VERIFIER:-enact}" ci host-outputs verify >/dev/null 2>&1
+        }
         clone_item() {
             rm -rf "$2"
             mkdir -p "$(dirname "$2")"
@@ -757,7 +821,7 @@ jobs:
         case "$ENACT_OUTPUTS_MODE" in
             restore)
                 hit=false
-                if [ -n "$store" ] && [ -f "$entry/.enact-ready" ]; then
+                if [ -n "$store" ] && [ -f "$entry/.enact-ready" ] && verify_outputs "$entry"; then
                     hit=true
                     while IFS= read -r pattern; do
                         [ -n "$pattern" ] || continue
@@ -769,6 +833,7 @@ jobs:
                         done
                     done <<<"$ENACT_OUTPUTS_PATHS"
                 fi
+                if [ "$hit" = true ] && ! verify_outputs .; then hit=false; fi
                 if [ "$hit" = true ]; then
                     touch "$entry/.enact-ready" 2>/dev/null || true
                 fi
@@ -776,7 +841,8 @@ jobs:
                 ;;
             save)
                 [ -n "$store" ] || exit 0
-                [ ! -f "$entry/.enact-ready" ] || exit 0
+                verify_outputs . || { echo "producer output integrity check failed" >&2; exit 1; }
+                if [ -f "$entry/.enact-ready" ] && verify_outputs "$entry"; then exit 0; fi
                 mkdir -p "$(dirname "$entry")"
                 tmp=$(mktemp -d "$entry.tmp.XXXXXX")
                 trap 'rm -rf "$tmp"' EXIT
@@ -788,8 +854,9 @@ jobs:
                         clone_item "$src" "$tmp/$src"
                     done
                 done <<<"$ENACT_OUTPUTS_PATHS"
+                verify_outputs "$tmp" || exit 1
                 touch "$tmp/.enact-ready"
-                chmod -R a+rX "$tmp" 2>/dev/null || true
+                [ ! -d "$entry" ] || rm -rf "$entry"
                 if ! mv -n "$tmp" "$entry" 2>/dev/null && [ ! -d "$entry" ]; then
                     rm -rf "$entry"
                     mv "$tmp" "$entry"

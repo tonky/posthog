@@ -99,7 +99,8 @@ _rust: schema.#ArchiveBuildSpec & {
 _seaweedfs_base: {
 	// Seaweed imports AWS keys as an admin identity; cache credentials must stay outside the fixture.
 	environment: {AWS_ACCESS_KEY_ID: "", AWS_SECRET_ACCESS_KEY: ""}
-	command: "weed server -ip=127.0.0.1 -master.raftHashicorp -s3 -s3.port=$PORT -s3.port.grpc=$PORT_S3_GRPC -s3.port.iceberg=0 -s3.port.lance=0 -master.port=$PORT_MASTER -master.port.grpc=$PORT_MASTER_GRPC -volume.port=$PORT_VOLUME -volume.port.grpc=$PORT_VOLUME_GRPC -filer.port=$PORT_FILER -filer.port.grpc=$PORT_FILER_GRPC -dir=\"$DATA_DIR\" -volume.max=1000 -master.volumePreallocate=false"
+	// `weed server` 4.48 spawns `git describe --dirty` (scanning the whole monorepo and overflowing the eBPF ringbuf) and deadlocks on SIGTERM/SIGINT past enve's 10s stopGrace.
+	command: "sh -c 'cd \"$DATA_DIR\" && export GIT_CEILING_DIRECTORIES=\"${PWD%/*}\" && trap \"kill -TERM \\$p 2>/dev/null || true; for i in 1 2 3 4; do kill -0 \\$p 2>/dev/null || exit 0; sleep 0.5; done; kill -KILL \\$p 2>/dev/null || true; wait \\$p 2>/dev/null || true; exit 0\" TERM INT; weed server -ip=127.0.0.1 -master.raftHashicorp -s3 -s3.port=$PORT -s3.port.grpc=$PORT_S3_GRPC -s3.port.iceberg=0 -s3.port.lance=0 -master.port=$PORT_MASTER -master.port.grpc=$PORT_MASTER_GRPC -volume.port=$PORT_VOLUME -volume.port.grpc=$PORT_VOLUME_GRPC -filer.port=$PORT_FILER -filer.port.grpc=$PORT_FILER_GRPC -dir=\"$DATA_DIR\" -volume.max=1000 -master.volumePreallocate=false & p=$!; wait $p'"
 }
 
 // PostHog Polyglot Monorepo — Zero-Docker Developer Environment & Microservice Topology
@@ -268,6 +269,7 @@ profiles: dev: schema.#Profile & {
 		TEST:                                 "1"
 		SKIP_SERVICE_VERSION_REQUIREMENTS:    "1"
 		npm_config_manage_package_manager_versions: "false"
+		NPM_CONFIG_MANAGE_PACKAGE_MANAGER_VERSIONS: "false"
 		TURBO_ENV_MODE:                       "loose"
 		COREPACK_ENABLE_DOWNLOAD_PROMPT:      "0"
 		NO_PROXY:                             "127.0.0.1,localhost,::1"

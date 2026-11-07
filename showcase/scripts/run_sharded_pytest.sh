@@ -45,7 +45,7 @@ PG_HOST="${PGHOST:-127.0.0.1}"
 PG_PORT="${PGPORT:-}"
 PG_USER="${PGUSER:-posthog}"
 
-if [ "$#" -eq 1 ] && [ -z "$1" ]; then
+if [ "$#" -eq 1 ] && { [ -z "$1" ] || [ "$1" = "@" ]; }; then
     shift
 fi
 
@@ -137,18 +137,19 @@ export AWS_REGION="${AWS_REGION:-us-east-1}"
 
 # Resolve test targets (supports @argfile, raw file path, positional args, or $ENACT_TARGETS_FILE)
 TARGETS=()
-if [ "$#" -eq 1 ] && [[ "$1" == @* || ( -f "$1" && "$1" == *.txt ) ]]; then
-    RAW_ARG="$1"
-    FILE_PATH="${RAW_ARG#@}"
-    if [ -f "$FILE_PATH" ]; then
-        if ! rg -v -q '^[[:space:]]*$' "$FILE_PATH"; then
-            echo "✗ run_sharded_pytest.sh: no test targets in $FILE_PATH" >&2
-            exit 1
-        fi
-        mapfile -t TARGETS < <(rg -v '^[[:space:]]*$' "$FILE_PATH")
-    else
-        TARGETS=("$RAW_ARG")
+if [ "$#" -eq 1 ] && [[ "$1" == @* ]]; then
+    FILE_PATH="${1#@}"
+    if [ -z "$FILE_PATH" ] || [ ! -f "$FILE_PATH" ] || ! rg -v -q '^[[:space:]]*$' "$FILE_PATH"; then
+        echo "✗ run_sharded_pytest.sh: no test targets in ${FILE_PATH:-$1}" >&2
+        exit 1
     fi
+    mapfile -t TARGETS < <(rg -v '^[[:space:]]*$' "$FILE_PATH")
+elif [ "$#" -eq 1 ] && [[ -f "$1" && "$1" == *.txt ]]; then
+    if ! rg -v -q '^[[:space:]]*$' "$1"; then
+        echo "✗ run_sharded_pytest.sh: no test targets in $1" >&2
+        exit 1
+    fi
+    mapfile -t TARGETS < <(rg -v '^[[:space:]]*$' "$1")
 elif [ "$#" -gt 0 ]; then
     TARGETS=("$@")
 elif [ -n "${ENACT_TARGETS_FILE:-}" ] && [ -f "${ENACT_TARGETS_FILE}" ]; then
@@ -227,7 +228,7 @@ fi
 # fails with the last failing run's code, as ci-backend.yml's legs. A run collecting nothing
 # (pytest's 5) fails too: its targets were selected as tests, so none running is a stale
 # target or a product's flags deselecting it, never a pass.
-runs="$(python3 showcase/scripts/product_pytest.py "${TARGETS[@]}")"
+runs="$(printf '%s\n' "${TARGETS[@]}" | python3 showcase/scripts/product_pytest.py -)"
 mapfile -t RUNS <<<"$runs"
 if [ -z "$runs" ] || [ "${#RUNS[@]}" -eq 0 ]; then
     echo "✗ run_sharded_pytest.sh: product_pytest.py planned no pytest run for ${#TARGETS[@]} target(s)" >&2

@@ -36,6 +36,7 @@ _goModule: {
 _rustCargoCrate: {
 	technology:       "rust"
 	depends_on:       ["root"]
+	resources:        {cpus: number, memory_mb: int} | *_recordCargo
 	recorder:         "own_linux"
 	record_resources: _recordCargo
 }
@@ -149,15 +150,16 @@ pipeline: components: {
 		}
 	}
 	"cli": _rustCargoCrate & {
-		name:         "cli"
-		title:        "PostHog Developer CLI"
-		description:  "PostHog Developer CLI in Rust"
-		root:         "cli"
-		watch_paths:  ["cli/**", "dist-workspace.toml", "clippy.toml", "showcase/scripts/run_cargo_tests.sh", "rust/cymbal/tests/static/native/**"]
-		fmt:          "cargo fmt --all -- --check"
-		lint:         "cargo clippy --all-targets --all-features -- -D warnings"
-		shards:       1
-		test:         "../showcase/scripts/run_cargo_tests.sh cli --all-features -- {targets}"
+		name:              "cli"
+		title:             "PostHog Developer CLI"
+		description:       "PostHog Developer CLI in Rust"
+		root:              "cli"
+		watch_paths:       ["cli/**", "dist-workspace.toml", "clippy.toml", "showcase/scripts/run_cargo_tests.sh", "rust/cymbal/tests/static/native/**"]
+		fmt:               "cargo fmt --all -- --check"
+		lint:              "cargo clippy --all-targets --all-features -- -D warnings"
+		shards:            1
+		resource_forecast: {mode: "bounded", min: {cpus: 1, memory_mb: 1024}, max: {cpus: 4, memory_mb: 8192}}
+		test:              "../showcase/scripts/run_cargo_tests.sh cli --all-features -- {targets}"
 		target_scope: tests: ["cli/src/lib.rs", "cli/tests/*.rs"]
 	}
 	"funnel_udf": _rustCargoCrate & {
@@ -333,13 +335,13 @@ pipeline: components: {
 			worker: "standard", recorder: "own", resources: {cpus: 4, memory_mb: 11264}, record_resources: resources, needs: _mcpUiAppsNeeds
 			tasks: [
 				{name: "Build UI apps", command: "../../../showcase/scripts/build_mcp_ui_apps.sh"},
-				{name: "Run Tests", command: "../../../showcase/scripts/run_mcp_integration.sh {targets}", timeout: "60m"},
+				{name: "Run Tests", command: "../../../showcase/scripts/run_mcp_integration.sh {relative_targets}", timeout: "60m"},
 			]
 			target_scope: {
 				fallback: "all"
 				tests:    ["services/mcp/tests/**/*.integration.test.ts"]
 				rules: [
-					{match: ["posthog/dags/**", "products/*/dags/**"], action: "ignore"},
+					{match: ["posthog/dags/**", "products/*/dags/**", "frontend/snapshots.yml", "playwright/snapshots.yml"], action: "ignore"},
 					{
 						match: [
 							"services/mcp/src/**/*.{ts,tsx,js,mjs}", "services/mcp/tests/**/*.ts",
