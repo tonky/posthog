@@ -31,8 +31,11 @@ sync)
     mkdir -p .venv/bin .venv/lib/site-packages
     : > .venv/pyvenv.cfg
     : > .venv/bin/python3
-    printf '#!%s/.venv/bin/python3\\n' "$PWD" > .venv/bin/pytest
-    chmod +x .venv/bin/python3 .venv/bin/pytest
+    if [ ! -e .venv/bin/pytest ]; then
+        printf '#!%s/.venv/bin/python3\\nprint("pytest")\\n' "$PWD" > .venv/bin/pytest
+        chmod +x .venv/bin/pytest
+    fi
+    chmod +x .venv/bin/python3
     printf '%s\\n' "$PWD" > .venv/lib/site-packages/_editable.pth
     echo sync >> "$STUB_LOG"
     case "$*" in

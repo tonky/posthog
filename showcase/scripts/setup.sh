@@ -40,7 +40,26 @@ case "${1:-frontend}" in
         if [ -n "$VENV_CACHE" ] && [ -d "$VENV_CACHE" ] && [ ! -e .venv ]; then
             WORK_VENV="$(mktemp -d "$UV_CACHE_DIR/work/venv.XXXXXX")"
             if clone_tree "$VENV_CACHE" "$WORK_VENV"; then
-                find "$WORK_VENV" \( -path '*/bin/*' ! -name 'python*' -o -name '*.pth' \) -type f -delete 2>/dev/null || true
+                find "$WORK_VENV" -name '*.pth' -type f -delete 2>/dev/null || true
+                # Rewrite cloned entrypoint shebangs on fresh inodes (`uv sync` skips rebuilding
+                # unchanged third-party scripts such as `bin/pytest`) so they invoke this checkout.
+                "$PY_BIN" -c '
+import os, sys
+from pathlib import Path
+bin_dir, py = Path(sys.argv[1]) / "bin", sys.argv[2]
+if bin_dir.is_dir():
+    shebang = f"#!{py}\n".encode()
+    for p in bin_dir.iterdir():
+        if p.name.startswith("python") or not p.is_file() or p.is_symlink():
+            continue
+        data = p.read_bytes()
+        if data.startswith(b"#!") and b"python" in data.split(b"\n", 1)[0]:
+            rest = data.split(b"\n", 1)[1] if b"\n" in data else b""
+            tmp = p.with_name(f".{p.name}.tmp.{os.getpid()}")
+            tmp.write_bytes(shebang + rest)
+            os.chmod(tmp, p.stat().st_mode & 0o7777)
+            tmp.replace(p)
+' "$WORK_VENV" "$PWD/.venv/bin/python3"
                 touch "$VENV_CACHE" "$WORK_VENV" 2>/dev/null || true
                 ln -sfn "$WORK_VENV" .venv
                 if uv sync --frozen --dev --no-install-package pytest-split --python "$PY_BIN" && uv run --no-sync python -c 'import grpc; from grpc._cython import cygrpc'; then

@@ -625,7 +625,7 @@ pipeline: schema.#Pipeline & {
 				"showcase/scripts/no_drift.sh",
 			]
 			schema_check: {
-				command:         "./bin/hogli build:openapi && pnpm --filter=@posthog/mcp run scaffold-yaml -- --sync-all"
+				command:         "showcase/scripts/exclusive.sh geoip bin/download-mmdb && ./bin/hogli build:openapi && pnpm --filter=@posthog/mcp run scaffold-yaml -- --sync-all"
 				expect_no_drift: true
 			}
 			resources: {cpus: 1.0, memory_mb: 2400}
