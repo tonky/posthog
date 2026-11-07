@@ -292,7 +292,7 @@ pipeline: components: {
 	"hogql_language_service": _goModule & {
 		name:      "hogql_language_service", title: "HogQL language service", root: "services/hogql-language-service"
 		resources: {cpus: 4, memory_mb: 1024}
-		test:      "HOGQL_LANGUAGE_SERVICE_ENFORCE_LATENCY_BUDGET=1 ../../showcase/scripts/run_go_tests.sh {targets} || HOGQL_LANGUAGE_SERVICE_ENFORCE_LATENCY_BUDGET=1 ../../showcase/scripts/run_go_tests.sh {targets}"
+		test:      "if [ \"${ENACT_RECORD:-off}\" = \"off\" ]; then export HOGQL_LANGUAGE_SERVICE_ENFORCE_LATENCY_BUDGET=1; fi && (../../showcase/scripts/run_go_tests.sh {targets} || ../../showcase/scripts/run_go_tests.sh {targets})"
 	}
 	"phrocs": _goModule & {
 		name: "phrocs", title: "phrocs process runner", root: "tools/phrocs"
@@ -356,7 +356,7 @@ pipeline: components: {
 				builds:    true
 				resources: {cpus: 4, memory_mb: 8192}
 				outputs: {
-					paths: ["rust/.enact-live-bin/mcp_integration"]
+					paths: [".enact/state/live-bin/mcp_integration"]
 					key: list.Concat([
 						_liveFlagsRust,
 						[
@@ -368,7 +368,7 @@ pipeline: components: {
 				tasks: [{
 					name:    "Build MCP live Rust services"
 					dir:     "."
-					command: "bash -c 'source showcase/scripts/live_posthog.sh && live_stage_rust rust/.enact-live-bin/mcp_integration feature-flags personhog-replica personhog-router'"
+					command: "bash -c 'source showcase/scripts/live_posthog.sh && live_stage_rust .enact/state/live-bin/mcp_integration feature-flags personhog-replica personhog-router'"
 					timeout: "25m"
 				}]
 			}

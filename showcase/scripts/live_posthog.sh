@@ -317,7 +317,7 @@ live_stage_rust() { # <stage_dir> <package...>
     cp -f "$tmp_dir/out/seed.json" "$stage_dir/built-from.json"
 }
 live_build_rust() { # <package...>
-    local stage_dir="$PWD/rust/.enact-live-bin/${ENACT_COMPONENT:-}" all_staged=1 package
+    local stage_dir="$PWD/.enact/state/live-bin/${ENACT_COMPONENT:-}" all_staged=1 package
     if [ -n "${ENACT_COMPONENT:-}" ] && [ -s "$stage_dir/built-from.json" ]; then
         for package in "$@"; do
             [ -x "$stage_dir/$package" ] || { all_staged=0; break; }

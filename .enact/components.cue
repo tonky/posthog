@@ -502,8 +502,8 @@ pipeline: schema.#Pipeline & {
 			max_shards:   12
 			shards:       10
 			shard_groups: {by: "products/*/", overhead_s: 1}
-			// Measured 2.1-3.3 GiB peak RSS across shards; 4096 + 1024 reserve quantizes to c2m5g.
-			resources:        {cpus: 2.0, memory_mb: 4096}
+			// Measured 2.1-3.3 GiB peak RSS across shards; 3 CPUs prevent Kafka JVM healthcheck starvation under 7 services, and 4096 + 1024 reserve quantizes to c3m5g.
+			resources:        {cpus: 3.0, memory_mb: 4096}
 			record_resources: resources
 			scoping: {
 				domain_roots:    ["posthog", "ee", "products"]
@@ -1199,7 +1199,7 @@ pipeline: schema.#Pipeline & {
 							"common/replay-headless/dist",
 							"rust/replay-anonymizer-node/dist", "rust/replay-anonymizer-node/index.node",
 							"rust/common/hogvm/node/index.node",
-							"rust/.enact-live-bin/e2e",
+							".enact/state/live-bin/e2e",
 						]
 						key: list.Concat([
 							_liveCaptureRust, _liveIngestionNode, _buildOnceKey,
@@ -1213,7 +1213,7 @@ pipeline: schema.#Pipeline & {
 					}
 					tasks: [{
 						name:    "Build E2E native & Rust services"
-						command: "rm -f nodejs/dist/.enact-build-key && showcase/scripts/build_e2e.sh && bash -c 'source showcase/scripts/live_posthog.sh && live_stage_rust rust/.enact-live-bin/e2e capture personhog-replica personhog-router'"
+						command: "rm -f nodejs/dist/.enact-build-key && showcase/scripts/build_e2e.sh && bash -c 'source showcase/scripts/live_posthog.sh && live_stage_rust .enact/state/live-bin/e2e capture personhog-replica personhog-router'"
 						timeout: "30m"
 					}]
 				}

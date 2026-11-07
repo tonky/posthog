@@ -12,9 +12,9 @@ showcase/scripts/build_once.sh plugin-transpiler common/plugin_transpiler/dist/.
     showcase/scripts/exclusive.sh node-modules bash -c \
     'CI=true COREPACK_ENABLE_DOWNLOAD_PROMPT=0 pnpm --filter=@posthog/plugin-transpiler... install --frozen-lockfile --config.confirmModulesPurge=false && bin/turbo --filter=@posthog/plugin-transpiler build'
 
-if [ ! -f common/hogvm/typescript/dist/.enact-build-key ] && [ -f rust/.enact-live-bin/e2e/hogvm-ts-dist/.enact-build-key ]; then
+if [ ! -f common/hogvm/typescript/dist/.enact-build-key ] && [ -f .enact/state/live-bin/e2e/hogvm-ts-dist/.enact-build-key ]; then
     mkdir -p common/hogvm/typescript/dist
-    cp -a rust/.enact-live-bin/e2e/hogvm-ts-dist/. common/hogvm/typescript/dist/
+    cp -a .enact/state/live-bin/e2e/hogvm-ts-dist/. common/hogvm/typescript/dist/
 fi
 showcase/scripts/build_hogvm.sh
 
@@ -25,7 +25,7 @@ showcase/scripts/build_once.sh e2e-nodejs-build nodejs/dist/.enact-build-key \
     showcase/scripts/exclusive.sh nodejs-build bin/turbo --filter=@posthog/nodejs build
 
 if [ "${ENACT_JOB:-}" = "build" ]; then
-    rm -rf rust/.enact-live-bin/e2e/hogvm-ts-dist
-    mkdir -p rust/.enact-live-bin/e2e/hogvm-ts-dist
-    cp -a common/hogvm/typescript/dist/. rust/.enact-live-bin/e2e/hogvm-ts-dist/
+    rm -rf .enact/state/live-bin/e2e/hogvm-ts-dist
+    mkdir -p .enact/state/live-bin/e2e/hogvm-ts-dist
+    cp -a common/hogvm/typescript/dist/. .enact/state/live-bin/e2e/hogvm-ts-dist/
 fi

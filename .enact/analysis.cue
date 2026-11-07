@@ -106,7 +106,7 @@ pipeline: analysis: {
 			inputs:  ["playwright/playwright.config.ts", "playwright/package.json"]
 		},
 		{
-			outputs: ["rust/.enact-live-bin/**"]
+			outputs: [".enact/state/live-bin/**"]
 			inputs:  ["rust/Cargo.toml", "rust/Cargo.lock"]
 		},
 		{

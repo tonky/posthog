@@ -32,6 +32,14 @@ ROOT="$PWD"
 export PYTHONPATH="$ROOT/showcase/pytest_plugins${PYTHONPATH:+:$PYTHONPATH}"
 export POSTHOG_REPO_ROOT="$ROOT"
 export ENACT_REPLAY_RESULTS="${ENACT_REPLAY_RESULTS:-$ROOT/.enact/state/pytest}"
+if [ -z "${TZDIR:-}" ] && [ ! -d /usr/share/zoneinfo ]; then
+    for _tzdir in "$ROOT"/.venv/lib/python*/site-packages/tzdata/zoneinfo; do
+        if [ -d "$_tzdir" ]; then
+            export TZDIR="$_tzdir"
+            break
+        fi
+    done
+fi
 # pytest_snapshot_worker: snapshots compare this shard's ClickHouse database as upstream's.
 # pytest_fail_early: a broken session-scoped fixture ends the pytest at once (exit 2).
 # pytest_unmarked_db_setup: a test reaching django_db_setup without a django_db marker gets

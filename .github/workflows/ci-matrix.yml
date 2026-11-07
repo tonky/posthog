@@ -337,7 +337,7 @@ jobs:
       if: ${{ (toJson(matrix.output_keys) != 'null') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
       run: |-
         cat > "$ENACT_OUTPUTS_PRODUCERS_FILE" <<'PRODUCERS_JSON'
-        {"e2e--build":{"job":"e2e:build","paths":"nodejs/dist\nnodejs/dist/.enact-build-key\ncommon/replay-headless/dist\nrust/replay-anonymizer-node/dist\nrust/replay-anonymizer-node/index.node\nrust/common/hogvm/node/index.node\nrust/.enact-live-bin/e2e\n.enact/state/outputs/e2e--build.key\n.enact/state/outputs/e2e--build.manifest-v1.json"},"frontend--build":{"job":"frontend:build","paths":"frontend/dist\n.enact/state/outputs/frontend--build.key\n.enact/state/outputs/frontend--build.manifest-v1.json","arch_independent":true},"mcp--ui_apps":{"job":"mcp:ui_apps","paths":"services/mcp/public/ui-apps\n.enact/state/outputs/mcp--ui_apps.key\n.enact/state/outputs/mcp--ui_apps.manifest-v1.json","arch_independent":true},"mcp_integration--build":{"job":"mcp_integration:build","paths":"rust/.enact-live-bin/mcp_integration\n.enact/state/outputs/mcp_integration--build.key\n.enact/state/outputs/mcp_integration--build.manifest-v1.json"},"plugin_transpiler--build":{"job":"plugin_transpiler:build","paths":"common/plugin_transpiler/dist\ncommon/plugin_transpiler/dist/.enact-build-key\n.enact/state/outputs/plugin_transpiler--build.key\n.enact/state/outputs/plugin_transpiler--build.manifest-v1.json","arch_independent":true},"quill--build":{"job":"quill:build","paths":"packages/quill/packages/quill/dist\npackages/quill/packages/tokens/dist\npackages/quill/packages/primitives/dist\npackages/quill/packages/components/dist\npackages/quill/packages/charts/dist\npackages/quill/packages/blocks/dist\npackages/quill/packages/quill/dist/.enact-build-key\n.enact/state/outputs/quill--build.key\n.enact/state/outputs/quill--build.manifest-v1.json","arch_independent":true},"storybook--build":{"job":"storybook:build","paths":"common/storybook/dist\ncommon/hogvm/typescript/dist\nfrontend/.cache/products.hash\n.enact/state/outputs/storybook--build.key\n.enact/state/outputs/storybook--build.manifest-v1.json","arch_independent":true}}
+        {"e2e--build":{"job":"e2e:build","paths":"nodejs/dist\nnodejs/dist/.enact-build-key\ncommon/replay-headless/dist\nrust/replay-anonymizer-node/dist\nrust/replay-anonymizer-node/index.node\nrust/common/hogvm/node/index.node\n.enact/state/live-bin/e2e\n.enact/state/outputs/e2e--build.key\n.enact/state/outputs/e2e--build.manifest-v1.json"},"frontend--build":{"job":"frontend:build","paths":"frontend/dist\n.enact/state/outputs/frontend--build.key\n.enact/state/outputs/frontend--build.manifest-v1.json","arch_independent":true},"mcp--ui_apps":{"job":"mcp:ui_apps","paths":"services/mcp/public/ui-apps\n.enact/state/outputs/mcp--ui_apps.key\n.enact/state/outputs/mcp--ui_apps.manifest-v1.json","arch_independent":true},"mcp_integration--build":{"job":"mcp_integration:build","paths":".enact/state/live-bin/mcp_integration\n.enact/state/outputs/mcp_integration--build.key\n.enact/state/outputs/mcp_integration--build.manifest-v1.json"},"plugin_transpiler--build":{"job":"plugin_transpiler:build","paths":"common/plugin_transpiler/dist\ncommon/plugin_transpiler/dist/.enact-build-key\n.enact/state/outputs/plugin_transpiler--build.key\n.enact/state/outputs/plugin_transpiler--build.manifest-v1.json","arch_independent":true},"quill--build":{"job":"quill:build","paths":"packages/quill/packages/quill/dist\npackages/quill/packages/tokens/dist\npackages/quill/packages/primitives/dist\npackages/quill/packages/components/dist\npackages/quill/packages/charts/dist\npackages/quill/packages/blocks/dist\npackages/quill/packages/quill/dist/.enact-build-key\n.enact/state/outputs/quill--build.key\n.enact/state/outputs/quill--build.manifest-v1.json","arch_independent":true},"storybook--build":{"job":"storybook:build","paths":"common/storybook/dist\ncommon/hogvm/typescript/dist\nfrontend/.cache/products.hash\n.enact/state/outputs/storybook--build.key\n.enact/state/outputs/storybook--build.manifest-v1.json","arch_independent":true}}
         PRODUCERS_JSON
       env:
         ENACT_OUTPUTS_PRODUCERS_FILE: ${{ runner.temp }}/enact-outputs-producers.json
@@ -364,7 +364,7 @@ jobs:
           rust/replay-anonymizer-node/dist
           rust/replay-anonymizer-node/index.node
           rust/common/hogvm/node/index.node
-          rust/.enact-live-bin/e2e
+          .enact/state/live-bin/e2e
           .enact/state/outputs/e2e--build.key
           .enact/state/outputs/e2e--build.manifest-v1.json
     - name: Restore Built Outputs Artifact (e2e:build)
@@ -421,7 +421,7 @@ jobs:
       with:
         key: enact-outputs-mcp_integration--build-${{ runner.os }}-${{ runner.arch }}-${{ matrix.output_keys['mcp_integration--build'] }}
         path: |-
-          rust/.enact-live-bin/mcp_integration
+          .enact/state/live-bin/mcp_integration
           .enact/state/outputs/mcp_integration--build.key
           .enact/state/outputs/mcp_integration--build.manifest-v1.json
     - name: Restore Built Outputs Artifact (mcp_integration:build)
