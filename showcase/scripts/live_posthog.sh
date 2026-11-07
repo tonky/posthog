@@ -189,15 +189,18 @@ live_migrate_pg() {
         trap 'rm -rf "$tmp_dir"' EXIT
         pg_dump -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -Fc -f "$tmp_dump" "$live_db" || exit 1
         pg -d "$live_db" -F $'\t' -c "SELECT app, name FROM django_migrations ORDER BY app, name" >"$tmp_applied" || exit 1
-        python3 showcase/scripts/live_migrate_cache.py pg-publish \
+        local published_dir
+        published_dir=$(python3 showcase/scripts/live_migrate_cache.py pg-publish \
             --snapshot-root "$SNAPSHOT_ROOT" --repo . --key "$key" --pg-major "$pg_major" \
-            --template-key "$template_key" --dump-file "$tmp_dump" --applied-file "$tmp_applied" >/dev/null || exit 1
+            --template-key "$template_key" --dump-file "$tmp_dump" --applied-file "$tmp_applied") || exit 1
+        echo "live-pg published snapshot: $published_dir" >&2
         live_wait_db_free "$live_db" || exit 1
         live_wait_db_free "$tpl" || exit 1
         pg -d postgres -c "DROP DATABASE IF EXISTS $tpl WITH (FORCE);" >/dev/null || exit 1
         pg -d postgres -c "CREATE DATABASE $tpl TEMPLATE $live_db;" >/dev/null || exit 1
         pg -d postgres -c "COMMENT ON DATABASE $tpl IS '$fmt';" >/dev/null || exit 1
-    ) 7>"$SNAPSHOT_ROOT/live-v1/${key}.lock"
+    # Distinct from pg-publish's .publish.lock so holding fd 7 never self-deadlocks child python.
+    ) 7>"$SNAPSHOT_ROOT/live-v1/${key}.migrate.lock"
 }
 
 live_migrate_ch() {

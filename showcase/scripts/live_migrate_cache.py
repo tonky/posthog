@@ -903,7 +903,8 @@ def main(argv: list[str] | None = None) -> int:
         ]
         if not applied:
             raise ValueError("Refusing to publish empty django_migrations list")
-        with file_lock(store_root / f"{args.key}.lock"):
+        # Dedicated lock suffix so callers holding `<key>.lock` / `<key>.migrate.lock` never self-deadlock.
+        with file_lock(store_root / f"{args.key}.publish.lock"):
             existing = resolve_verified_generation(
                 store_root,
                 PG_FORMAT_PREFIX,

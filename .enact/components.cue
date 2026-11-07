@@ -767,6 +767,7 @@ pipeline: schema.#Pipeline & {
 			jobs: test: {
 				name:        "Test"
 				shards:      1
+				resources:   {cpus: 2.0, memory_mb: 6144}
 				recorder:    "trace"
 				recorded_by: ["enact-node"]
 				tasks: [
@@ -779,7 +780,7 @@ pipeline: schema.#Pipeline & {
 							inputs:  ["packages/agent/package.json", "packages/agent/pnpm-lock.yaml", "packages/agent/pnpm-workspace.yaml", "packages/agent/packages/*/package.json"]
 							outputs: ["packages/agent/node_modules"]
 						}
-						command: "showcase/scripts/build_once.sh agent-node-modules packages/agent/node_modules/.enact-build-key packages/agent/package.json packages/agent/pnpm-lock.yaml packages/agent/pnpm-workspace.yaml 'packages/agent/packages/*/package.json' -- pnpm --dir packages/agent install --frozen-lockfile && cd packages/agent && pnpm exec turbo run build --filter='!@posthog/agent'"
+						command: "showcase/scripts/build_once.sh agent-node-modules packages/agent/node_modules/.enact-build-key packages/agent/package.json packages/agent/pnpm-lock.yaml packages/agent/pnpm-workspace.yaml 'packages/agent/packages/*/package.json' -- pnpm --dir packages/agent install --frozen-lockfile --prefer-offline && cd packages/agent && pnpm exec turbo run build --filter='!@posthog/agent'"
 					},
 					{
 						name:      "Run Tests"

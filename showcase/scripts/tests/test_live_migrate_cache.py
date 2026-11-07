@@ -384,6 +384,55 @@ class SnapshotVerificationAndHttpRoundtripTest(unittest.TestCase):
             seed_inserts = [b for q, b in executed if "INSERT INTO `posthog_mcp_2`.`channel_definition`" in q]
             self.assertEqual(seed_inserts, ['{"k":"direct"}\n'])
 
+    def test_pg_publish_does_not_deadlock_under_caller_migrate_lock(self) -> None:
+        with tempfile.TemporaryDirectory() as work:
+            root = Path(work) / "snapshots"
+            repo = Path(work) / "repo"
+            _seed_repo(repo)
+            key = "b" * 64
+            dump_file = Path(work) / "live-postgres.dump"
+            applied_file = Path(work) / "applied.tsv"
+            dump_file.write_bytes(b"PGDMP")
+            applied_file.write_text("posthog\t0001_initial\nvisual_review\t0001_initial\n", encoding="utf-8")
+
+            with (
+                lmc.file_lock(root / "live-v1" / f"{key}.migrate.lock"),
+                lmc.file_lock(root / "live-v1" / f"{key}.lock"),
+            ):
+                pub = subprocess.run(
+                    [
+                        sys.executable,
+                        str(SCRIPTS / "live_migrate_cache.py"),
+                        "pg-publish",
+                        "--snapshot-root",
+                        str(root),
+                        "--repo",
+                        str(repo),
+                        "--key",
+                        key,
+                        "--pg-major",
+                        "15",
+                        "--template-key",
+                        "tpl_a",
+                        "--dump-file",
+                        str(dump_file),
+                        "--applied-file",
+                        str(applied_file),
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                    check=False,
+                )
+            self.assertEqual(pub.returncode, 0, pub.stderr)
+            ver = subprocess.run(
+                [sys.executable, str(SCRIPTS / "live_migrate_cache.py"), "verify", str(root)],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(ver.returncode, 0, ver.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()
