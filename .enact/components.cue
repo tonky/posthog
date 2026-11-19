@@ -625,8 +625,22 @@ pipeline: schema.#Pipeline & {
 				"showcase/scripts/no_drift.sh",
 			]
 			schema_check: {
-				command:         "cd ../.. && showcase/scripts/exclusive.sh geoip bin/download-mmdb && ./bin/hogli build:openapi && pnpm --filter=@posthog/mcp run scaffold-yaml -- --sync-all"
-				expect_no_drift: true
+				command: "cd ../.. && showcase/scripts/exclusive.sh geoip bin/download-mmdb && ./bin/hogli build:openapi && pnpm --filter=@posthog/mcp run scaffold-yaml -- --sync-all"
+				expect_no_drift: [
+					"frontend/src/generated/**",
+					"frontend/src/lib/agentScopes.generated.ts",
+					"products/*/frontend/generated/**",
+					"services/mcp/src/generated/**",
+					"services/mcp/src/api/generated.ts",
+					"services/mcp/src/tools/generated/**",
+					"services/mcp/schema/tool-definitions.json",
+					"services/mcp/schema/tool-definitions-v2.json",
+					"services/mcp/schema/generated-tool-definitions.json",
+					"services/mcp/schema/tool-definitions-all.json",
+					"services/mcp/schema/exec-command-reference.md",
+					"products/*/mcp/tools.yaml",
+					"services/mcp/definitions/**/*.yaml",
+				]
 			}
 			resources: {cpus: 1.0, memory_mb: 2400}
 		}

@@ -4,7 +4,7 @@ import "list"
 
 _storybookTestJob: {
 	needs:     ["build"]
-	resources: {cpus: 2.0, memory_mb: 4096}
+	resources: *{cpus: 2.0, memory_mb: 4096} | _
 	_args:     string | *""
 	tasks: [
 		{name: "Build products", command: "showcase/scripts/build_quill.sh && showcase/scripts/build_hogvm.sh && showcase/scripts/build_products.sh"},
@@ -102,6 +102,7 @@ pipeline: components: {
 			webkit: _storybookTestJob & {
 				name:         "WebKit"
 				shards:       4
+				resources:    {cpus: 2.0, memory_mb: 11264}
 				_args:        "--browser webkit "
 				target_scope: _scope & {footprints_from: "storybook:test"}
 			}
