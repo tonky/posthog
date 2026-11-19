@@ -47,7 +47,7 @@ showcase/scripts/build_once.sh storybook-build common/storybook/dist/.enact-buil
     posthog/templates/replay_player_frame package.json pnpm-lock.yaml pnpm-workspace.yaml \
     turbo.json tsconfig.json patches -- \
     bash -c 'rm -rf common/storybook/dist && bin/turbo --filter=@posthog/storybook prepare &&
-        NODE_OPTIONS=--max-old-space-size=32768 pnpm --filter=@posthog/storybook build --test -c .storybook-enact'
+        NODE_OPTIONS=--max-old-space-size=8192 pnpm --filter=@posthog/storybook build --test -c .storybook-enact'
 [ "${1:-}" != --build ] || exit 0
 
 shard="${1:?usage: run_storybook_tests.sh [--browser chromium|webkit] <shard> <total> [story files...] | --build}"

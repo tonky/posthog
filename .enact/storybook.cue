@@ -81,7 +81,7 @@ pipeline: components: {
 				name:      "Build"
 				services:  false
 				needs:     ["quill:build"]
-				resources: {cpus: 4.0, memory_mb: 8192}
+				resources: {cpus: 4.0, memory_mb: 12288}
 				outputs: {
 					arch_independent: true
 					paths: [
