@@ -60,7 +60,8 @@ if [ -n "${ENACT_FOOTPRINT_DIR:-}" ] && [ "${ENACT_FRONTEND_FORCE_TRACE:-$(uname
     set -- "${rest[@]}"
 fi
 
-CI=true pnpm --filter=@posthog/frontend exec jest "${jest_ignore[@]}" --maxWorkers=3 --forceExit \
+# Recycle Jest/jsdom workers at 768MB idle so 3 workers stay <= ~3.9 GiB inside c3m6g containers.
+CI=true pnpm --filter=@posthog/frontend exec jest "${jest_ignore[@]}" --maxWorkers=3 --workerIdleMemoryLimit=768MB --forceExit \
     --testNamePattern="$pattern" \
     ${ENACT_TEST_VERBOSE:+--verbose} "$@" || { rc=$?; [ "$status" -ne 0 ] || status=$rc; }
 exit "$status"
