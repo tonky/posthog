@@ -278,7 +278,10 @@ if RECORDING:
     core.start(
         root,
         recorders=(__file__,),
-        unlisted_callers=(f"{os.sep}_pytest{os.sep}",),
+        unlisted_callers=(
+            f"{os.sep}_pytest{os.sep}",
+            f"{os.sep}django{os.sep}core{os.sep}management{os.sep}",
+        ),
         # posthog/conftest.py's persons database: `sqlx migrate run --source
         # rust/persons_migrations` reads that directory, and sqlx reads `.env` (and a
         # `sqlx.toml`, its default `migrations/`) where it runs.

@@ -101,6 +101,7 @@ pipeline: components: {
 			test:   _storybookTestJob & {name: "Test", shards: 16, recorder: "own"}
 			webkit: _storybookTestJob & {
 				name:         "WebKit"
+				events:       ["push", "workflow_dispatch", "merge_group", "schedule"]
 				shards:       4
 				resources:    {cpus: 2.0, memory_mb: 11264}
 				_args:        "--browser webkit "

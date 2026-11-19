@@ -506,6 +506,22 @@ jobs:
         ENACT_OUTPUTS_PLATFORM: ${{ runner.os }}-${{ runner.arch }}
         ENACT_OUTPUTS_PRODUCERS_FILE: ${{ runner.temp }}/enact-outputs-producers.json
         ENACT_OUTPUTS_STEPS: ${{ toJson(steps) }}
+    - name: restore Host Cache [frontend tsgo declaration-emit cache]
+      id: host_cache_frontend_tsgo
+      if: ${{ (steps.runner_caches.outputs.host != '' && contains(format(',{0},', matrix.caches), ',frontend-tsgo,')) && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
+      continue-on-error: true
+      run: enact ci host-cache restore
+      env:
+        ENACT_HOST_CACHE_KEY: frontend-tsgo-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tsconfig.json', 'package.json', 'pnpm-lock.yaml') }}
+        ENACT_HOST_CACHE_PATHS: .enact/state/tsgo
+    - name: restore Host Cache [mypy fine-grained cache]
+      id: host_cache_mypy
+      if: ${{ (steps.runner_caches.outputs.host != '' && contains(format(',{0},', matrix.caches), ',mypy,')) && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
+      continue-on-error: true
+      run: enact ci host-cache restore
+      env:
+        ENACT_HOST_CACHE_KEY: mypy-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pyproject.toml', 'uv.lock') }}
+        ENACT_HOST_CACHE_PATHS: .mypy_cache
     - parallel:
       - name: Restore Python build & venv cache
         id: python_l1_cache
@@ -703,13 +719,15 @@ jobs:
           restore-keys: backend-templates-4-${{ runner.os }}-
       - name: Restore Cache [frontend tsgo declaration-emit cache]
         id: cache_frontend_tsgo
-        if: ${{ (contains(format(',{0},', matrix.caches), ',frontend-tsgo,')) && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
+        if: ${{ (contains(format(',{0},', matrix.caches), ',frontend-tsgo,') && steps.host_cache_frontend_tsgo.outputs.hit != 'true') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
         continue-on-error: true
         uses: actions/cache/restore@v6
         with:
-          key: frontend-tsgo-${{ runner.os }}-${{ github.sha }}
+          key: frontend-tsgo-${{ runner.os }}-${{ hashFiles('tsconfig.json', 'package.json', 'pnpm-lock.yaml') }}-${{ github.sha }}
           path: .enact/state/tsgo
-          restore-keys: frontend-tsgo-${{ runner.os }}-
+          restore-keys: |-
+            frontend-tsgo-${{ runner.os }}-${{ hashFiles('tsconfig.json', 'package.json', 'pnpm-lock.yaml') }}-
+            frontend-tsgo-${{ runner.os }}-
       - name: Restore Cache [Standalone HogVM native target]
         id: cache_hogvm_native
         if: ${{ (contains(format(',{0},', matrix.caches), ',hogvm-native,')) && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
@@ -732,13 +750,15 @@ jobs:
           restore-keys: live-migrations-1-${{ runner.os }}-
       - name: Restore Cache [mypy fine-grained cache]
         id: cache_mypy
-        if: ${{ (contains(format(',{0},', matrix.caches), ',mypy,')) && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
+        if: ${{ (contains(format(',{0},', matrix.caches), ',mypy,') && steps.host_cache_mypy.outputs.hit != 'true') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
         continue-on-error: true
         uses: actions/cache/restore@v6
         with:
-          key: mypy-${{ runner.os }}-${{ github.sha }}
+          key: mypy-${{ runner.os }}-${{ hashFiles('pyproject.toml', 'uv.lock') }}-${{ github.sha }}
           path: .mypy_cache
-          restore-keys: mypy-${{ runner.os }}-
+          restore-keys: |-
+            mypy-${{ runner.os }}-${{ hashFiles('pyproject.toml', 'uv.lock') }}-
+            mypy-${{ runner.os }}-
       - name: Restore Cache [Replay anonymizer native release target]
         id: cache_replay_anonymizer_native
         if: ${{ (contains(format(',{0},', matrix.caches), ',replay-anonymizer-native,')) && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
@@ -767,14 +787,14 @@ jobs:
           cache_backend_templates=${{ steps.cache_backend_templates.outputs.cache-hit }}
           cache_live_migrations=${{ steps.cache_live_migrations.outputs.cache-hit }}
     - name: Require Seeded Cache [frontend tsgo declaration-emit cache]
-      if: ${{ (contains(format(',{0},', matrix.caches), ',frontend-tsgo,') && !(github.event_name == 'workflow_dispatch' && inputs.seed_caches == 'true') && steps.cache_frontend_tsgo.outputs.cache-matched-key == '') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
+      if: ${{ (contains(format(',{0},', matrix.caches), ',frontend-tsgo,') && steps.host_cache_frontend_tsgo.outputs.hit != 'true' && !(github.event_name == 'workflow_dispatch' && inputs.seed_caches == 'true') && steps.cache_frontend_tsgo.outputs.cache-matched-key == '') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
       run: |-
         echo "::error title=Cache seed needed::$ENACT_SEED_MESSAGE"
         exit 1
       env:
         ENACT_SEED_MESSAGE: "cache 'frontend tsgo declaration-emit cache' needs a seed: its jobs never start cold. Run workflow '${{ github.workflow }}' on the default branch by workflow_dispatch with seed_caches=true, then rerun this one."
     - name: Require Seeded Cache [mypy fine-grained cache]
-      if: ${{ (contains(format(',{0},', matrix.caches), ',mypy,') && !(github.event_name == 'workflow_dispatch' && inputs.seed_caches == 'true') && steps.cache_mypy.outputs.cache-matched-key == '') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
+      if: ${{ (contains(format(',{0},', matrix.caches), ',mypy,') && steps.host_cache_mypy.outputs.hit != 'true' && !(github.event_name == 'workflow_dispatch' && inputs.seed_caches == 'true') && steps.cache_mypy.outputs.cache-matched-key == '') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
       run: |-
         echo "::error title=Cache seed needed::$ENACT_SEED_MESSAGE"
         exit 1
@@ -919,6 +939,22 @@ jobs:
         name: enact-footprints-${{ matrix.task_id }}
         path: .enact/state/cache/trace-reach.d/
         retention-days: "1"
+    - name: save Host Cache [frontend tsgo declaration-emit cache]
+      id: save_host_cache_frontend_tsgo
+      if: ${{ (steps.runner_caches.outputs.host != '' && contains(format(',{0},', matrix.caches), ',frontend-tsgo,')) && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
+      continue-on-error: true
+      run: enact ci host-cache save
+      env:
+        ENACT_HOST_CACHE_KEY: frontend-tsgo-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tsconfig.json', 'package.json', 'pnpm-lock.yaml') }}
+        ENACT_HOST_CACHE_PATHS: .enact/state/tsgo
+    - name: save Host Cache [mypy fine-grained cache]
+      id: save_host_cache_mypy
+      if: ${{ (steps.runner_caches.outputs.host != '' && contains(format(',{0},', matrix.caches), ',mypy,')) && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
+      continue-on-error: true
+      run: enact ci host-cache save
+      env:
+        ENACT_HOST_CACHE_KEY: mypy-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pyproject.toml', 'uv.lock') }}
+        ENACT_HOST_CACHE_PATHS: .mypy_cache
     - name: Check Package Caches for New Entries
       id: cache_delta
       if: ${{ (!cancelled() && (steps.runner_caches.outputs.host == '' && steps.python_l1_cache.outputs.cache-hit != 'true' || steps.runner_caches.outputs.host == '' && steps.node_l1_cache.outputs.cache-hit != 'true' || contains(format(',{0},', matrix.caches), ',backend-templates,') && steps.cache_backend_templates.outputs.cache-hit != 'true' || contains(format(',{0},', matrix.caches), ',live-migrations,') && steps.cache_live_migrations.outputs.cache-hit != 'true') && env.ENACT_SAVE_EVENT == 'true' && (matrix.shard_index == '' || matrix.shard_index == 1 || matrix.shard_index == '1') && github.event_name != 'pull_request') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
@@ -1149,7 +1185,7 @@ jobs:
           key: ${{ steps.cache_backend_templates.outputs.cache-primary-key }}
           path: ~/.cache/enact/snapshots/v3
       - name: Save Cache [frontend tsgo declaration-emit cache]
-        if: ${{ ((env.ENACT_SAVE_EVENT == 'true' && contains(format(',{0},', matrix.caches), ',frontend-tsgo,') && (matrix.shard_index == '' || matrix.shard_index == 1 || matrix.shard_index == '1') && (github.event_name == 'schedule' || github.event_name != 'pull_request' && github.ref_name == github.event.repository.default_branch || !startsWith(steps.cache_frontend_tsgo.outputs.cache-matched-key, format('frontend-tsgo-{0}-', runner.os)))) && github.event_name != 'pull_request' && steps.cache_frontend_tsgo.outputs.cache-hit != 'true') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
+        if: ${{ ((env.ENACT_SAVE_EVENT == 'true' && contains(format(',{0},', matrix.caches), ',frontend-tsgo,') && (matrix.shard_index == '' || matrix.shard_index == 1 || matrix.shard_index == '1') && steps.host_cache_frontend_tsgo.outputs.hit != 'true' && steps.cache_frontend_tsgo.outputs.cache-primary-key != '' && (github.event_name == 'schedule' || github.event_name != 'pull_request' && github.ref_name == github.event.repository.default_branch || !startsWith(steps.cache_frontend_tsgo.outputs.cache-matched-key, format('frontend-tsgo-{0}-{1}-', runner.os, hashFiles('tsconfig.json', 'package.json', 'pnpm-lock.yaml'))))) && github.event_name != 'pull_request' && steps.cache_frontend_tsgo.outputs.cache-hit != 'true') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
         continue-on-error: true
         uses: actions/cache/save@v6
         with:
@@ -1172,7 +1208,7 @@ jobs:
             ~/.cache/enact/snapshots/live-v1
             ~/.cache/enact/snapshots/ch-v1
       - name: Save Cache [mypy fine-grained cache]
-        if: ${{ ((env.ENACT_SAVE_EVENT == 'true' && contains(format(',{0},', matrix.caches), ',mypy,') && (matrix.shard_index == '' || matrix.shard_index == 1 || matrix.shard_index == '1') && (github.event_name == 'schedule' || github.event_name != 'pull_request' && github.ref_name == github.event.repository.default_branch || !startsWith(steps.cache_mypy.outputs.cache-matched-key, format('mypy-{0}-', runner.os)))) && github.event_name != 'pull_request' && steps.cache_mypy.outputs.cache-hit != 'true') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
+        if: ${{ ((env.ENACT_SAVE_EVENT == 'true' && contains(format(',{0},', matrix.caches), ',mypy,') && (matrix.shard_index == '' || matrix.shard_index == 1 || matrix.shard_index == '1') && steps.host_cache_mypy.outputs.hit != 'true' && steps.cache_mypy.outputs.cache-primary-key != '' && (github.event_name == 'schedule' || github.event_name != 'pull_request' && github.ref_name == github.event.repository.default_branch || !startsWith(steps.cache_mypy.outputs.cache-matched-key, format('mypy-{0}-{1}-', runner.os, hashFiles('pyproject.toml', 'uv.lock'))))) && github.event_name != 'pull_request' && steps.cache_mypy.outputs.cache-hit != 'true') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
         continue-on-error: true
         uses: actions/cache/save@v6
         with:

@@ -2,8 +2,8 @@
   "platforms": {
     "aarch64-darwin": {
       "binding": {
-        "environment_sha256": "101d98d4936d29fc361a3ee4e812a4b04a251c6ce0c982d2e46550d3ad91a510",
-        "inventory_sha256": "83e69ed5d2703e1164ea6d2ce9862181c4a271efd4e438a9f37f5945542f8d01",
+        "environment_sha256": "b24490b238f18b574d4c37f91ee91b7954453a726a2a854bfdcb7021be569c5a",
+        "inventory_sha256": "a7d7db213436e1b0d894f82ca52d8dc97d663056c931032990c5a7c8420a28ab",
         "profile": null,
         "version": 2
       },
@@ -3545,7 +3545,7 @@
           }
         },
         "lockSourcePath": "enve.lock",
-        "projectSha256": "940945c3fd94ee10647574135d23da7ca13ed413ddb256ea4051f73f093a4a1d"
+        "projectSha256": "027f6e1b996f52b38a61e327c2becad95346941bd0daa492149f68366f84b93e"
       },
       "environment": {
         "AWS_ENDPOINT_URL": "http://127.0.0.1:${ENVE_SERVICE_SEAWEEDFS_PORT}",
@@ -4515,8 +4515,8 @@
     },
     "aarch64-linux": {
       "binding": {
-        "environment_sha256": "101d98d4936d29fc361a3ee4e812a4b04a251c6ce0c982d2e46550d3ad91a510",
-        "inventory_sha256": "b5a47d34ea8ca9923b3e77454facfe06e3f4d6a593d4069d9ce275c355181c27",
+        "environment_sha256": "b24490b238f18b574d4c37f91ee91b7954453a726a2a854bfdcb7021be569c5a",
+        "inventory_sha256": "bc5a363a6079a6eac6f1b6e9fe5cb757d2ff43c32630f38b79a03804bc55ea15",
         "profile": null,
         "version": 2
       },
@@ -5502,6 +5502,52 @@
           ]
         },
         {
+          "hash_name": "4qbpxb13vnfki30hprwdywdlv3ag0j2s-gst-plugins-good-1.28.7",
+          "nar_hash": "sha256:002b5wc3hn0lgnpkq770ks733ph6b0g406fp524gh44zdkqzd538",
+          "nar_size": 11795528,
+          "references": [
+            "39gixpp9ffk4z947bqgi245hrmi4h8zw-libavc1394-0.5.4",
+            "3anfddw01ai5ykdf393s3pbia6agx3df-bzip2-1.0.8",
+            "3jfk16h5di5vhrs3kw04jwkca1gzi6af-libpulseaudio-17.0",
+            "41xkq3fdlnk0d4rcsfsr97dkd68i387h-flac-1.5.0",
+            "43kdmn1mcqkmz4hjjqz8q5022g0wwh8s-wavpack-5.9.0",
+            "4qbpxb13vnfki30hprwdywdlv3ag0j2s-gst-plugins-good-1.28.7",
+            "4zlxqzzbws9z259rx9qa55pb3y4rqy5h-libxtst-1.2.5",
+            "51kbcjh6xqpn59qp3wrw03bvpanx6vhj-libdv-1.0.0",
+            "5cca109qgqr4zr7xjlzm3n9x1hsr2rnc-taglib-2.2.1",
+            "6ylp5nllhhm1dvp3h9qp9lkgdg7cz4vd-speex-1.2.1",
+            "7mbr0lhycwsl36hz5wnyjjd4f92lc4r7-libxext-1.3.7",
+            "7vm2a5lq43fr9zmnfcnavjhxxcgdrddi-libiec61883-1.2.0",
+            "92l6ysf7lfi33d4vpgz8f4xx9mgm02zv-gst-plugins-base-1.28.7",
+            "9wd1p2hwnww5bhb70gqqgg8y4x51da35-aalib-1.4rc5",
+            "b36qacaxzhyvn4fsjncap6v5g0vkgf22-libshout-2.4.6",
+            "c7dh1d8iig2cy3q5vxhs1bwq0zynj72d-libxml2-2.15.4",
+            "db07pw9avlwysb3v68cfp9cijg2mmfns-openssl-3.5.8",
+            "dcrw86f3s39dm7wmvc08ynhq22a2q8ak-mpg123-1.33.7",
+            "g5cw0p88bbls0848czzvvj0b2byb119r-lame-4.0-lib",
+            "gh65jkx5hqzh3s12851c9m09ld2qaq4x-libgudev-238",
+            "gy76gi2303p29mxwd53hchpr3zyib1xf-libcaca-0.99.beta20",
+            "h5lg2wlg4kzw421h0q4zbazsm8l583dj-libpng-apng-1.6.58",
+            "hjy0cvhhv2s0bvh9zn2bf88m4kbr9gah-v4l-utils-1.32.0",
+            "hx9wvdx2l59iahwf9nmrx7rwkm6cymgs-glibc-2.44-25",
+            "jihd8ww5b7bfj4jvhwd21831rac5ipgd-gdk-pixbuf-2.44.8",
+            "jnhyay8hqg0iaxsgmlm7q9dlcrz632zz-libxfixes-6.0.2",
+            "k35v740z5dfa098gw641r0db6kah9fvs-glib-2.88.3",
+            "kamv6nii5127y32pyprqnfk8kc824x02-libx11-1.8.13",
+            "l57s8hy0nd1sli77jn8ybvd3b5jqabab-gstreamer-1.28.7",
+            "m64pfzf9yxpyranl4ypkgamzn5zh87s6-libxdamage-1.1.7",
+            "m6d33nhx1nf6g4ss10f8bnpv5m9cgzrr-libjpeg-turbo-3.1.4.1",
+            "n8y9f4bc1sn03l6wsxd6ypnwrjzasng7-libvpx-1.17.0",
+            "na9inwswsrgxxqpqrz3ms78qn7pyxg44-gcc-16.2.0-lib",
+            "prfywghskr5s1pf9afr93kk7hb0d708x-cairo-1.18.4",
+            "psqj1smk0g57wqnd9wz6cxdb31fxck7c-libraw1394-2.1.2",
+            "r58sbkfz4p00jl61r091v8973prm1b7a-opencore-amr-0.1.6",
+            "vp53177hsn5f3ji2a1qvwj659sgmgc38-libsoup-3.6.6",
+            "xm1ngvss69sd1n2n8zgcyc27mhc1q1s7-twolame-2017-09-27",
+            "ylk29ja7wc762v9csch9v3fvjjvw40wg-orc-0.4.44"
+          ]
+        },
+        {
           "hash_name": "4rfrq8nbjvldg4dgkgya8jjry2nqjp8h-libva-2.24.1",
           "nar_hash": "sha256:01wlbnld0brdwky4ggbpk1q9hvmfsbsnjsldylc889lf3qpa1a3w",
           "nar_size": 577768,
@@ -5600,6 +5646,17 @@
             "jv7npga16bn65m0k8r4wqkwnnpx4fpbq-libxcrypt-4.5.2",
             "kq7m9dp5cjy0yxz2n9mbcwx4xscjwrsj-kmod-31-lib",
             "lngldcdpyc39i41g3zrsf7n9rh7mn2gs-util-linux-minimal-2.42.3-lib"
+          ]
+        },
+        {
+          "hash_name": "5cca109qgqr4zr7xjlzm3n9x1hsr2rnc-taglib-2.2.1",
+          "nar_hash": "sha256:1fqdnzzy1zqpll7s6ndqqpz6l3la047xc2jycr2lhigq0wy1fz7y",
+          "nar_size": 3311944,
+          "references": [
+            "5cca109qgqr4zr7xjlzm3n9x1hsr2rnc-taglib-2.2.1",
+            "7d907izyink96xhqazkbw4wicvgkm76c-zlib-1.3.2",
+            "hx9wvdx2l59iahwf9nmrx7rwkm6cymgs-glibc-2.44-25",
+            "na9inwswsrgxxqpqrz3ms78qn7pyxg44-gcc-16.2.0-lib"
           ]
         },
         {
@@ -6267,6 +6324,14 @@
           ]
         },
         {
+          "hash_name": "84cmlhwd901w1x7kgqfkii2ay9kwxlk4-gst-plugins-good-1.28.7-dev",
+          "nar_hash": "sha256:1bl34kislqlsmnj2chxdvc2gii2g6dz8zrkxkypnx0qdfv6xmjba",
+          "nar_size": 544,
+          "references": [
+            "4qbpxb13vnfki30hprwdywdlv3ag0j2s-gst-plugins-good-1.28.7"
+          ]
+        },
+        {
           "hash_name": "89igyzp72y4ky0qyj4x5r52z84w203ki-strip.sh",
           "nar_hash": "sha256:1g7aj4jiklwafv67nspk15zdg69g4lnh27nvdyahhfqrnydbnwg6",
           "nar_size": 4616,
@@ -6657,6 +6722,16 @@
           ]
         },
         {
+          "hash_name": "9wd1p2hwnww5bhb70gqqgg8y4x51da35-aalib-1.4rc5",
+          "nar_hash": "sha256:1d5hx7lqimpiv75lxx6q3wgsnrzag8k4a65r12h46yw394783fiw",
+          "nar_size": 151416,
+          "references": [
+            "5l2pjvrbxby6yrl2k3g07sp28j2bxrzv-ncurses-6.6",
+            "9wd1p2hwnww5bhb70gqqgg8y4x51da35-aalib-1.4rc5",
+            "hx9wvdx2l59iahwf9nmrx7rwkm6cymgs-glibc-2.44-25"
+          ]
+        },
+        {
           "hash_name": "9ygld0zbpkqvng2xwbb02k91qap39h6z-gupnp-1.6.10",
           "nar_hash": "sha256:0mrpd7n6jqp4ys1gg4ilx9063rzciw0ss1fq9jbcrrd1rk0rgm0f",
           "nar_size": 373216,
@@ -6901,7 +6976,18 @@
           ]
         },
         {
-          "hash_name": "b3n377nvpzd1gpwh3551ba0hxim6igz5-playwright-browsers-1.60.0"
+          "hash_name": "b36qacaxzhyvn4fsjncap6v5g0vkgf22-libshout-2.4.6",
+          "nar_hash": "sha256:0nm8xahff2v0f89ybmdzy4565wnjwjdssdkvm6cv7rca6bi4n4sa",
+          "nar_size": 239552,
+          "references": [
+            "6ylp5nllhhm1dvp3h9qp9lkgdg7cz4vd-speex-1.2.1",
+            "a6naychnaf31hvgsnbj9i9xc0hg5x6c2-libogg-1.3.6",
+            "b36qacaxzhyvn4fsjncap6v5g0vkgf22-libshout-2.4.6",
+            "db07pw9avlwysb3v68cfp9cijg2mmfns-openssl-3.5.8",
+            "hx9wvdx2l59iahwf9nmrx7rwkm6cymgs-glibc-2.44-25",
+            "ra4mgv63g0c91hyi261y3f0vd0v3n4i6-libvorbis-1.3.7",
+            "rmclzg27v68radz2gw3sgd6gi2zp10kh-libtheora-1.2.0"
+          ]
         },
         {
           "hash_name": "b472j18jwlz0xqzdb0a85ywc5ifryipq-shared-mime-info-2.5.1",
@@ -7837,6 +7923,19 @@
           ]
         },
         {
+          "hash_name": "gy76gi2303p29mxwd53hchpr3zyib1xf-libcaca-0.99.beta20",
+          "nar_hash": "sha256:0df550yacn6x664k3jl4mbki4ipxwpkiid0fpgdrypkqy821mhgw",
+          "nar_size": 963920,
+          "references": [
+            "5l2pjvrbxby6yrl2k3g07sp28j2bxrzv-ncurses-6.6",
+            "7d907izyink96xhqazkbw4wicvgkm76c-zlib-1.3.2",
+            "gy76gi2303p29mxwd53hchpr3zyib1xf-libcaca-0.99.beta20",
+            "hx9wvdx2l59iahwf9nmrx7rwkm6cymgs-glibc-2.44-25",
+            "kamv6nii5127y32pyprqnfk8kc824x02-libx11-1.8.13",
+            "na9inwswsrgxxqpqrz3ms78qn7pyxg44-gcc-16.2.0-lib"
+          ]
+        },
+        {
           "hash_name": "gyvsr9yz3llc07p6z64dbkkfgypfl08r-perl5.42.3-CGI-Fast-2.16",
           "nar_hash": "sha256:1i4rcmgvycxa3hmgiazn1bfbk94l3bd0aghgh65dr52la4lns154",
           "nar_size": 13368,
@@ -8234,6 +8333,9 @@
             "hx9wvdx2l59iahwf9nmrx7rwkm6cymgs-glibc-2.44-25",
             "igyjhpir19kwc71zqcnpvw16d5jl5nyv-perl5.42.3-Crypt-URandom-0.55"
           ]
+        },
+        {
+          "hash_name": "ii41dp942q7p04jr0f9m89a8f8pkm4r7-playwright-browsers-1.60.0"
         },
         {
           "hash_name": "ijbpixrnm9cbf24ylvp3aiwxrjjlrajc-spandsp-0.0.6",
@@ -10010,6 +10112,15 @@
           ]
         },
         {
+          "hash_name": "r58sbkfz4p00jl61r091v8973prm1b7a-opencore-amr-0.1.6",
+          "nar_hash": "sha256:16i495inw1c7ndkrz36a9fjpz3ssbz13qics8md1z5qjy5grp39r",
+          "nar_size": 375216,
+          "references": [
+            "hx9wvdx2l59iahwf9nmrx7rwkm6cymgs-glibc-2.44-25",
+            "r58sbkfz4p00jl61r091v8973prm1b7a-opencore-amr-0.1.6"
+          ]
+        },
+        {
           "hash_name": "r63s0qhvs9wqiz5z4jry5ajsfwl6xxp3-neon-0.37.1",
           "nar_hash": "sha256:000q9q5ifmi19iirkq06zssqx7ki4rjr0zh0xwg9vxi2r37fa12w",
           "nar_size": 987112,
@@ -10622,6 +10733,16 @@
           "references": [
             "hx9wvdx2l59iahwf9nmrx7rwkm6cymgs-glibc-2.44-25",
             "xkwmb4wpas8ly749i21yq594zdny6yyn-libseccomp-2.6.1-lib"
+          ]
+        },
+        {
+          "hash_name": "xm1ngvss69sd1n2n8zgcyc27mhc1q1s7-twolame-2017-09-27",
+          "nar_hash": "sha256:1sxf2sh4sgbi9767ya9vhp5zxaddsp884040nnx6fs9k86c5bwl5",
+          "nar_size": 271608,
+          "references": [
+            "h9c11p6mc4yig5dhwmrqn8scqqddjnbk-libsndfile-1.2.2",
+            "hx9wvdx2l59iahwf9nmrx7rwkm6cymgs-glibc-2.44-25",
+            "xm1ngvss69sd1n2n8zgcyc27mhc1q1s7-twolame-2017-09-27"
           ]
         },
         {
@@ -12455,6 +12576,36 @@
                 "rev": "7dd199b0e2993e37b4775ed66b1c291699608c9f",
                 "store_paths": [
                   "/nix/store/92l6ysf7lfi33d4vpgz8f4xx9mgm02zv-gst-plugins-base-1.28.7"
+                ],
+                "version": "1.28.7"
+              }
+            },
+            {
+              "constraint": {
+                "attr": "gst_all_1.gst-plugins-good",
+                "context": "profiles.dev",
+                "output": null,
+                "system": "aarch64-linux",
+                "version": null
+              },
+              "package": {
+                "attr_path": "gst_all_1.gst-plugins-good",
+                "name": "gst-plugins-good",
+                "origin": {
+                  "Channel": {
+                    "build": 347113768,
+                    "evaluation": 1829922,
+                    "release": "nixpkgs/nixpkgs-26.11pre1086972.7dd199b0e299/"
+                  }
+                },
+                "outputs": {
+                  "debug": "/nix/store/z4xwagl3855n7ddvcgs38wmymn29nyw1-gst-plugins-good-1.28.7-debug",
+                  "dev": "/nix/store/84cmlhwd901w1x7kgqfkii2ay9kwxlk4-gst-plugins-good-1.28.7-dev",
+                  "out": "/nix/store/4qbpxb13vnfki30hprwdywdlv3ag0j2s-gst-plugins-good-1.28.7"
+                },
+                "rev": "7dd199b0e2993e37b4775ed66b1c291699608c9f",
+                "store_paths": [
+                  "/nix/store/4qbpxb13vnfki30hprwdywdlv3ag0j2s-gst-plugins-good-1.28.7"
                 ],
                 "version": "1.28.7"
               }
@@ -14476,7 +14627,7 @@
           }
         },
         "lockSourcePath": "enve.lock",
-        "projectSha256": "940945c3fd94ee10647574135d23da7ca13ed413ddb256ea4051f73f093a4a1d"
+        "projectSha256": "027f6e1b996f52b38a61e327c2becad95346941bd0daa492149f68366f84b93e"
       },
       "environment": {
         "AWS_ENDPOINT_URL": "http://127.0.0.1:${ENVE_SERVICE_SEAWEEDFS_PORT}",
@@ -14568,7 +14719,7 @@
         "ETCD_HOST": "127.0.0.1",
         "ETCD_PORT": "2379",
         "ETCD_URL": "http://127.0.0.1:2379",
-        "FONTCONFIG_FILE": "$ENVE_STORE_DIR/b3n377nvpzd1gpwh3551ba0hxim6igz5-playwright-browsers-1.60.0/fonts.conf",
+        "FONTCONFIG_FILE": "$ENVE_STORE_DIR/ii41dp942q7p04jr0f9m89a8f8pkm4r7-playwright-browsers-1.60.0/fonts.conf",
         "IDENTITY_MATCHING_S3_ENDPOINT": "http://127.0.0.1:${ENVE_SERVICE_SEAWEEDFS_PORT}",
         "KAFKA_BROKERS": "127.0.0.1:9092",
         "KAFKA_HOST": "127.0.0.1",
@@ -14592,7 +14743,7 @@
         "PGPORT": "${ENVE_SERVICE_POSTGRES_PORT}",
         "PGTZ": "UTC",
         "PGUSER": "posthog",
-        "PLAYWRIGHT_BROWSERS_PATH": "$ENVE_STORE_DIR/b3n377nvpzd1gpwh3551ba0hxim6igz5-playwright-browsers-1.60.0",
+        "PLAYWRIGHT_BROWSERS_PATH": "$ENVE_STORE_DIR/ii41dp942q7p04jr0f9m89a8f8pkm4r7-playwright-browsers-1.60.0",
         "PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS": "1",
         "POSTGRES_HOST": "127.0.0.1",
         "POSTGRES_PORT": "5432",
@@ -15227,6 +15378,7 @@
             "46gg5rkwhvxz4dpidgbrvq33p5rdzzf4-libxkbcommon-1.13.2-dev",
             "4k6kz6xz22sjb04mwxnjdhyhf3xhz3yz-at-spi2-core-2.60.6-dev",
             "4n5jdf2170lrq2q6als3w6akd6s70isv-vulkan-loader-1.4.357.0",
+            "4qbpxb13vnfki30hprwdywdlv3ag0j2s-gst-plugins-good-1.28.7",
             "5gbcnwaz86304pm1a1q1z4l0jipnwqsb-flite-2.2-bin",
             "5ll8ndagxr1f4h88ydzvp348d4xj2jzs-libavif-1.4.2",
             "5npqg3bwkdvynqyjzv8aln1k0p0kxw1i-woff2-1.0.2-dev",
@@ -15242,6 +15394,7 @@
             "7i8bg9nbj8164q1qf8nh2yiihn9gdn66-libxcomposite-0.4.7-dev",
             "7mbr0lhycwsl36hz5wnyjjd4f92lc4r7-libxext-1.3.7",
             "7y213gg01i4jx6rxi8q01gvq7i5gisv6-enchant-2.6.9",
+            "84cmlhwd901w1x7kgqfkii2ay9kwxlk4-gst-plugins-good-1.28.7-dev",
             "92l6ysf7lfi33d4vpgz8f4xx9mgm02zv-gst-plugins-base-1.28.7",
             "944yw68xl02j8av80zqgqpb4i58lcn8n-libjpeg-turbo-3.1.4.1-bin",
             "9cnwcn4fgz42vc0dh8y1n4xgavnddw4l-libxslt-1.1.45-bin",
@@ -15331,7 +15484,7 @@
             "zvslra1w3iwm9hvrmnyrz85dvsj5bkgl-systemd-minimal-libs-261.3-dev",
             "zxxlg1hpnbpzl5lrmaxc0qdnw72pz5i5-libtasn1-4.21.0"
           ],
-          "closure": "b3n377nvpzd1gpwh3551ba0hxim6igz5-playwright-browsers-1.60.0",
+          "closure": "ii41dp942q7p04jr0f9m89a8f8pkm4r7-playwright-browsers-1.60.0",
           "version": "1.60.0"
         },
         "pnpm": {
@@ -15594,8 +15747,8 @@
     },
     "x86_64-linux": {
       "binding": {
-        "environment_sha256": "101d98d4936d29fc361a3ee4e812a4b04a251c6ce0c982d2e46550d3ad91a510",
-        "inventory_sha256": "aaa5a0e19df6181014f4c7784c7c511ec13b8103599421c50dda2abd69424a6c",
+        "environment_sha256": "b24490b238f18b574d4c37f91ee91b7954453a726a2a854bfdcb7021be569c5a",
+        "inventory_sha256": "b2a198bc085af4748b8c33e518953a4522badc46c7bb6bed65c4cc804fa5b906",
         "profile": null,
         "version": 2
       },
@@ -15887,6 +16040,16 @@
           ]
         },
         {
+          "hash_name": "142ix3fvf9wmbhwlr35k770zbzp1q16z-twolame-2017-09-27",
+          "nar_hash": "sha256:1hix4prnz526drz0qa71pmsjkd1dghj3fyb9x4y1859vkzl72qlz",
+          "nar_size": 243088,
+          "references": [
+            "142ix3fvf9wmbhwlr35k770zbzp1q16z-twolame-2017-09-27",
+            "h4wfwic161kxrr74jlzla5lsm28hgary-glibc-2.44-25",
+            "kv27f6dgpprwdm1038l2pwrcgpbfg7h6-libsndfile-1.2.2"
+          ]
+        },
+        {
           "hash_name": "14l36b0z69hgd8b6migz9w5m49gjak6d-libthai-0.1.30",
           "nar_hash": "sha256:197lj30rd7jbryfz0q0rvyk4mfkwgkywrzpxn7agm7v13wh8dv71",
           "nar_size": 652312,
@@ -16129,6 +16292,17 @@
           "references": [
             "2hhfad8hwbsy5gskb4mpiwybb4y116zr-perl5.42.3-FCGI-0.82",
             "h4wfwic161kxrr74jlzla5lsm28hgary-glibc-2.44-25"
+          ]
+        },
+        {
+          "hash_name": "2i66bjzsn8l3yqlb9cqb7j6k90sj7nsb-taglib-2.2.1",
+          "nar_hash": "sha256:0q0jkxfz4vbl5n6i2b6ilnwydanbb3bg0i5f982cngbs0vm7lmv6",
+          "nar_size": 3294920,
+          "references": [
+            "2i66bjzsn8l3yqlb9cqb7j6k90sj7nsb-taglib-2.2.1",
+            "h4wfwic161kxrr74jlzla5lsm28hgary-glibc-2.44-25",
+            "j7qx4s4mr17j1wqgvqdzj33lmrnzb387-gcc-16.2.0-lib",
+            "wgw25d181h0qks7qsfp1bh7c5nd3f0s7-zlib-1.3.2"
           ]
         },
         {
@@ -16573,6 +16747,52 @@
           ]
         },
         {
+          "hash_name": "4wcvpxq1gqy0fwyygwyzg4jxj7lsl0wr-gst-plugins-good-1.28.7",
+          "nar_hash": "sha256:0dl9g43d9wv8diwfp9b8knimqnrsrbivwvx2g5wyi4qj0xxd76pq",
+          "nar_size": 9634344,
+          "references": [
+            "0k2p6nrgj5v0538zlvkyh41n15g3d7pf-libiec61883-1.2.0",
+            "11dc1v8xr8rgkg2x7cqri8b68fpccs47-libdv-1.0.0",
+            "142ix3fvf9wmbhwlr35k770zbzp1q16z-twolame-2017-09-27",
+            "181dcka5aqx9b3ivbxkbgx0bzsiflady-v4l-utils-1.32.0",
+            "2i66bjzsn8l3yqlb9cqb7j6k90sj7nsb-taglib-2.2.1",
+            "3chja2vfj09qdchm54br4rr8i1n5srh1-libavc1394-0.5.4",
+            "3dkchpfn8r3ipsccl1001xhcl5smfjdx-glib-2.88.3",
+            "3lgd2133qg3pxlpkb5gqgyq7z9riz8p9-flac-1.5.0",
+            "4wcvpxq1gqy0fwyygwyzg4jxj7lsl0wr-gst-plugins-good-1.28.7",
+            "5bsh9kxidwb078vr5iffzr5df1v6c18l-libsoup-3.6.6",
+            "7b1npb926ga8pdwsi5n5cbyi1xyhb7dc-libgudev-238",
+            "84plc6304paw47v6s6vnn497vxakngqi-lame-4.0-lib",
+            "8ppwxgxhffc9srprc528nwlvjcdhskvq-libraw1394-2.1.2",
+            "90a5m7w1mjg6sh7g82dx34dnypn1476q-gst-plugins-base-1.28.7",
+            "95h7khkpwa5hgj9sydl2mkmv9z9kgdjx-orc-0.4.44",
+            "anhzkxdm61w312pmyj4wg36957sizgqy-opencore-amr-0.1.6",
+            "c63p5gc7k8s71f0z6g0f1pa1nnghdy4g-wavpack-5.9.0",
+            "cxd8d2vg70c3pa31v2473hphaa1v0j44-openssl-3.5.8",
+            "dkmjavf5yaj6hdcf2ggc6hsj1lp7lwsx-libjpeg-turbo-3.1.4.1",
+            "firki6qp8l2y6jgpwvix2wd95bi572mi-libxext-1.3.7",
+            "g4yzw1lc8npx2gzxlmw6lw748wpzra74-speex-1.2.1",
+            "h4wfwic161kxrr74jlzla5lsm28hgary-glibc-2.44-25",
+            "hlk27kiwy9zqwlk4pghb8gshs8s6akdy-cairo-1.18.4",
+            "ijmh255rwz2ir2v05l0s24h3n841kdgc-gstreamer-1.28.7",
+            "j7qx4s4mr17j1wqgvqdzj33lmrnzb387-gcc-16.2.0-lib",
+            "jxqmvxwnnp9gnfgbczg7d4sv6bdvvl1l-libcaca-0.99.beta20",
+            "kg5wp6wavf5p7v6shcccyqxy2nlzsn5s-libxdamage-1.1.7",
+            "ki6hf4l2l5i6rp2m2vhkr492r627msl8-gdk-pixbuf-2.44.8",
+            "l5y7fz08zvrqiinb90j1r922ymncb0sj-libxfixes-6.0.2",
+            "mpqgjnlmzy3c5hslbgyc3s7zfz3m32lg-bzip2-1.0.8",
+            "q9v6d7kfqx3ws3ssraly4c3rzl2g4iij-mpg123-1.33.7",
+            "qc7wwg64ggan8nzgrlal5dy16gyx6c1l-libpng-apng-1.6.58",
+            "qljkaaa4v37lyc43c91pvz5fsgf8j2wg-libxtst-1.2.5",
+            "rssqiz9l5knlan7fy5knf43zsrdwmg5g-libpulseaudio-17.0",
+            "vfj3fn7rp56w7f3xy6vz5s41nziv4jgm-libxml2-2.15.4",
+            "wms7nxy7ji82qlk6mgp5jbf7xvasib13-libshout-2.4.6",
+            "x93id6d40sfd5xvdmfsg8xgw067vi3bf-libvpx-1.17.0",
+            "zgja8wz4sykxvblaahn4bl0m1iz43788-aalib-1.4rc5",
+            "znrm90algr0fvnnnp130am1qfg59nl1f-libx11-1.8.13"
+          ]
+        },
+        {
           "hash_name": "4xkrh8kds5cakycv5f182dx2h8bd7prl-ada-4.0.0",
           "nar_hash": "sha256:15bkq4519z94vy43707vgiw22khfc2x73h1l13ypd1767ygjc3b2",
           "nar_size": 754536,
@@ -16747,6 +16967,14 @@
             "qa8pjnpxm0nkpci88dbig628hc7xxf67-mpfr-4.2.2",
             "s4mrmq9aciz9r5kb37jzfc7cvgk3lnxb-libmpc-1.4.1",
             "wgw25d181h0qks7qsfp1bh7c5nd3f0s7-zlib-1.3.2"
+          ]
+        },
+        {
+          "hash_name": "5qnb8il4nvc6gsn55k4n1rg3sqn5izbd-gst-plugins-good-1.28.7-dev",
+          "nar_hash": "sha256:1hy36z1anq5fam4rk1gi1gp5gh4n5pb8ay65vxs1d7qqcq753i65",
+          "nar_size": 544,
+          "references": [
+            "4wcvpxq1gqy0fwyygwyzg4jxj7lsl0wr-gst-plugins-good-1.28.7"
           ]
         },
         {
@@ -17546,9 +17774,6 @@
           ]
         },
         {
-          "hash_name": "9gllzrcm5icvvnki696zw8hba95vp9pb-playwright-browsers-1.60.0"
-        },
-        {
           "hash_name": "9ia7882m3hhvdk6qi4p3p650pfhxg75r-nghttp2-1.70.0-dev",
           "nar_hash": "sha256:0v8nmhkpiw0kx0fiwpb6qxfsavinnd0hbpxh1ps9s71y5iqhigmj",
           "nar_size": 247368,
@@ -17757,6 +17982,15 @@
             "ijmh255rwz2ir2v05l0s24h3n841kdgc-gstreamer-1.28.7",
             "rssqiz9l5knlan7fy5knf43zsrdwmg5g-libpulseaudio-17.0",
             "xlqm12gx3s3f7dc1a5pnfk4p2niw2lri-alsa-lib-1.2.16.1"
+          ]
+        },
+        {
+          "hash_name": "anhzkxdm61w312pmyj4wg36957sizgqy-opencore-amr-0.1.6",
+          "nar_hash": "sha256:1rfd4xqi6jmnqqw3qsw563j7j03vgzna0kqzs9c9gfw4ry7035pn",
+          "nar_size": 306216,
+          "references": [
+            "anhzkxdm61w312pmyj4wg36957sizgqy-opencore-amr-0.1.6",
+            "h4wfwic161kxrr74jlzla5lsm28hgary-glibc-2.44-25"
           ]
         },
         {
@@ -19195,6 +19429,19 @@
           ]
         },
         {
+          "hash_name": "jxqmvxwnnp9gnfgbczg7d4sv6bdvvl1l-libcaca-0.99.beta20",
+          "nar_hash": "sha256:0alad8xvycg8wpc9chdgjfswqc0ykdhn3zawwr5mylxp6b6yamsi",
+          "nar_size": 910536,
+          "references": [
+            "h4wfwic161kxrr74jlzla5lsm28hgary-glibc-2.44-25",
+            "hzqwc6pv8sb9qrwivc4h42cr811gs1mk-ncurses-6.6",
+            "j7qx4s4mr17j1wqgvqdzj33lmrnzb387-gcc-16.2.0-lib",
+            "jxqmvxwnnp9gnfgbczg7d4sv6bdvvl1l-libcaca-0.99.beta20",
+            "wgw25d181h0qks7qsfp1bh7c5nd3f0s7-zlib-1.3.2",
+            "znrm90algr0fvnnnp130am1qfg59nl1f-libx11-1.8.13"
+          ]
+        },
+        {
           "hash_name": "jxqrv7q8ydpsc2m9zli83bjsabq0rxs0-libxfixes-6.0.2-dev",
           "nar_hash": "sha256:1v0hdz26hlbm929qcqhkiyqhcgyq4bwiyx755c7c2707al1p1cqw",
           "nar_size": 9992,
@@ -19902,6 +20149,9 @@
             "wgw25d181h0qks7qsfp1bh7c5nd3f0s7-zlib-1.3.2",
             "yb5lz2i7rvlcxjz62764cvbw9fvfwkx2-libpng-apng-1.6.58-dev"
           ]
+        },
+        {
+          "hash_name": "my4zs453gqpqi4n48yrfzx4zl5ybgrc6-playwright-browsers-1.60.0"
         },
         {
           "hash_name": "mykdyfv1c4vv6mvc8j6k0cg9pvkazi3y-gupnp-igd-1.6.0",
@@ -21287,6 +21537,20 @@
           ]
         },
         {
+          "hash_name": "wms7nxy7ji82qlk6mgp5jbf7xvasib13-libshout-2.4.6",
+          "nar_hash": "sha256:0b71xyp6y2bj2phziza307hm5sj9gy6qi4bjca0z8wp0wnzkfmyc",
+          "nar_size": 190192,
+          "references": [
+            "cb6lsgww14cl2390y8vhy650z1jaclqy-libvorbis-1.3.7",
+            "cxd8d2vg70c3pa31v2473hphaa1v0j44-openssl-3.5.8",
+            "g4yzw1lc8npx2gzxlmw6lw748wpzra74-speex-1.2.1",
+            "h4wfwic161kxrr74jlzla5lsm28hgary-glibc-2.44-25",
+            "jdr4vga6jaj6aak5xvaamva8yhwnlw06-libogg-1.3.6",
+            "wms7nxy7ji82qlk6mgp5jbf7xvasib13-libshout-2.4.6",
+            "wv8x0w7apcviazfa4fk0v22afh9q0xid-libtheora-1.2.0"
+          ]
+        },
+        {
           "hash_name": "wnjaiawf798z57if1yf59i73abakkxwk-golangci-lint-2.14.0",
           "nar_hash": "sha256:1phcbs8dkc8jzb2n5mnxiizzgh8p7w83cgicp67ia9m82lyjlwj0",
           "nar_size": 52106816,
@@ -22004,6 +22268,16 @@
           "nar_size": 90248,
           "references": [
             "zg52i10yhzxlza087amx9hblipm9xc7d-perl5.42.3-TimeDate-2.33"
+          ]
+        },
+        {
+          "hash_name": "zgja8wz4sykxvblaahn4bl0m1iz43788-aalib-1.4rc5",
+          "nar_hash": "sha256:1gqj431msx5d2sz1kd5vrvssdi6nlksgl6ibg5in2lkgasdl5ggm",
+          "nar_size": 114336,
+          "references": [
+            "h4wfwic161kxrr74jlzla5lsm28hgary-glibc-2.44-25",
+            "hzqwc6pv8sb9qrwivc4h42cr811gs1mk-ncurses-6.6",
+            "zgja8wz4sykxvblaahn4bl0m1iz43788-aalib-1.4rc5"
           ]
         },
         {
@@ -23510,6 +23784,36 @@
                 "rev": "7dd199b0e2993e37b4775ed66b1c291699608c9f",
                 "store_paths": [
                   "/nix/store/90a5m7w1mjg6sh7g82dx34dnypn1476q-gst-plugins-base-1.28.7"
+                ],
+                "version": "1.28.7"
+              }
+            },
+            {
+              "constraint": {
+                "attr": "gst_all_1.gst-plugins-good",
+                "context": "profiles.dev",
+                "output": null,
+                "system": "x86_64-linux",
+                "version": null
+              },
+              "package": {
+                "attr_path": "gst_all_1.gst-plugins-good",
+                "name": "gst-plugins-good",
+                "origin": {
+                  "Channel": {
+                    "build": 347113771,
+                    "evaluation": 1829922,
+                    "release": "nixpkgs/nixpkgs-26.11pre1086972.7dd199b0e299/"
+                  }
+                },
+                "outputs": {
+                  "debug": "/nix/store/2j7jd892qn3ryvi9iy2qlb4h5ww18kg0-gst-plugins-good-1.28.7-debug",
+                  "dev": "/nix/store/5qnb8il4nvc6gsn55k4n1rg3sqn5izbd-gst-plugins-good-1.28.7-dev",
+                  "out": "/nix/store/4wcvpxq1gqy0fwyygwyzg4jxj7lsl0wr-gst-plugins-good-1.28.7"
+                },
+                "rev": "7dd199b0e2993e37b4775ed66b1c291699608c9f",
+                "store_paths": [
+                  "/nix/store/4wcvpxq1gqy0fwyygwyzg4jxj7lsl0wr-gst-plugins-good-1.28.7"
                 ],
                 "version": "1.28.7"
               }
@@ -25531,7 +25835,7 @@
           }
         },
         "lockSourcePath": "enve.lock",
-        "projectSha256": "940945c3fd94ee10647574135d23da7ca13ed413ddb256ea4051f73f093a4a1d"
+        "projectSha256": "027f6e1b996f52b38a61e327c2becad95346941bd0daa492149f68366f84b93e"
       },
       "environment": {
         "AWS_ENDPOINT_URL": "http://127.0.0.1:${ENVE_SERVICE_SEAWEEDFS_PORT}",
@@ -25623,7 +25927,7 @@
         "ETCD_HOST": "127.0.0.1",
         "ETCD_PORT": "2379",
         "ETCD_URL": "http://127.0.0.1:2379",
-        "FONTCONFIG_FILE": "$ENVE_STORE_DIR/9gllzrcm5icvvnki696zw8hba95vp9pb-playwright-browsers-1.60.0/fonts.conf",
+        "FONTCONFIG_FILE": "$ENVE_STORE_DIR/my4zs453gqpqi4n48yrfzx4zl5ybgrc6-playwright-browsers-1.60.0/fonts.conf",
         "IDENTITY_MATCHING_S3_ENDPOINT": "http://127.0.0.1:${ENVE_SERVICE_SEAWEEDFS_PORT}",
         "KAFKA_BROKERS": "127.0.0.1:9092",
         "KAFKA_HOST": "127.0.0.1",
@@ -25647,7 +25951,7 @@
         "PGPORT": "${ENVE_SERVICE_POSTGRES_PORT}",
         "PGTZ": "UTC",
         "PGUSER": "posthog",
-        "PLAYWRIGHT_BROWSERS_PATH": "$ENVE_STORE_DIR/9gllzrcm5icvvnki696zw8hba95vp9pb-playwright-browsers-1.60.0",
+        "PLAYWRIGHT_BROWSERS_PATH": "$ENVE_STORE_DIR/my4zs453gqpqi4n48yrfzx4zl5ybgrc6-playwright-browsers-1.60.0",
         "PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS": "1",
         "POSTGRES_HOST": "127.0.0.1",
         "POSTGRES_PORT": "5432",
@@ -26278,9 +26582,11 @@
             "48m7kz9i7dhc0c145a8r4aixcmq7a7k4-pango-1.57.1-dev",
             "4g39rajyrxqn3na1kd4pykdigsr82af5-at-spi2-core-2.60.6",
             "4sybn1iicsp9ai87d9dqc5mlh520mz2n-graphene-1.10.8-dev",
+            "4wcvpxq1gqy0fwyygwyzg4jxj7lsl0wr-gst-plugins-good-1.28.7",
             "58afjz2qz0b5q5465jjdrqi2cb2xlfkc-libgpg-error-1.61-dev",
             "5km0hqviyr3994y2z6r7bpn7vln1yfgp-libxcomposite-0.4.7-dev",
             "5q6bdxkp7lc70gn9mnf4yiybrx8ry5xq-gcc-16.2.0",
+            "5qnb8il4nvc6gsn55k4n1rg3sqn5izbd-gst-plugins-good-1.28.7-dev",
             "6258qrsicd2vjcqfwq1pc5zn2hdpf73l-graphene-1.10.8",
             "68zxfjq4ikzim1lmvang0r289zv3clwm-flite-2.2-lib",
             "6bvizw9qcnw5qz273y2qyix2wnb3r6ns-wayland-1.26.0-dev",
@@ -26386,7 +26692,7 @@
             "znrm90algr0fvnnnp130am1qfg59nl1f-libx11-1.8.13",
             "zrkqwk0989k5wa1gn3cjb76jfga3d8i3-expat-2.8.5"
           ],
-          "closure": "9gllzrcm5icvvnki696zw8hba95vp9pb-playwright-browsers-1.60.0",
+          "closure": "my4zs453gqpqi4n48yrfzx4zl5ybgrc6-playwright-browsers-1.60.0",
           "version": "1.60.0"
         },
         "pnpm": {

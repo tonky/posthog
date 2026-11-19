@@ -412,7 +412,7 @@ pipeline: schema.#Pipeline & {
 			fmt: filter: exclude:  ["products/**"]
 			lint: filter: exclude: ["products/**"]
 			max_shards: 12
-			shards:     4
+			shards:     8
 			jobs: {
 				audit: {
 					name:      "Audit"
@@ -1205,10 +1205,11 @@ pipeline: schema.#Pipeline & {
 			], _liveCaptureRust, _liveIngestionNode])
 			jobs: {
 				build: {
-					services:  false
-					builds:    true
-					resources: {cpus: 4, memory_mb: 8192}
-					needs:     ["plugin_transpiler:build"]
+					services:   false
+					builds:     true
+					technology: ["typescript", "rust"]
+					resources:  {cpus: 4, memory_mb: 8192}
+					needs:      ["plugin_transpiler:build"]
 					outputs: {
 						paths: [
 							"nodejs/dist", "nodejs/dist/.enact-build-key",
@@ -1318,12 +1319,18 @@ pipeline: schema.#Pipeline & {
 pipeline: caches: {
 	"frontend-tsgo": {
 		name:    "frontend tsgo declaration-emit cache"
+		host:    true
+		refresh: "rolling"
+		key:     ["tsconfig.json", "package.json", "pnpm-lock.yaml"]
 		paths:   [_tsgoCache]
 		seed:    {}
 		used_by: {components: ["frontend"], jobs: [pipeline.#jobs.typecheck]}
 	}
 	mypy: {
 		name:    "mypy fine-grained cache"
+		host:    true
+		refresh: "rolling"
+		key:     ["pyproject.toml", "uv.lock"]
 		paths:   [".mypy_cache"]
 		seed:    {}
 		used_by: {components: ["products"], jobs: [pipeline.#jobs.typecheck]}
