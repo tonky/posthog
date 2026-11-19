@@ -224,14 +224,18 @@ for (const name of fs.existsSync(loadsArg) ? fs.readdirSync(loadsArg) : []) {
 const targets = {}
 for (const [target, files] of [...footprints].sort(([a], [b]) => a.localeCompare(b))) {
     if (!unrecorded.has(target)) {
-        targets[target] = { files: [...files].sort() }
+        const sorted = [...files].sort()
+        targets[target] = { files: sorted, loaded: sorted }
     }
 }
 fs.mkdirSync(outDir, { recursive: true })
 const shard = process.env.ENACT_SHARD_INDEX ?? '1'
 const out = path.join(outDir, `storybook-shard${shard}-${process.pid}.json`)
 const shared = sharedFiles()
-fs.writeFileSync(out, JSON.stringify({ version: 1, recorder: RECORDER, shared: { files: shared }, targets }))
+fs.writeFileSync(
+    out,
+    JSON.stringify({ version: 1, recorder: RECORDER, shared: { files: shared, loaded: shared }, targets })
+)
 fs.writeFileSync(
     out.replace(/\.json$/, '.stats'),
     JSON.stringify(

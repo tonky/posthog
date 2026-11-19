@@ -344,9 +344,10 @@ pipeline: components: {
 		technology:       ["typescript", "python", "rust"]
 		root:             "services/mcp/tests"
 		cargo: workspace: "rust"
-		depends_on:       ["mcp", "base", "proto", "frontend", "mcp_integration_harness"]
+		depends_on:       ["mcp", "base", "proto", "mcp_integration_harness"]
 		workspace_scope:  include: list.Concat([_djangoTree, ["services/mcp", "rust", "proto", "docker", "infra", "frontend/src/queries"]])
 		watch_paths: list.Concat([[
+			"frontend/src/queries/**",
 			"rust/persons_migrations/**",
 			"showcase/scripts/rust_footprint.py",
 		], _liveFlagsRust])
@@ -400,6 +401,9 @@ pipeline: components: {
 							engine:      "python"
 							granularity: "file"
 						},
+						{match: _python_core_paths, engine: "python", granularity: "file"},
+						{match: _baseData, engine: "reach"},
+						{match: ["products/*/mcp/**/*.{json,yaml,yml}", "services/mcp/schema/**", "services/mcp/tests/unit/__snapshots__/**"], engine: "reach"},
 					]
 				}
 			}

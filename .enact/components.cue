@@ -571,13 +571,17 @@ pipeline: schema.#Pipeline & {
 				service_markers: ["django_db", "BaseTest", "ClickhouseTestMixin", "posthog.test"]
 			}
 			target_scope: {
-				rules: [{
-					match: [
-						"posthog/**/*.{py,ambr}", "ee/**/*.py", "common/**/*.py",
-						"packages/personhog-proto/**/*.py", "products/**/*.{py,ambr}",
-					]
-					engine: "python"
-				}]
+				rules: [
+					{
+						match: [
+							"posthog/**/*.{py,ambr}", "ee/**/*.py", "common/**/*.py",
+							"packages/personhog-proto/**/*.py", "products/**/*.{py,ambr}",
+						]
+						engine: "python"
+					},
+					{match: _python_core_paths, engine: "python", granularity: "file"},
+					{match: _baseData, engine: "reach"},
+				]
 				tests: [for root in ["posthog/dags", "products/*/dags"] for f in _pytestFiles {"\(root)/**/\(f)"}]
 			}
 			record_resources: resources
@@ -678,6 +682,8 @@ pipeline: schema.#Pipeline & {
 				build: {
 					services:  false
 					builds:    true
+					// Pin 261 MiB frontend:build artifact upload to GitHub-hosted runner (avoid home uplink on ibp8).
+					worker:    "github"
 					resources: {cpus: 4.0, memory_mb: 10240}
 					outputs: {
 						arch_independent: true
@@ -1266,6 +1272,8 @@ pipeline: schema.#Pipeline & {
 								engine:      "python"
 								granularity: "file"
 							},
+							{match: _python_core_paths, engine: "python", granularity: "file"},
+							{match: _baseData, engine: "reach"},
 							{match: _liveIngestionNodeTests, action: "ignore"},
 						]
 					}

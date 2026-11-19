@@ -83,6 +83,13 @@ pipeline: components: {
 			"showcase/scripts/rust_footprint.py",
 		], _liveFlagsRust])
 		resources: {cpus: 2, memory_mb: 6144}
+		target_scope: {
+			tests: ["posthog/api/test/rust_integration/test_*.py"]
+			rules: [
+				{match: _liveFlagsRust, engine: "reach"},
+				{match: ["posthog/**/*.py", "products/**/*.py", "ee/**/*.py", "common/**/*.py"], engine: "python", granularity: "file"},
+			]
+		}
 		test: {
 			command: "../../../../showcase/scripts/run_flags_integration.sh {targets}"
 			timeout: "45m"
