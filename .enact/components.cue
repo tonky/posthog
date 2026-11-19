@@ -170,7 +170,7 @@ _productsFrontendInputs: [
 ]
 _jestFrontendIgnore: "--modulePathIgnorePatterns='/products/([^/]+/(backend|dags|eval|evals|eval_harness|mcp|skills|opensearch|scout|stats|fixtures|management|observability|plan|adr|agent|scripts)|desktop|visual_review/cli)(/|$)' --modulePathIgnorePatterns='/([.]turbo|__pycache__)(/|$)' --watchPathIgnorePatterns='/products/([^/]+/(backend|dags|eval|evals|eval_harness|mcp|skills|opensearch|scout|stats|fixtures|management|observability|plan|adr|agent|scripts)|desktop|visual_review/cli)(/|$)' --watchPathIgnorePatterns='/([.]turbo|__pycache__)(/|$)'"
 _mcpPrebuild: "pnpm exec tsx scripts/copy-instructions.ts"
-_frontendBuild: "showcase/scripts/build_once.sh frontend-build frontend/dist/.enact-build-key frontend ':(glob)products/*/frontend/**' ':(glob)products/*/*.ts' ':(glob)products/*/*.tsx' ':(glob)products/*/*.js' ':(glob)products/*/*.jsx' ':(glob)products/*/*.json' products/games products/canvas/packages products/ai_observability/shared ':(glob)products/*/mcp/**' common packages ee/frontend services/mcp/src/ui-apps package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json tsconfig.json patches -- bash -c 'showcase/scripts/build_quill.sh && showcase/scripts/build_hogvm.sh && bin/turbo --filter=@posthog/frontend prepare && showcase/scripts/build_products.sh && pnpm --filter=@posthog/frontend build && mkdir -p frontend/dist/.enact-esbuild-meta && cp -f frontend/*-esbuild-meta.json frontend/dist/.enact-esbuild-meta/'"
+_frontendBuild: #"showcase/scripts/build_once.sh frontend-build frontend/dist/.enact-build-key frontend ':(glob)products/*/frontend/**' ':(glob)products/*/*.ts' ':(glob)products/*/*.tsx' ':(glob)products/*/*.js' ':(glob)products/*/*.jsx' ':(glob)products/*/*.json' products/games products/canvas/packages products/ai_observability/shared ':(glob)products/*/mcp/**' common packages ee/frontend services/mcp/src/ui-apps package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json tsconfig.json patches -- bash -c 'showcase/scripts/build_quill.sh && showcase/scripts/build_hogvm.sh && bin/turbo --filter=@posthog/frontend prepare && showcase/scripts/build_products.sh && pnpm --filter=@posthog/frontend build && mkdir -p frontend/dist/.enact-esbuild-meta && cp -f frontend/*-esbuild-meta.json frontend/dist/.enact-esbuild-meta/ && node -e "const fs=require(\"fs\"),p=require(\"path\"),d=\"frontend/dist/.enact-esbuild-meta\",rs=[...new Set([process.cwd(),fs.realpathSync(process.cwd()),process.env.PWD].filter(Boolean))].sort((a,b)=>b.length-a.length);for(const f of fs.readdirSync(d)){if(!f.endsWith(\"-esbuild-meta.json\"))continue;const fp=p.join(d,f);let s=fs.readFileSync(fp,\"utf8\"),o=s;for(const r of rs){const a=s.split(r);if(a.length>1){for(let i=0;i<a.length-1;i++)a[i]=a[i].replace(/[A-Za-z0-9_.-]+:\$/,\"\");s=a.join(\"..\")}}if(s!==o)fs.writeFileSync(fp,s)}"'"#
 
 _buildOnceKey: [
 	"package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml", "turbo.json", "tsconfig.json",
@@ -675,7 +675,7 @@ pipeline: schema.#Pipeline & {
 						], _productsFrontendInputs, _buildOnceKey])
 					}
 					needs: ["quill:build"]
-					tasks: [{command: _frontendBuild, env: GOMEMLIMIT: "6GiB"}]
+					tasks: [{command: _frontendBuild, timeout: "20m", env: GOMEMLIMIT: "6GiB"}]
 				}
 				typecheck: {
 					direct:    true
