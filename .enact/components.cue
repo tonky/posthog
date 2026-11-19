@@ -743,7 +743,8 @@ pipeline: schema.#Pipeline & {
 					name:             "Test"
 					shards:           12
 					max_shards:       12
-					resources:        {cpus: 3, memory_mb: 4096}
+					// Measured 4.5–4.6 GiB peak RSS across 3 Jest workers on full-suite shards (OOM-killed on c3m5g in PR #22); 5120 + 1024 reserve quantizes to c3m6g.
+					resources:        {cpus: 3, memory_mb: 5120}
 					record_resources: resources
 					recorder:         "own_linux"
 					recorded_by:      ["enact-node"]
