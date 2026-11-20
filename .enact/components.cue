@@ -1246,6 +1246,7 @@ pipeline: schema.#Pipeline & {
 					shards:           4
 					max_shards:       4
 					resources:        {cpus: 4, memory_mb: 10240}
+					worker:           "github"
 					record_resources: resources
 					needs:            ["frontend:build", "plugin_transpiler:build", "build"]
 					tasks: [
