@@ -1213,7 +1213,7 @@ pipeline: schema.#Pipeline & {
 			title:       "Playwright E2E runner"
 			technology:  ["python", "typescript"]
 			depends_on:  ["live_harness", "build_once"]
-			watch_paths: ["showcase/scripts/run_e2e_tests.sh", "showcase/scripts/build_e2e.sh"]
+			watch_paths: ["showcase/scripts/run_e2e_tests.sh", "showcase/scripts/build_e2e.sh", "showcase/playwright.enact.config.ts"]
 		}
 		"e2e": {
 			name:             "e2e"

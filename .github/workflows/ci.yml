@@ -1940,11 +1940,11 @@ jobs:
         continue-on-error: true
         uses: actions/cache/restore@v6
         with:
-          key: ${{ runner.os }}-${{ runner.arch }}-python-${{ hashFiles('uv.lock', 'pyproject.toml', 'requirements.txt', 'poetry.lock', 'enve.lock') }}
+          key: ${{ runner.os }}-${{ runner.arch }}-python-v2-${{ hashFiles('uv.lock', 'pyproject.toml', 'requirements.txt', 'poetry.lock', 'enve.lock') }}
           path: |-
             /tmp/.cache/uv
             /tmp/.cache/pip
-          restore-keys: ${{ runner.os }}-${{ runner.arch }}-python-
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-python-v2-
       - name: Restore Rust target & cargo cache [cli/target]
         id: rust_l1_cache_cli_target
         if: ${{ (hashFiles('cli/Cargo.lock', 'cli/**/Cargo.toml') != '' && contains(format(',{0},', fromJson(needs.detect.outputs.stage_cargo)['preflight'].cargo_targets), ',cli/target,') && steps.runner_caches.outputs.host == '') && steps.stage_plan.outputs.stage_has_work == 'true' }}
@@ -3172,11 +3172,11 @@ jobs:
         continue-on-error: true
         uses: actions/cache/restore@v6
         with:
-          key: ${{ runner.os }}-${{ runner.arch }}-python-${{ hashFiles('uv.lock', 'pyproject.toml', 'requirements.txt', 'poetry.lock', 'enve.lock') }}
+          key: ${{ runner.os }}-${{ runner.arch }}-python-v2-${{ hashFiles('uv.lock', 'pyproject.toml', 'requirements.txt', 'poetry.lock', 'enve.lock') }}
           path: |-
             /tmp/.cache/uv
             /tmp/.cache/pip
-          restore-keys: ${{ runner.os }}-${{ runner.arch }}-python-
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-python-v2-
       - name: Restore Cache [mypy fine-grained cache]
         id: cache_mypy
         if: ${{ (steps.host_cache_mypy.outputs.hit != 'true') && steps.stage_plan.outputs.stage_has_work == 'true' }}
@@ -4957,11 +4957,11 @@ jobs:
         continue-on-error: true
         uses: actions/cache/restore@v6
         with:
-          key: ${{ runner.os }}-${{ runner.arch }}-python-${{ hashFiles('uv.lock', 'pyproject.toml', 'requirements.txt', 'poetry.lock', 'enve.lock') }}
+          key: ${{ runner.os }}-${{ runner.arch }}-python-v2-${{ hashFiles('uv.lock', 'pyproject.toml', 'requirements.txt', 'poetry.lock', 'enve.lock') }}
           path: |-
             /tmp/.cache/uv
             /tmp/.cache/pip
-          restore-keys: ${{ runner.os }}-${{ runner.arch }}-python-
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-python-v2-
     - name: Record Restored Package Caches
       if: (steps.runner_caches.outputs.host == '' && steps.node_l1_cache.outputs.cache-hit != 'true' || steps.runner_caches.outputs.host == '' && steps.python_l1_cache.outputs.cache-hit != 'true') && github.event_name != 'pull_request'
       continue-on-error: true
@@ -6268,11 +6268,11 @@ jobs:
         continue-on-error: true
         uses: actions/cache/restore@v6
         with:
-          key: ${{ runner.os }}-${{ runner.arch }}-python-${{ hashFiles('uv.lock', 'pyproject.toml', 'requirements.txt', 'poetry.lock', 'enve.lock') }}
+          key: ${{ runner.os }}-${{ runner.arch }}-python-v2-${{ hashFiles('uv.lock', 'pyproject.toml', 'requirements.txt', 'poetry.lock', 'enve.lock') }}
           path: |-
             /tmp/.cache/uv
             /tmp/.cache/pip
-          restore-keys: ${{ runner.os }}-${{ runner.arch }}-python-
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-python-v2-
     - name: Record Restored Package Caches
       if: (steps.runner_caches.outputs.host == '' && steps.node_l1_cache.outputs.cache-hit != 'true' || steps.runner_caches.outputs.host == '' && steps.python_l1_cache.outputs.cache-hit != 'true') && github.event_name != 'pull_request'
       continue-on-error: true

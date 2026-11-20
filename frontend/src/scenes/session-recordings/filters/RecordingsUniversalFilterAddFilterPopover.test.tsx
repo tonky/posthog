@@ -82,12 +82,8 @@ describe('RecordingsUniversalFilterAddFilterPopover', () => {
 
         const pillTrigger = await screen.findByTestId('taxonomic-category-dropdown-trigger-pill')
         expect(pillTrigger).toHaveTextContent('All')
-        expect(input.closest('.LemonInput')).toHaveClass('TaxonomicFilter__search-input--with-category')
-        expect(pillTrigger).toHaveClass(
-            'TaxonomicFilter__category-dropdown',
-            'LemonButton--tertiary',
-            'LemonButton--truncate'
-        )
+        expect(pillTrigger).toHaveClass('LemonButton--secondary')
+        expect(pillTrigger).not.toHaveClass('TaxonomicFilter__category-dropdown', 'LemonButton--truncate')
 
         // Type a query so we can prove the surrounding popover is not dismissed by the pick:
         // the bug routed the menu click through the parent popover's outside-press handler,

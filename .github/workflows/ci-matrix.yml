@@ -529,11 +529,11 @@ jobs:
         continue-on-error: true
         uses: actions/cache/restore@v6
         with:
-          key: ${{ runner.os }}-${{ runner.arch }}-python-${{ hashFiles('uv.lock', 'pyproject.toml', 'requirements.txt', 'poetry.lock', 'enve.lock') }}
+          key: ${{ runner.os }}-${{ runner.arch }}-python-v2-${{ hashFiles('uv.lock', 'pyproject.toml', 'requirements.txt', 'poetry.lock', 'enve.lock') }}
           path: |-
             /tmp/.cache/uv
             /tmp/.cache/pip
-          restore-keys: ${{ runner.os }}-${{ runner.arch }}-python-
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-python-v2-
       - name: Restore Go build cache
         id: go_l1_cache
         if: ${{ (contains(matrix.technology, 'go') && steps.runner_caches.outputs.host == '' && hashFiles('**/go.mod', '**/go.sum') != '') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
