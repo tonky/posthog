@@ -230,6 +230,9 @@ def test_compile_hogql_predicate_emits_no_table_qualifier(team, snapshot):
     prefix is caught.
     """
     from posthog.models.data_deletion_request import compile_hogql_predicate
+    from posthog.test.base import cleanup_materialized_columns
+
+    cleanup_materialized_columns()
 
     request = DataDeletionRequest(
         **_base_kwargs(
@@ -252,21 +255,24 @@ def test_compile_hogql_predicate_emits_unqualified_materialized_column(team, sna
     from posthog.models.data_deletion_request import compile_hogql_predicate
 
     from ee.clickhouse.materialized_columns.analyze import materialize
+    from posthog.test.base import cleanup_materialized_columns
 
     materialize("events", "$current_url")
-
-    request = DataDeletionRequest(
-        **_base_kwargs(
-            team_id=team.id,
-            events=["$pageview"],
-            hogql_predicate="properties.$current_url LIKE '%message=%'",
+    try:
+        request = DataDeletionRequest(
+            **_base_kwargs(
+                team_id=team.id,
+                events=["$pageview"],
+                hogql_predicate="properties.$current_url LIKE '%message=%'",
+            )
         )
-    )
-    sql, _ = compile_hogql_predicate(request)
-    assert "events.`mat_$current_url`" not in sql
-    assert "sharded_events.`mat_$current_url`" not in sql
-    assert "`mat_$current_url`" in sql
-    assert sql == snapshot
+        sql, _ = compile_hogql_predicate(request)
+        assert "events.`mat_$current_url`" not in sql
+        assert "sharded_events.`mat_$current_url`" not in sql
+        assert "`mat_$current_url`" in sql
+        assert sql == snapshot
+    finally:
+        cleanup_materialized_columns()
 
 
 def test_compile_hogql_predicate_missing_team_raises_validation_error(db):
