@@ -45,11 +45,6 @@ const RAIL_PANE_HOME: Record<Exclude<TodayRailPane, 'more'>, () => string> = {
     tools: () => urls.tools(),
 }
 
-/** The page a rail pane opens, or undefined for panes without a page of their own. */
-export function railPaneHref(pane: TodayRailPane): string | undefined {
-    return pane === 'more' ? undefined : RAIL_PANE_HOME[pane]()
-}
-
 const PHONE_PAGE_LIMIT = 50
 
 export interface TodayPhonePage {
@@ -329,9 +324,8 @@ export const todayShellLogic = kea<todayShellLogicType>([
         pickPane: ({ pane }) => {
             // pinned: analytics event name and property. Renaming them breaks dashboards.
             posthog.capture('today rail pane picked', { pane, phone_layout: values.phoneLayout })
-            const href = railPaneHref(pane)
-            if (href) {
-                router.actions.push(href)
+            if (pane !== 'more') {
+                router.actions.push(RAIL_PANE_HOME[pane]())
             }
             if (values.mobileLayout) {
                 actions.setMobileSidebarOpen(true)

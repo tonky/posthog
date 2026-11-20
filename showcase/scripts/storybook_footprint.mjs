@@ -28,11 +28,39 @@ import fs from 'node:fs'
 import path from 'node:path'
 
 const RECORDER = 'storybook_footprint.mjs/1'
-const [distArg, loadsArg, serverUrl] = process.argv.slice(2)
+const rawArgs = process.argv.slice(2)
+const positional = []
+let runnerStatus = null
+let junitPath = null
+let skipTagsRaw = process.env.STORYBOOK_SKIP_TAGS ?? 'test-skip'
+for (let i = 0; i < rawArgs.length; i += 1) {
+    const arg = rawArgs[i]
+    if (arg === '--status' && i + 1 < rawArgs.length) {
+        runnerStatus = Number.parseInt(rawArgs[++i], 10)
+    } else if (arg === '--junit' && i + 1 < rawArgs.length) {
+        junitPath = rawArgs[++i]
+    } else if (arg === '--skip-tags' && i + 1 < rawArgs.length) {
+        skipTagsRaw = rawArgs[++i]
+    } else if (arg.startsWith('--')) {
+        console.error(`storybook_footprint: unknown flag ${arg}`)
+        process.exit(64)
+    } else {
+        positional.push(arg)
+    }
+}
+const [distArg, loadsArg, serverUrl] = positional
 if (!distArg || !loadsArg || !serverUrl) {
-    console.error('usage: storybook_footprint.mjs <dist> <loads dir> <server url>')
+    console.error(
+        'usage: storybook_footprint.mjs <dist> <loads dir> <server url> [--status <n>] [--junit <xml>] [--skip-tags <csv>]'
+    )
     process.exit(64)
 }
+const skipTags = new Set(
+    skipTagsRaw
+        .split(',')
+        .map((t) => t.trim())
+        .filter(Boolean)
+)
 const root = process.cwd()
 const outDir = process.env.ENACT_FOOTPRINT_DIR
 if (!outDir) {
@@ -221,12 +249,128 @@ for (const name of fs.existsSync(loadsArg) ? fs.readdirSync(loadsArg) : []) {
     }
 }
 
+function decodeXmlAttr(value) {
+    return value
+        .replace(/&quot;/g, '"')
+        .replace(/&apos;/g, "'")
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&amp;/g, '&')
+}
+
+function parseXmlAttrs(raw) {
+    const attrs = {}
+    for (const match of raw.matchAll(/([A-Za-z_][\w:.-]*)\s*=\s*(?:"([^"]*)"|'([^']*)')/g)) {
+        attrs[match[1]] = decodeXmlAttr(match[2] ?? match[3] ?? '')
+    }
+    return attrs
+}
+
+function parseNonNegInt(value) {
+    if (typeof value !== 'string' || !/^\d+$/.test(value)) {
+        return null
+    }
+    return Number.parseInt(value, 10)
+}
+
+/** Whether `dist/index.json` lists any runnable (non-skipped) story entry for `target`. */
+function indexHasRunnableStory(target) {
+    for (const entry of Object.values(index)) {
+        if (!entry || entry.type !== 'story' || !entry.importPath) {
+            continue
+        }
+        const entryTarget = path.relative(root, path.resolve(root, 'common/storybook', entry.importPath))
+        if (entryTarget !== target) {
+            continue
+        }
+        const tags = Array.isArray(entry.tags) ? entry.tags : []
+        if (!tags.some((tag) => skipTags.has(tag))) {
+            return true
+        }
+    }
+    return false
+}
+
+/**
+ * Story files positively proved by `junit.xml` to have executed cleanly in this shard with every
+ * story skipped (zero errors, zero failures, every testcase `<skipped>`). Fail closed: returns
+ * empty when the runner exited non-zero, `junit.xml` is missing/malformed, or any story ran.
+ */
+function provenSkippedOnlyTargets() {
+    if (runnerStatus !== 0 || !junitPath || !fs.existsSync(junitPath)) {
+        return []
+    }
+    let xml
+    try {
+        xml = fs.readFileSync(junitPath, 'utf8')
+    } catch {
+        return []
+    }
+    if (!xml.includes('<testsuites') && !xml.includes('<testsuite')) {
+        return []
+    }
+    const proved = new Set()
+    const suiteRe = /<testsuite\b([^>]*?)(?:\/>|>([\s\S]*?)<\/testsuite>)/g
+    for (const match of xml.matchAll(suiteRe)) {
+        const attrs = parseXmlAttrs(match[1])
+        const body = match[2] ?? ''
+        const suiteName = attrs.name
+        if (!suiteName) {
+            continue
+        }
+        const errors = parseNonNegInt(attrs.errors)
+        const failures = parseNonNegInt(attrs.failures)
+        const tests = parseNonNegInt(attrs.tests)
+        const skipped = parseNonNegInt(attrs.skipped ?? '0')
+        if (errors !== 0 || failures !== 0 || tests === null || skipped === null) {
+            continue
+        }
+        const target = path.isAbsolute(suiteName)
+            ? path.relative(root, suiteName)
+            : path.relative(root, path.resolve(root, 'common/storybook', suiteName))
+        if (!target || target.startsWith('..') || !fs.existsSync(path.join(root, target))) {
+            continue
+        }
+        if (wanted && !wanted.has(target)) {
+            continue
+        }
+        if (footprints.has(target) || unrecorded.has(target)) {
+            continue
+        }
+        const testcases = [...body.matchAll(/<testcase\b([^>]*?)(?:\/>|>([\s\S]*?)<\/testcase>)/g)]
+        if (tests > 0) {
+            if (skipped !== tests || testcases.length !== tests) {
+                continue
+            }
+            const allSkipped = testcases.every((tc) => {
+                const tcBody = tc[2] ?? ''
+                return (
+                    /<skipped(?:\s|\/|>)/.test(tcBody) &&
+                    !/<failure(?:\s|\/|>)/.test(tcBody) &&
+                    !/<error(?:\s|\/|>)/.test(tcBody)
+                )
+            })
+            if (!allSkipped) {
+                continue
+            }
+            proved.add(target)
+        } else if (tests === 0 && skipped === 0 && testcases.length === 0 && !indexHasRunnableStory(target)) {
+            proved.add(target)
+        }
+    }
+    return [...proved].sort()
+}
+
+const skippedOnly = provenSkippedOnlyTargets()
 const targets = {}
 for (const [target, files] of [...footprints].sort(([a], [b]) => a.localeCompare(b))) {
     if (!unrecorded.has(target)) {
         const sorted = [...files].sort()
         targets[target] = { files: sorted, loaded: sorted }
     }
+}
+for (const target of skippedOnly) {
+    targets[target] = { files: [target], loaded: [target] }
 }
 fs.mkdirSync(outDir, { recursive: true })
 const shard = process.env.ENACT_SHARD_INDEX ?? '1'
@@ -242,6 +386,7 @@ fs.writeFileSync(
         {
             targets: Object.keys(targets).length,
             shared: shared.length,
+            skipped_only: skippedOnly,
             left_out: Object.fromEntries(unrecorded),
             unmapped: [...unmapped].sort(),
         },
@@ -251,6 +396,7 @@ fs.writeFileSync(
 )
 console.error(
     `storybook_footprint: ${Object.keys(targets).length} story files` +
+        (skippedOnly.length ? ` (${skippedOnly.length} proven all-skipped)` : '') +
         (unrecorded.size ? `, ${unrecorded.size} left out (unrecorded builds)` : '') +
         ` -> ${out}`
 )

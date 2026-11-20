@@ -47,7 +47,7 @@ showcase/scripts/build_once.sh storybook-build common/storybook/dist/.enact-buil
     posthog/templates/replay_player_frame package.json pnpm-lock.yaml pnpm-workspace.yaml \
     turbo.json tsconfig.json patches -- \
     bash -c 'rm -rf common/storybook/dist && bin/turbo --filter=@posthog/storybook prepare &&
-        NODE_OPTIONS=--max-old-space-size=8192 pnpm --filter=@posthog/storybook build --test -c .storybook-enact'
+        NODE_OPTIONS="--max-old-space-size=${STORYBOOK_BUILD_HEAP_MB:-8192}" pnpm --filter=@posthog/storybook build --test -c .storybook-enact'
 [ "${1:-}" != --build ] || exit 0
 
 shard="${1:?usage: run_storybook_tests.sh [--browser chromium|webkit] <shard> <total> [story files...] | --build}"
@@ -80,12 +80,13 @@ fi
 args=(--shard "$shard/$total")
 [ "${#stories[@]}" -eq 0 ] || args=(-- "${stories[@]}")
 status=0
-OPT_OUT_CAPTURE=1 NODE_OPTIONS="${NODE_OPTIONS:+$NODE_OPTIONS }--max-old-space-size=16384 --require $root/.enact/vitest/node_env_preload.cjs" \
+OPT_OUT_CAPTURE=1 NODE_OPTIONS="${NODE_OPTIONS:+$NODE_OPTIONS }--max-old-space-size=4096 --require $root/.enact/vitest/node_env_preload.cjs" \
     STORYBOOK_SKIP_TAGS="test-skip,test-skip-${browser}" \
-    STORYBOOK_SNAPSHOTS_DIR="$out/snapshots" JEST_JUNIT_OUTPUT_DIR="$out" ENACT_STORYBOOK_LOADS="$loads" \
+    STORYBOOK_SNAPSHOTS_DIR="$out/snapshots" JEST_JUNIT_OUTPUT_DIR="$out" JEST_JUNIT_SUITE_NAME="{filepath}" ENACT_STORYBOOK_LOADS="$loads" \
     pnpm --filter=@posthog/storybook test:visual:ci:update --browsers "$browser" \
     --url "http://127.0.0.1:$port" -c .storybook-enact "${args[@]}" || status=$?
 if [ -n "$loads" ]; then
-    node showcase/scripts/storybook_footprint.mjs common/storybook/dist "$loads" "http://127.0.0.1:$port" || status=$((status ? status : 1))
+    node showcase/scripts/storybook_footprint.mjs common/storybook/dist "$loads" "http://127.0.0.1:$port" \
+        --status "$status" --junit "$out/junit.xml" --skip-tags "test-skip,test-skip-${browser}" || status=$((status ? status : 1))
 fi
 exit "$status"

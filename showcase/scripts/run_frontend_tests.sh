@@ -32,7 +32,7 @@ if [ -n "${ENACT_FOOTPRINT_DIR:-}" ] && [ "${ENACT_FRONTEND_FORCE_TRACE:-$(uname
         done <<< "$listed"
     fi
     reporter="${ENACT_RECORDERS_DIR:?ENACT_RECORDERS_DIR must be set}/js/jest-attribution.cjs"
-    max_auto="${ENACT_MAX_AUTO_TRACE_FILES:-10}"
+    max_auto="${ENACT_MAX_AUTO_TRACE_FILES:-40}"
     n=0
     rest=()
     for target in "$@"; do

@@ -140,6 +140,10 @@ if [ "$SERVICES_ACTIVE" = "1" ]; then
     # once, so the worker is named for the component and job too (ENACT_COMPONENT, ENACT_JOB).
     WORKER_ID="$(test_worker_name "${ENACT_COMPONENT:-}" "${ENACT_JOB:-}" "$SHARD")"
     prepare_worker_databases "$WORKER_ID"
+    # Clean per-worker ClickHouse materialized-column baseline file: captured once after the
+    # first DB migration and enforced between product subprocesses (surviving SIGKILL/OOM).
+    export ENACT_CH_MAT_BASELINE_FILE="$ROOT/.enact/state/ch-mat-baseline-${WORKER_ID}.json"
+    rm -f "$ENACT_CH_MAT_BASELINE_FILE"
     # Worker DB routing for warehouse_sources (settings/data_warehouse.py reads WAREHOUSE_SOURCES_DATABASE_URL
     # before PRODUCT_DB_WRITER_URLS, which points at the un-prefixed posthog_<worker>_warehouse_sources_queue).
     export WAREHOUSE_SOURCES_DATABASE_URL="postgres://${PGUSER}:${PGPASSWORD:-posthog}@${PGHOST}:${PGPORT}/test_posthog_${WORKER_ID}"
@@ -410,6 +414,10 @@ for run in "${RUNS[@]}"; do
         )
     fi
     code=$?
+    if [ "$SERVICES_ACTIVE" = "1" ] && [ -n "${CLICKHOUSE_DATABASE:-}" ] && [ -s "${ENACT_CH_MAT_BASELINE_FILE:-}" ] && [ "${#RUNS[@]}" -gt 1 ]; then
+        python3 "$ROOT/showcase/pytest_plugins/pytest_snapshot_worker.py" cleanup-clickhouse \
+            "$CLICKHOUSE_DATABASE" "$ENACT_CH_MAT_BASELINE_FILE" || true
+    fi
     if [ "$code" -eq 5 ]; then
         echo "✗ pytest [$group] in $dir collected no tests from its targets" >&2
     fi

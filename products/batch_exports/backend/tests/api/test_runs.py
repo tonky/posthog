@@ -146,11 +146,12 @@ def test_cancelling_a_batch_export_run(client: HttpClient, temporal, organizatio
         # In order for a run to be cancelable we need a running workflow execution
         _ = wait_for_workflow_executions(temporal, query=f'TemporalScheduledById="{batch_export_id}"')
 
-        # Wait for the Temporal workflow to create the BatchExportRun record in Postgres.
+        # Wait for the Temporal workflow to create and start the BatchExportRun record in Postgres.
         deadline = time.monotonic() + 30.0
         while True:
             data = get_batch_export_runs_ok(client, team.pk, batch_export_id)
-            if len(data["results"]) >= 1 or time.monotonic() >= deadline:
+            results = data["results"]
+            if (results and results[0]["status"] == "Running") or time.monotonic() >= deadline:
                 break
             time.sleep(0.2)
         assert len(data["results"]) == 1

@@ -228,6 +228,24 @@ class ShardProvisioningTest(unittest.TestCase):
         self.assertEqual(f"{proof_2}\n", (proof_2 / ".venv/lib/site-packages/_editable.pth").read_text())
         self.assertEqual(f"{proof_1}\n", (populated[0] / "lib/site-packages/_editable.pth").read_text())
 
+        # (d) Hosted GitHub Actions without ENACT_HOST_CACHE must not populate venv-v2-* inside
+        #     UV_CACHE_DIR (which gets archived into GitHub's 10 GiB L1 cache).
+        hosted_cache = self.repo / "uv-cache-hosted"
+        hosted_checkout = self.repo / "hosted-checkout"
+        self.stage_checkout(hosted_checkout)
+        env_hosted = {**env, "UV_CACHE_DIR": str(hosted_cache), "GITHUB_ACTIONS": "true"}
+        env_hosted.pop("ENACT_HOST_CACHE", None)
+        done_hosted = subprocess.run(
+            ["bash", "showcase/scripts/setup.sh", "backend"],
+            cwd=hosted_checkout,
+            env=env_hosted,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(0, done_hosted.returncode, done_hosted.stdout + done_hosted.stderr)
+        self.assertEqual([], list(hosted_cache.glob("venv-v2-*")))
+        self.assertFalse((hosted_cache / "work").exists())
+
 
 if __name__ == "__main__":
     unittest.main()

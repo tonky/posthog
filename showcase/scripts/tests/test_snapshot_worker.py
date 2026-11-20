@@ -311,6 +311,279 @@ class RuntimeHooksTest(unittest.TestCase):
             )
             self.assertEqual(["cleaned"], calls)
 
+    def test_sessionfinish_cleans_materialized_columns_only_when_clickhouse_events_exist(self) -> None:
+        import json
+        from types import ModuleType, SimpleNamespace
+        from unittest.mock import patch
+
+        executed: list[str] = []
+        table_count = [1]
+        columns: dict[str, set[str]] = {
+            "events": {"mat_$current_url"},
+            "sharded_events": {"mat_$current_url"},
+            "person": {"pmat_default"},
+            "groups": set(),
+        }
+        skip_indexes: dict[str, list[tuple[str, str]]] = {
+            "sharded_events": [],
+            "person": [],
+            "groups": [],
+        }
+
+        def fake_sync_execute(sql: str, params=None):
+            executed.append(sql)
+            if "FROM system.tables" in sql:
+                return [(table_count[0],)]
+            if "FROM system.columns" in sql:
+                return [
+                    (tbl, col)
+                    for tbl in ("events", "sharded_events", "person", "groups")
+                    for col in sorted(columns[tbl])
+                ]
+            if "FROM system.data_skipping_indices" in sql:
+                if "SELECT table, name, expr" in sql:
+                    return [
+                        (tbl, name, expr)
+                        for tbl in ("sharded_events", "person", "groups")
+                        for name, expr in sorted(skip_indexes.get(tbl, []))
+                    ]
+                return list(skip_indexes.get(params["tbl"], []))
+            if "DROP INDEX IF EXISTS" in sql:
+                for tbl in skip_indexes:
+                    if f".`{tbl}`" in sql:
+                        skip_indexes[tbl] = [(n, e) for n, e in skip_indexes[tbl] if f"`{n}`" not in sql]
+                return []
+            if "DROP COLUMN IF EXISTS" in sql:
+                for tbl in columns:
+                    if f".`{tbl}`" in sql:
+                        for col in list(columns[tbl]):
+                            if f"`{col}`" in sql:
+                                columns[tbl].remove(col)
+                return []
+            return []
+
+        client_mod = ModuleType("posthog.clickhouse.client")
+        client_mod.sync_execute = fake_sync_execute
+        posthog_mod = ModuleType("posthog")
+        clickhouse_mod = ModuleType("posthog.clickhouse")
+        clickhouse_mod.client = client_mod
+        posthog_mod.clickhouse = clickhouse_mod
+
+        with tempfile.TemporaryDirectory() as tmp:
+            baseline_file = Path(tmp) / "ch-mat-baseline-w1.json"
+
+            # (1) Pure non-DB test (no baseline file, client not imported): zero queries on finish.
+            with patch.dict(
+                os.environ,
+                {"CLICKHOUSE_DATABASE": "posthog_test_w1", "ENACT_CH_MAT_BASELINE_FILE": str(baseline_file)},
+            ):
+                sys.modules.pop("posthog.clickhouse.client", None)
+                self.plugin.pytest_sessionfinish(None, 0)
+            self.assertEqual([], executed)
+            self.assertFalse(baseline_file.exists())
+
+            mods = {
+                "posthog": posthog_mod,
+                "posthog.clickhouse": clickhouse_mod,
+                "posthog.clickhouse.client": client_mod,
+            }
+            # (2) First DB-using process (`django_db_setup`): captures baseline ONCE, drops nothing.
+            with (
+                patch.dict(sys.modules, mods),
+                patch.dict(
+                    os.environ,
+                    {"CLICKHOUSE_DATABASE": "posthog_test_w1", "ENACT_CH_MAT_BASELINE_FILE": str(baseline_file)},
+                ),
+            ):
+                gen = self.plugin.pytest_fixture_setup(SimpleNamespace(argname="django_db_setup"), None)
+                next(gen)
+                with self.assertRaises(StopIteration):
+                    gen.send(SimpleNamespace(get_result=lambda: None))
+            self.assertTrue(baseline_file.is_file())
+            saved = json.loads(baseline_file.read_text())
+            self.assertEqual("posthog_test_w1", saved["database"])
+            self.assertEqual(["mat_$current_url"], saved["columns"]["events"])
+            self.assertEqual(["pmat_default"], saved["columns"]["person"])
+
+            # (3) Simulate SIGKILL/OOM writer leak (`sessionfinish` skipped!): next process's
+            #     `django_db_setup` drops leaked columns + skip index while preserving baseline defaults.
+            columns["events"].add("mat_$exception_issue_id")
+            columns["sharded_events"].add("mat_$exception_issue_id")
+            columns["person"].add("pmat_leaked")
+            skip_indexes["sharded_events"].append(("idx_exception_issue_id", "mat_$exception_issue_id"))
+
+            with (
+                patch.dict(sys.modules, mods),
+                patch.dict(
+                    os.environ,
+                    {"CLICKHOUSE_DATABASE": "posthog_test_w1", "ENACT_CH_MAT_BASELINE_FILE": str(baseline_file)},
+                ),
+            ):
+                gen = self.plugin.pytest_fixture_setup(SimpleNamespace(argname="django_db_setup"), None)
+                next(gen)
+                with self.assertRaises(StopIteration):
+                    gen.send(SimpleNamespace(get_result=lambda: None))
+            self.assertEqual({"mat_$current_url"}, columns["events"])
+            self.assertEqual({"mat_$current_url"}, columns["sharded_events"])
+            self.assertEqual({"pmat_default"}, columns["person"])
+            self.assertEqual([], skip_indexes["sharded_events"])
+
+            # (4) Normal `pytest_sessionfinish` drops any columns leaked during the process.
+            columns["events"].add("mat_$other_leak")
+            with (
+                patch.dict(sys.modules, mods),
+                patch.dict(
+                    os.environ,
+                    {"CLICKHOUSE_DATABASE": "posthog_test_w1", "ENACT_CH_MAT_BASELINE_FILE": str(baseline_file)},
+                ),
+            ):
+                self.plugin.pytest_sessionfinish(None, 0)
+            self.assertEqual({"mat_$current_url"}, columns["events"])
+
+            # (5) Inter-product CLI cleanup (`clickhouse-client` path) also drops leaked columns.
+            columns["events"].add("mat_$cli_leak")
+
+            def fake_run(cmd, **_kwargs):
+                sql = cmd[-1]
+                rows = fake_sync_execute(sql, {"tbl": "sharded_events"} if "sharded_events" in sql else {"tbl": "person"})
+                out = "\n".join("\t".join(str(x) for x in r) for r in rows)
+                return SimpleNamespace(stdout=out, returncode=0)
+
+            with (
+                patch.object(subprocess, "run", side_effect=fake_run),
+                patch.dict(os.environ, {"CLICKHOUSE_TCP_PORT": "9000"}),
+            ):
+                dropped = self.plugin.cleanup_clickhouse_via_cli("posthog_test_w1", str(baseline_file))
+            self.assertEqual(1, dropped)
+            self.assertEqual({"mat_$current_url"}, columns["events"])
+
+            # (6) Errors are caught so test exit status is never masked.
+            client_mod.sync_execute = lambda *_a, **_kw: (_ for _ in ()).throw(RuntimeError("ch down"))
+            with (
+                patch.dict(sys.modules, mods),
+                patch.dict(
+                    os.environ,
+                    {"CLICKHOUSE_DATABASE": "posthog_test_w1", "ENACT_CH_MAT_BASELINE_FILE": str(baseline_file)},
+                ),
+            ):
+                self.plugin.pytest_sessionfinish(None, 0)
+
+    def test_skip_index_cleanup_preserves_prefix_siblings_and_drops_writer_indexes(self) -> None:
+        import json
+        from types import ModuleType, SimpleNamespace
+        from unittest.mock import patch
+
+        columns: dict[str, set[str]] = {
+            "events": {"mat_foo_long", "mat_$browser_version"},
+            "sharded_events": {"mat_foo_long", "mat_$browser_version"},
+            "person": set(),
+            "groups": set(),
+        }
+        skip_indexes: dict[str, list[tuple[str, str]]] = {
+            "sharded_events": [
+                ("idx_kept", "lower(mat_foo_long)"),
+                ("bloom_filter_mat_$browser_version", "`mat_$browser_version`"),
+            ],
+            "person": [],
+            "groups": [],
+        }
+
+        def fake_sync_execute(sql: str, params=None):
+            if "FROM system.tables" in sql:
+                return [(1,)]
+            if "FROM system.columns" in sql:
+                return [
+                    (tbl, col)
+                    for tbl in ("events", "sharded_events", "person", "groups")
+                    for col in sorted(columns[tbl])
+                ]
+            if "FROM system.data_skipping_indices" in sql:
+                if "SELECT table, name, expr" in sql:
+                    return [
+                        (tbl, name, expr)
+                        for tbl in ("sharded_events", "person", "groups")
+                        for name, expr in sorted(skip_indexes.get(tbl, []))
+                    ]
+                return list(skip_indexes.get(params["tbl"], []))
+            if "DROP INDEX IF EXISTS" in sql:
+                for tbl in skip_indexes:
+                    if f".`{tbl}`" in sql:
+                        skip_indexes[tbl] = [(n, e) for n, e in skip_indexes[tbl] if f"`{n}`" not in sql]
+                return []
+            if "DROP COLUMN IF EXISTS" in sql:
+                for tbl in columns:
+                    if f".`{tbl}`" in sql:
+                        for col in list(columns[tbl]):
+                            if f"`{col}`" in sql:
+                                columns[tbl].remove(col)
+                return []
+            return []
+
+        client_mod = ModuleType("posthog.clickhouse.client")
+        client_mod.sync_execute = fake_sync_execute
+        posthog_mod = ModuleType("posthog")
+        clickhouse_mod = ModuleType("posthog.clickhouse")
+        clickhouse_mod.client = client_mod
+        posthog_mod.clickhouse = clickhouse_mod
+        mods = {
+            "posthog": posthog_mod,
+            "posthog.clickhouse": clickhouse_mod,
+            "posthog.clickhouse.client": client_mod,
+        }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            baseline_file = Path(tmp) / "ch-mat-baseline-prefix.json"
+            env = {
+                "CLICKHOUSE_DATABASE": "posthog_test_prefix",
+                "ENACT_CH_MAT_BASELINE_FILE": str(baseline_file),
+            }
+            with patch.dict(sys.modules, mods), patch.dict(os.environ, env):
+                # Capture baseline columns + baseline skip indexes once at start.
+                gen = self.plugin.pytest_fixture_setup(SimpleNamespace(argname="django_db_setup"), None)
+                next(gen)
+                with self.assertRaises(StopIteration):
+                    gen.send(SimpleNamespace(get_result=lambda: None))
+                saved = json.loads(baseline_file.read_text())
+                baseline_idx_snapshot = list(skip_indexes["sharded_events"])
+                self.assertEqual(
+                    [
+                        ["sharded_events", "bloom_filter_mat_$browser_version", "`mat_$browser_version`"],
+                        ["sharded_events", "idx_kept", "lower(mat_foo_long)"],
+                    ],
+                    saved["indexes"],
+                )
+
+                # (1) Prefix collision: writer leaks `mat_foo` beside baseline `mat_foo_long` (`idx_kept`).
+                columns["events"].add("mat_foo")
+                columns["sharded_events"].add("mat_foo")
+                self.plugin.pytest_sessionfinish(None, 0)
+                self.assertEqual({"mat_foo_long", "mat_$browser_version"}, columns["events"])
+                self.assertEqual({"mat_foo_long", "mat_$browser_version"}, columns["sharded_events"])
+                self.assertEqual(baseline_idx_snapshot, skip_indexes["sharded_events"])
+
+                # (2) Real PostHog pair: writer leaks `mat_$browser` beside baseline `mat_$browser_version`.
+                columns["events"].add("mat_$browser")
+                columns["sharded_events"].add("mat_$browser")
+                # Also simulate a non-baseline sibling index on `mat_$browser_version` to prove whole-token matching.
+                skip_indexes["sharded_events"].append(("idx_extra_bv", "lower(mat_$browser_version)"))
+                self.plugin.pytest_sessionfinish(None, 0)
+                self.assertEqual({"mat_foo_long", "mat_$browser_version"}, columns["events"])
+                self.assertIn(("bloom_filter_mat_$browser_version", "`mat_$browser_version`"), skip_indexes["sharded_events"])
+                self.assertIn(("idx_extra_bv", "lower(mat_$browser_version)"), skip_indexes["sharded_events"])
+                skip_indexes["sharded_events"].remove(("idx_extra_bv", "lower(mat_$browser_version)"))
+
+                # (3) Writer-created indexes on a leaked column are dropped cleanly while baseline indexes stay intact.
+                columns["events"].add("mat_$exception_issue_id")
+                columns["sharded_events"].add("mat_$exception_issue_id")
+                skip_indexes["sharded_events"].append(
+                    ("bloom_filter_mat_$exception_issue_id", "lower(`mat_$exception_issue_id`)")
+                )
+                skip_indexes["sharded_events"].append(("idx_custom_ex", "lower(mat_$exception_issue_id)"))
+                self.plugin.pytest_sessionfinish(None, 0)
+                self.assertEqual({"mat_foo_long", "mat_$browser_version"}, columns["events"])
+                self.assertEqual({"mat_foo_long", "mat_$browser_version"}, columns["sharded_events"])
+                self.assertEqual(baseline_idx_snapshot, skip_indexes["sharded_events"])
+
     def test_temporal_list_workflows_strips_order_by_and_sorts_by_start_time(self) -> None:
         import asyncio
         from types import SimpleNamespace

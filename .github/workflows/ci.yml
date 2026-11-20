@@ -809,7 +809,7 @@ jobs:
     - self-hosted
     - Linux
     - tonky-ci
-    - tonky-ci-c6m7g
+    - tonky-ci-c6m5g
     timeout-minutes: 120
     steps:
     - name: Probe Runner Caches
@@ -1878,41 +1878,6 @@ jobs:
       run: enact ci handoff history --publish --artifact "$ENACT_HANDOFF_ARTIFACT" --directory "$RUNNER_TEMP/enact-history-input"
       env:
         ENACT_HANDOFF_ARTIFACT: ${{ needs.detect.outputs.history_input_artifact }}
-    - name: Restore reach Handoff
-      id: reach-native
-      if: env.ENACT_HOST_CACHE != ''
-      continue-on-error: true
-      run: enact ci handoff reach --artifact "$ENACT_HANDOFF_ARTIFACT" --directory "$RUNNER_TEMP/enact-reach"
-      env:
-        ENACT_HANDOFF_ARTIFACT: enact-reach-map
-        GH_TOKEN: ${{ github.token }}
-    - name: Download the Reach Map
-      id: reach-download
-      if: steps.reach-native.outputs.ready != 'true'
-      continue-on-error: true
-      uses: actions/download-artifact@v8
-      with:
-        name: enact-reach-map
-        path: ${{ runner.temp }}/enact-reach
-    - name: Cache reach Handoff on the Receiving Host
-      id: reach-verified
-      if: env.ENACT_HOST_CACHE != '' && steps.reach-native.outputs.ready != 'true'
-      continue-on-error: true
-      run: enact ci handoff reach --publish --artifact "$ENACT_HANDOFF_ARTIFACT" --directory "$RUNNER_TEMP/enact-reach"
-      env:
-        ENACT_HANDOFF_ARTIFACT: enact-reach-map
-    - name: Plan with the Detected Reach Map
-      id: reach-pin
-      run: |-
-        if [ -n "${GITHUB_HEAD_SHA:-}" ] && [ -z "$(git rev-list -n1 --no-walk --ignore-missing --missing=allow-any "$GITHUB_HEAD_SHA" -- 2>/dev/null)" ]; then
-          git fetch --no-tags --depth=1 --filter=blob:none origin "$GITHUB_HEAD_SHA" 2>/dev/null
-        fi
-        if [ "$ENACT_HANDOFF_READY" = true ] && [ -f "$RUNNER_TEMP/enact-reach/map.bin" ] && [ -f "$RUNNER_TEMP/enact-reach/map.age.json" ]; then
-          echo "ENACT_REACH_FILE=$RUNNER_TEMP/enact-reach/map.bin" >> "$GITHUB_ENV"
-        fi
-      env:
-        ENACT_HANDOFF_READY: ${{ steps.reach-native.outputs.ready == 'true' || steps.reach-verified.outputs.ready == 'true' || (env.ENACT_HOST_CACHE == '' && steps.reach-download.outcome == 'success') }}
-        GITHUB_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
     - name: Plan Stage [Preflight]
       id: stage_plan
       run: |-
@@ -1949,12 +1914,11 @@ jobs:
         ENACT_FORCE_RERUN: ${{ contains(github.event.pull_request.title, '[rerun]') || contains(github.event.pull_request.body, '[rerun]') || contains(github.event.pull_request.labels.*.name, 'rerun') || contains(github.event.pull_request.labels.*.name, 'showcase') || startsWith(github.head_ref, 'showcase/') || startsWith(github.ref_name, 'showcase/') }}
         ENACT_INPUT_ALL: ${{ inputs.all }}
         ENACT_INPUT_FILES: ${{ inputs.files }}
-        ENACT_INPUT_FORCE_WARM_SUITES: ${{ inputs.force_warm_suites }}
         ENACT_INPUT_UPDATED: ${{ inputs.updated }}
-        ENACT_INPUT_WARM_REACH: ${{ inputs.warm_reach }}
         ENACT_INTEGRATION_BRANCH: ${{ vars.ENACT_INTEGRATION_BRANCH }}
         ENACT_R2_BUCKET: ${{ secrets.R2_BUCKET || env.R2_BUCKET }}
-        ENACT_RUNNER_ALLOCATION: "{\"cpus\":6.0,\"memory_mb\":7168,\"runtime_reserve_mb\":1024}"
+        ENACT_REACH_PULLED: "1"
+        ENACT_RUNNER_ALLOCATION: "{\"cpus\":6.0,\"memory_mb\":5120,\"runtime_reserve_mb\":2048}"
         ENACT_SAME_REPO_PR: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
         GITHUB_HEAD_REF: ${{ github.head_ref }}
         GITHUB_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
@@ -1976,7 +1940,7 @@ jobs:
         continue-on-error: true
         uses: actions/cache/restore@v6
         with:
-          key: ${{ runner.os }}-${{ runner.arch }}-python-${{ hashFiles('**/uv.lock', '**/pyproject.toml', '**/requirements.txt', '**/poetry.lock') }}
+          key: ${{ runner.os }}-${{ runner.arch }}-python-${{ hashFiles('uv.lock', 'pyproject.toml', 'requirements.txt', 'poetry.lock', 'enve.lock') }}
           path: |-
             /tmp/.cache/uv
             /tmp/.cache/pip
@@ -2155,13 +2119,25 @@ jobs:
         ENACT_INPUT_ALL: ${{ inputs.all }}
         ENACT_INPUT_FILES: ${{ inputs.files }}
         ENACT_INPUT_UPDATED: ${{ inputs.updated }}
-        ENACT_INPUT_WARM_REACH: ${{ inputs.warm_reach }}
         ENACT_INTEGRATION_BRANCH: ${{ vars.ENACT_INTEGRATION_BRANCH }}
         ENACT_R2_BUCKET: ${{ secrets.R2_BUCKET || env.R2_BUCKET }}
-        ENACT_RUNNER_ALLOCATION: "{\"cpus\":6.0,\"memory_mb\":7168,\"runtime_reserve_mb\":1024}"
+        ENACT_REACH_PULLED: "1"
+        ENACT_RUNNER_ALLOCATION: "{\"cpus\":6.0,\"memory_mb\":5120,\"runtime_reserve_mb\":2048}"
         ENACT_SAME_REPO_PR: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
         GITHUB_HEAD_REF: ${{ github.head_ref }}
         GITHUB_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+    - name: Diagnose Cgroup OOM on Failure
+      if: ${{ failure() }}
+      run: |-
+        if [ -r /sys/fs/cgroup/memory.events ]; then
+        oom=$(awk '$1 == "oom_kill" { print $2 }' /sys/fs/cgroup/memory.events 2>/dev/null || echo 0)
+        peak=$(cat /sys/fs/cgroup/memory.peak 2>/dev/null || echo unknown)
+        limit=$(cat /sys/fs/cgroup/memory.max 2>/dev/null || echo unknown)
+        echo "cgroup memory: oom_kill=${oom:-0} peak=${peak} max=${limit}"
+        if [ "${oom:-0}" -gt 0 ] 2>/dev/null; then
+        echo "::error::Container cgroup OOM-killed a process (oom_kill=${oom}, memory.peak=${peak}, memory.max=${limit})"
+        fi
+        fi
     - name: Check Package Caches for New Entries
       id: cache_delta
       if: ${{ (!cancelled() && (steps.runner_caches.outputs.host == '' && steps.python_l1_cache.outputs.cache-hit != 'true' || steps.runner_caches.outputs.host == '' && steps.node_l1_cache.outputs.cache-hit != 'true') && env.ENACT_SAVE_EVENT == 'true' && github.event_name != 'pull_request') && steps.stage_plan.outputs.stage_has_work == 'true' }}
@@ -2318,23 +2294,10 @@ jobs:
           .enact/state/runs/*/services/*.log
           .enact/state/nodejs/*.services.log
         retention-days: "1"
-    - name: Upload Recorded Footprints
-      if: ${{ always() && (github.event_name == 'push' && github.ref_name == github.event.repository.default_branch || github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref != github.event.repository.default_branch || github.event_name == 'workflow_dispatch' && inputs.warm_reach == 'true' && github.ref_name == github.event.repository.default_branch) }}
-      continue-on-error: true
-      uses: actions/upload-artifact@v7
-      with:
-        if-no-files-found: ignore
-        name: enact-footprints-stage-preflight
-        path: .enact/state/cache/trace-reach.d/
-        retention-days: "1"
   seed-frontend-typecheck:
     name: "Seed caches: Frontend typecheck"
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.seed_caches == 'true' }}
-    runs-on:
-    - self-hosted
-    - Linux
-    - tonky-ci
-    - tonky-ci-c3m12g
+    runs-on: ubuntu-24.04
     timeout-minutes: 120
     steps:
     - name: Probe Runner Caches
@@ -2741,6 +2704,18 @@ jobs:
         AWS_REGION: auto
         AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY || env.R2_SECRET_ACCESS_KEY }}
         ENACT_R2_BUCKET: ${{ secrets.R2_BUCKET || env.R2_BUCKET }}
+    - name: Diagnose Cgroup OOM on Failure
+      if: ${{ failure() }}
+      run: |-
+        if [ -r /sys/fs/cgroup/memory.events ]; then
+        oom=$(awk '$1 == "oom_kill" { print $2 }' /sys/fs/cgroup/memory.events 2>/dev/null || echo 0)
+        peak=$(cat /sys/fs/cgroup/memory.peak 2>/dev/null || echo unknown)
+        limit=$(cat /sys/fs/cgroup/memory.max 2>/dev/null || echo unknown)
+        echo "cgroup memory: oom_kill=${oom:-0} peak=${peak} max=${limit}"
+        if [ "${oom:-0}" -gt 0 ] 2>/dev/null; then
+        echo "::error::Container cgroup OOM-killed a process (oom_kill=${oom}, memory.peak=${peak}, memory.max=${limit})"
+        fi
+        fi
     - name: Check Package Caches for New Entries
       id: cache_delta
       if: ${{ (!cancelled() && steps.runner_caches.outputs.host == '' && steps.node_l1_cache.outputs.cache-hit != 'true' && github.event_name == 'workflow_dispatch' && inputs.seed_caches == 'true' && github.event_name != 'pull_request') && steps.stage_plan.outputs.stage_has_work == 'true' }}
@@ -2796,7 +2771,7 @@ jobs:
     - self-hosted
     - Linux
     - tonky-ci
-    - tonky-ci-c2m12g
+    - tonky-ci-c2m13g
     timeout-minutes: 120
     steps:
     - name: Probe Runner Caches
@@ -3197,7 +3172,7 @@ jobs:
         continue-on-error: true
         uses: actions/cache/restore@v6
         with:
-          key: ${{ runner.os }}-${{ runner.arch }}-python-${{ hashFiles('**/uv.lock', '**/pyproject.toml', '**/requirements.txt', '**/poetry.lock') }}
+          key: ${{ runner.os }}-${{ runner.arch }}-python-${{ hashFiles('uv.lock', 'pyproject.toml', 'requirements.txt', 'poetry.lock', 'enve.lock') }}
           path: |-
             /tmp/.cache/uv
             /tmp/.cache/pip
@@ -3255,6 +3230,18 @@ jobs:
         AWS_REGION: auto
         AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY || env.R2_SECRET_ACCESS_KEY }}
         ENACT_R2_BUCKET: ${{ secrets.R2_BUCKET || env.R2_BUCKET }}
+    - name: Diagnose Cgroup OOM on Failure
+      if: ${{ failure() }}
+      run: |-
+        if [ -r /sys/fs/cgroup/memory.events ]; then
+        oom=$(awk '$1 == "oom_kill" { print $2 }' /sys/fs/cgroup/memory.events 2>/dev/null || echo 0)
+        peak=$(cat /sys/fs/cgroup/memory.peak 2>/dev/null || echo unknown)
+        limit=$(cat /sys/fs/cgroup/memory.max 2>/dev/null || echo unknown)
+        echo "cgroup memory: oom_kill=${oom:-0} peak=${peak} max=${limit}"
+        if [ "${oom:-0}" -gt 0 ] 2>/dev/null; then
+        echo "::error::Container cgroup OOM-killed a process (oom_kill=${oom}, memory.peak=${peak}, memory.max=${limit})"
+        fi
+        fi
     - name: Check Package Caches for New Entries
       id: cache_delta
       if: ${{ (!cancelled() && steps.runner_caches.outputs.host == '' && steps.python_l1_cache.outputs.cache-hit != 'true' && github.event_name == 'workflow_dispatch' && inputs.seed_caches == 'true' && github.event_name != 'pull_request') && steps.stage_plan.outputs.stage_has_work == 'true' }}
@@ -4970,7 +4957,7 @@ jobs:
         continue-on-error: true
         uses: actions/cache/restore@v6
         with:
-          key: ${{ runner.os }}-${{ runner.arch }}-python-${{ hashFiles('**/uv.lock', '**/pyproject.toml', '**/requirements.txt', '**/poetry.lock') }}
+          key: ${{ runner.os }}-${{ runner.arch }}-python-${{ hashFiles('uv.lock', 'pyproject.toml', 'requirements.txt', 'poetry.lock', 'enve.lock') }}
           path: |-
             /tmp/.cache/uv
             /tmp/.cache/pip
@@ -6281,7 +6268,7 @@ jobs:
         continue-on-error: true
         uses: actions/cache/restore@v6
         with:
-          key: ${{ runner.os }}-${{ runner.arch }}-python-${{ hashFiles('**/uv.lock', '**/pyproject.toml', '**/requirements.txt', '**/poetry.lock') }}
+          key: ${{ runner.os }}-${{ runner.arch }}-python-${{ hashFiles('uv.lock', 'pyproject.toml', 'requirements.txt', 'poetry.lock', 'enve.lock') }}
           path: |-
             /tmp/.cache/uv
             /tmp/.cache/pip

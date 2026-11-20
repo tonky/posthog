@@ -10,13 +10,19 @@ let J = pipeline.#jobs
 
 _preflightStage: {
 	name: "preflight"
-	select: [
-		J.lint, J.fmt, J.migrate, J.schema_check,
-		{component: "agent_proxy", job: J.typecheck},
-		{component: "oauth_proxy", job: J.typecheck},
-		{component: "integration_service", job: J.typecheck},
-		{component: "dagster", job: J.typecheck},
-	]
+	select: list.Concat([
+		[
+			J.fmt, J.migrate, J.schema_check,
+			{component: "agent_proxy", job: J.typecheck},
+			{component: "oauth_proxy", job: J.typecheck},
+			{component: "integration_service", job: J.typecheck},
+		],
+		// Keep heavy Rust `cargo clippy` lints (`rust_services:lint`, `cli:lint`) in the matrix
+		// stage so `Stage: Preflight` stays lightweight and avoids pulling Rust caches.
+		[for name, c in pipeline.components if name != "rust_services" && name != "cli" && (c.lint != _|_ || c.jobs.lint != _|_) {
+			component: name, job: J.lint
+		}],
+	])
 	fail_fast: true
 	services:  "disabled"
 }
@@ -30,6 +36,9 @@ _testStage: {
 		{component: "frontend", job: J.typecheck},
 		{component: "mcp", job: J.typecheck},
 		{component: "desktop", job: J.typecheck},
+		{component: "dagster", job: J.typecheck},
+		{component: "rust_services", job: J.lint},
+		{component: "cli", job: J.lint},
 		J.audit, J.build, J.jscpd,
 	]
 	fail_fast: false
@@ -193,7 +202,7 @@ pipeline: schema.#Pipeline & {
 						label_prefix:       "tonky-ci"
 						cpu_step:           1
 						memory_step_mb:     1024
-						runtime_reserve_mb: 1024
+						runtime_reserve_mb: 2048
 						min: {cpus: 1, memory_mb: 4096}
 						max: {cpus: 6, memory_mb: 13312}
 						control: {cpus: 2, memory_mb: 6144}
@@ -214,7 +223,7 @@ pipeline: schema.#Pipeline & {
 						label_prefix:       "tonky-ci"
 						cpu_step:           1
 						memory_step_mb:     1024
-						runtime_reserve_mb: 1024
+						runtime_reserve_mb: 2048
 						min: {cpus: 1, memory_mb: 4096}
 						max: {cpus: 6, memory_mb: 13312}
 						control: {cpus: 2, memory_mb: 6144}
@@ -231,7 +240,7 @@ pipeline: schema.#Pipeline & {
 						label_prefix:       "tonky-ci"
 						cpu_step:           1
 						memory_step_mb:     1024
-						runtime_reserve_mb: 1024
+						runtime_reserve_mb: 2048
 						min: {cpus: 1, memory_mb: 4096}
 						max: {cpus: 8, memory_mb: 8192}
 						control: {cpus: 2, memory_mb: 6144}

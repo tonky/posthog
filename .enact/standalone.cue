@@ -173,8 +173,20 @@ pipeline: components: {
 		description:       "PostHog Developer CLI in Rust"
 		root:              "cli"
 		watch_paths:       ["cli/**", "dist-workspace.toml", "clippy.toml", "showcase/scripts/run_cargo_tests.sh", "rust/cymbal/tests/static/native/**"]
-		fmt:               "cargo fmt --all -- --check"
-		lint:              "cargo clippy --all-targets --all-features -- -D warnings"
+		jobs: {
+			fmt: {
+				direct:    true
+				services:  false
+				resources: {cpus: 1.0, memory_mb: 512}
+				tasks: [{command: "cargo fmt --all -- --check"}]
+			}
+			lint: {
+				direct:    true
+				services:  false
+				resources: {cpus: 3.0, memory_mb: 3072}
+				tasks: [{command: "cargo clippy --all-targets --all-features -- -D warnings"}]
+			}
+		}
 		shards:            1
 		resource_forecast: {mode: "bounded", min: {cpus: 1, memory_mb: 1024}, max: {cpus: 4, memory_mb: 8192}}
 		test:              "../showcase/scripts/run_cargo_tests.sh cli --all-features -- {targets}"
@@ -355,7 +367,7 @@ pipeline: components: {
 			build: {
 				services:  false
 				builds:    true
-				resources: {cpus: 4, memory_mb: 8192}
+				resources: {cpus: 4, memory_mb: 4096}
 				outputs: {
 					paths: [".enact/state/live-bin/mcp_integration"]
 					key: list.Concat([
@@ -375,7 +387,7 @@ pipeline: components: {
 			}
 			test: {
 				recorder:         "own"
-				resources:        {cpus: 4, memory_mb: 11264}
+				resources:        {cpus: 2, memory_mb: 8192}
 				record_resources: resources
 				needs:            list.Concat([_mcpUiAppsNeeds, ["build"]])
 				tasks: [

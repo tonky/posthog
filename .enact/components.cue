@@ -211,20 +211,33 @@ _djangoSuite: {
 	domain:     "analytics"
 	technology: "python"
 	root:       "."
-	fmt: {
-		command: "uv run --no-sync ruff format --check {changed_files}"
-		filter:  include: ["**/*.py"]
-	}
-	lint: {
-		command: "uv run --no-sync ruff check {changed_files}"
-		filter:  include: ["**/*.py"]
+	_pyExclude: [...string] | *[]
+	jobs: {
+		fmt: {
+			direct:    true
+			services:  false
+			resources: {cpus: 1.0, memory_mb: 1024}
+			tasks: [{
+				command: "uv run --no-sync ruff format --check {changed_files}"
+				filter:  {include: ["**/*.py"], exclude: _pyExclude}
+			}]
+		}
+		lint: {
+			direct:    true
+			services:  false
+			resources: {cpus: 1.0, memory_mb: 1024}
+			tasks: [{
+				command: "uv run --no-sync ruff check {changed_files}"
+				filter:  {include: ["**/*.py"], exclude: _pyExclude}
+			}]
+		}
 	}
 	recorder: "own"
 	target_scope: fallback: "none"
 }
 
 _mcpVitestJob: {
-	recorder:    "trace"
+	recorder:    "own_linux"
 	recorded_by: ["enact-node"]
 	needs:       _mcpUiAppsNeeds
 }
@@ -409,8 +422,7 @@ pipeline: schema.#Pipeline & {
 				"showcase/scripts/fetch_test_durations.sh",
 				"showcase/scripts/repo_invariants.sh",
 			], _baseData])
-			fmt: filter: exclude:  ["products/**"]
-			lint: filter: exclude: ["products/**"]
+			_pyExclude: ["products/**"]
 			max_shards: 12
 			shards:     8
 			jobs: {
@@ -438,7 +450,8 @@ pipeline: schema.#Pipeline & {
 					name: "Test"
 					// Nightly peaks per shard: 1.8-3.8 GB (a 10.9 GB shard was the warehouse-URL hook's
 					// absence: test_groups_revenue_analytics' s3() reads retried at upstream's bucket).
-					resources:        {cpus: 0.75, memory_mb: 4096}
+					// >= 2 CPUs prevent 7-service shard starvation on c1m7g.
+					resources:        {cpus: 2.0, memory_mb: 4096}
 					record_resources: resources
 					needs:            ["plugin_transpiler:build"]
 					tasks: [
@@ -504,7 +517,7 @@ pipeline: schema.#Pipeline & {
 			max_shards:   12
 			shards:       10
 			shard_groups: {by: "products/*/", overhead_s: 1}
-			// Measured 2.1-3.3 GiB peak RSS across shards; 3 CPUs prevent Kafka JVM healthcheck starvation under 7 services, and 4096 + 1024 reserve quantizes to c3m5g.
+			// Measured 2.1-3.3 GiB peak RSS across shards; 3 CPUs prevent Kafka JVM healthcheck starvation under 7 services, and 4096 + 2048 reserve quantizes to c3m6g.
 			resources:        {cpus: 3.0, memory_mb: 4096}
 			record_resources: resources
 			scoping: {
@@ -560,11 +573,11 @@ pipeline: schema.#Pipeline & {
 				}]
 			}
 			shards:    3
-			resources: {cpus: 2.0, memory_mb: 3584}
+			resources: {cpus: 2.0, memory_mb: 5120}
 			resource_forecast: {
 				mode: "bounded"
-				min: {cpus: 2.0, memory_mb: 3584}
-				max: {cpus: 3.0, memory_mb: 6144}
+				min: {cpus: 2.0, memory_mb: 5120}
+				max: {cpus: 3.0, memory_mb: 8192}
 			}
 			scoping: {
 				domain_roots:    ["posthog", "products"]
@@ -674,11 +687,21 @@ pipeline: schema.#Pipeline & {
 				".kearc", "posthog.json", "postcss.config.js",
 				"showcase/scripts/build_products.sh", "bin/validate-setup-tasks.mjs",
 			], _storybookConfig])
-			fmt:       "pnpm exec oxfmt --check --no-error-on-unmatched-pattern {changed_files}"
-			lint:      "pnpm exec oxlint --no-error-on-unmatched-pattern {changed_files} --quiet"
 			resources: {cpus: 2.0, memory_mb: 5120}
 			scoping: domain_roots: ["frontend/src", "products", "common", "packages"]
 			jobs: {
+				fmt: {
+					direct:    true
+					services:  false
+					resources: {cpus: 1.0, memory_mb: 1024}
+					tasks: [{command: "pnpm exec oxfmt --check --no-error-on-unmatched-pattern {changed_files}"}]
+				}
+				lint: {
+					direct:    true
+					services:  false
+					resources: {cpus: 1.0, memory_mb: 1024}
+					tasks: [{command: "pnpm exec oxlint --no-error-on-unmatched-pattern {changed_files} --quiet"}]
+				}
 				build: {
 					services:  false
 					builds:    true
@@ -699,7 +722,9 @@ pipeline: schema.#Pipeline & {
 				}
 				typecheck: {
 					direct:    true
-					resources: {cpus: 2.0, memory_mb: 11264}
+					// Peaks at 10.97 GiB (near 12 GiB cgroup cliff); run on 16 GiB GitHub-hosted with 13 GiB envelope.
+					worker:    "github"
+					resources: {cpus: 2.0, memory_mb: 13312}
 					needs:     ["quill:build"]
 					tasks: [
 						{
@@ -749,7 +774,7 @@ pipeline: schema.#Pipeline & {
 					name:             "Test"
 					shards:           12
 					max_shards:       12
-					// Measured 4.5–4.6 GiB peak RSS across 3 Jest workers on full-suite shards (OOM-killed on c3m5g in PR #22); 5120 + 1024 reserve quantizes to c3m6g.
+					// Measured 4.5–4.6 GiB peak RSS across 3 Jest workers on full-suite shards (OOM-killed on c3m5g in PR #22); 5120 + 2048 reserve quantizes to c3m7g.
 					resources:        {cpus: 3, memory_mb: 5120}
 					record_resources: resources
 					recorder:         "own_linux"
@@ -1215,7 +1240,7 @@ pipeline: schema.#Pipeline & {
 					services:   false
 					builds:     true
 					technology: ["typescript", "rust"]
-					resources:  {cpus: 4, memory_mb: 8192}
+					resources:  {cpus: 4, memory_mb: 4096}
 					needs:      ["plugin_transpiler:build"]
 					outputs: {
 						paths: [

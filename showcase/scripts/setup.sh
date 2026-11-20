@@ -21,7 +21,7 @@ case "${1:-frontend}" in
                 rm -rf -- "$stale_venv" 2>/dev/null || true
             done
         }
-        if [ -n "${UV_CACHE_DIR:-}" ]; then
+        if [ -n "${UV_CACHE_DIR:-}" ] && { [ "${GITHUB_ACTIONS:-}" != "true" ] || [ -n "${ENACT_HOST_CACHE:-}" ]; }; then
             VENV_KEY="$({ printf '%s\n' "$PY_BIN"; sha256sum uv.lock pyproject.toml 2>/dev/null || shasum -a 256 uv.lock pyproject.toml; } | { sha256sum 2>/dev/null || shasum -a 256; } | cut -c1-16)"
             VENV_CACHE="${UV_CACHE_DIR}/venv-v2-${VENV_KEY}"
             CACHE_VENV_WRITE=1
