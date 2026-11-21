@@ -79,6 +79,34 @@ RETRY_FLAGS = ["--force-reruns", "1", "--reruns-delay", "1"]
 GROUP_FLAGS = {"core": RETRY_FLAGS, "temporal": RETRY_FLAGS, "dags": ["--reruns", "2", "--reruns-delay", "1"]}
 
 
+# Full-catalog `warehouse_sources` tests call `SourceRegistry.get_all_sources()`,
+# `load_all_sources()`, `_load_all`, `SourceRegistry.is_registered()`, or trigger
+# `backend/conftest.py`'s `google_ads_sdk_leak_check` subprocess (`SourceRegistry._ensure_loaded()`).
+# Running any of them in the same pytest process as the ~1,620+ individual vendor tests
+# imports every vendor source module into the shared session footprint (~8.8x file bloat,
+# ~2.3x peak RAM). Isolating them into `warehouse_sources_catalog` keeps vendor footprints
+# scoped to their own provider while preserving full catalog footprints on the catalog
+# invariant, API, and workflow e2e tests.
+WAREHOUSE_SOURCES_CATALOG_PREFIXES = (
+    "products/warehouse_sources/backend/temporal/data_imports/sources/tests/",
+    "products/warehouse_sources/backend/temporal/data_imports/tests/e2e/",
+)
+WAREHOUSE_SOURCES_CATALOG_FILES = frozenset(
+    {
+        "products/warehouse_sources/backend/temporal/data_imports/sources/common/test/test_resumable.py",
+        "products/warehouse_sources/backend/temporal/data_imports/workflow_activities/tests/test_import_data_sync.py",
+        "products/warehouse_sources/backend/tests/api/test_external_data_source.py",
+        "products/warehouse_sources/backend/tests/api/test_public_source_configs.py",
+        "products/warehouse_sources/backend/tests/api/test_external_data_source_end_to_end.py",
+    }
+)
+
+
+def _is_warehouse_sources_catalog(target: str) -> bool:
+    file_path = target.split("::", 1)[0]
+    return file_path in WAREHOUSE_SOURCES_CATALOG_FILES or file_path.startswith(WAREHOUSE_SOURCES_CATALOG_PREFIXES)
+
+
 def group_of(target: str) -> tuple[str, str]:
     """The target's (group, directory)."""
     parts = target.split("/")
@@ -91,6 +119,8 @@ def group_of(target: str) -> tuple[str, str]:
             return "tasks_temporal", "products/tasks"
         if target.startswith("products/batch_exports/backend/tests/temporal/"):
             return "batch_exports_temporal", "products/batch_exports"
+        if parts[1] == "warehouse_sources" and _is_warehouse_sources_catalog(target):
+            return "warehouse_sources_catalog", "products/warehouse_sources"
         return parts[1], "/".join(parts[:2])
     for prefix, group in CORE_SEGMENTS:
         if target.startswith(prefix):

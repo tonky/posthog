@@ -18,8 +18,32 @@ if [ ! -f common/hogvm/typescript/dist/.enact-build-key ] && [ -f .enact/state/l
 fi
 showcase/scripts/build_hogvm.sh
 
+# Fail closed if the restored stamp is present without its required built outputs.
+if [ -f nodejs/dist/.enact-build-key ]; then
+    for out in \
+        nodejs/dist/index.js \
+        common/replay-headless/dist/player.html \
+        common/replay-headless/dist/protocol.js \
+        rust/replay-anonymizer-node/dist/index.js \
+        rust/replay-anonymizer-node/index.node \
+        rust/common/hogvm/node/index.node; do
+        if [ ! -e "$out" ]; then
+            rm -f nodejs/dist/.enact-build-key
+            break
+        fi
+    done
+fi
+
+# Inputs match `_liveIngestionNode` + `_buildOnceKey` in `.enact/components.cue` so
+# `e2e:test` shards reuse `e2e:build` outputs without rebuilding on `nodejs/tests/**` edits.
 showcase/scripts/build_once.sh e2e-nodejs-build nodejs/dist/.enact-build-key \
-    nodejs common/hogvm/typescript common/replay-headless common/replay-shared \
+    nodejs/src nodejs/assets nodejs/package.json nodejs/tsconfig.json \
+    common/hogvm/typescript/src common/hogvm/typescript/package.json \
+    common/hogvm/typescript/tsconfig.json common/hogvm/typescript/tsconfig.build.json \
+    common/hogvm/typescript/.parcelrc \
+    common/replay-headless/src common/replay-headless/package.json \
+    common/replay-headless/tsconfig.json common/replay-headless/build.mjs \
+    common/replay-shared/src common/replay-shared/package.json \
     rust/common/hogvm rust/replay-anonymizer rust/replay-anonymizer-node \
     package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json tsconfig.json patches -- \
     showcase/scripts/exclusive.sh nodejs-build bin/turbo --filter=@posthog/nodejs build

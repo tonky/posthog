@@ -735,7 +735,7 @@ jobs:
         RESOLVED=$(enact ci resolve-base) || exit
         eval "$RESOLVED"
         ADMISSION_REPORT="$RUNNER_TEMP/enact-admission.json"
-        MATRIX=$(enact ci matrix --pipeline .enact --workflow ci --github-output "$GITHUB_OUTPUT" --reach-hand-off "$RUNNER_TEMP/enact-reach" --selection-record .enact/state/selection.json --budget --budget-report "$ADMISSION_REPORT" "$@" --format json) || {
+        MATRIX=$(enact ci matrix --pipeline .enact --workflow ci --github-output "$GITHUB_OUTPUT" --reach-hand-off "$RUNNER_TEMP/enact-reach" --selection-record .enact/state/selection.json --shard-manifest "$RUNNER_TEMP/enact-shard-manifest" --budget --budget-report "$ADMISSION_REPORT" "$@" --format json) || {
           status=$?
           if [ "$status" -ge 128 ]; then
             echo "::error::enact ci matrix terminated by signal/OOM (exit $status)" >&2
@@ -760,6 +760,7 @@ jobs:
         ENACT_INPUT_ALL: ${{ inputs.all }}
         ENACT_INPUT_FILES: ${{ inputs.files }}
         ENACT_INPUT_FORCE_WARM_SUITES: ${{ inputs.force_warm_suites }}
+        ENACT_INPUT_SEED_CACHES: ${{ inputs.seed_caches }}
         ENACT_INPUT_UPDATED: ${{ inputs.updated }}
         ENACT_INPUT_WARM_REACH: ${{ inputs.warm_reach }}
         ENACT_INTEGRATION_BRANCH: ${{ vars.ENACT_INTEGRATION_BRANCH }}
@@ -780,6 +781,22 @@ jobs:
         if-no-files-found: ignore
         name: enact-selection
         path: .enact/state/selection.json
+        retention-days: "30"
+    - name: Cache Shard Manifest Handoff on the Receiving Host
+      if: env.ENACT_HOST_CACHE != ''
+      continue-on-error: true
+      run: |-
+        if [ -f "$RUNNER_TEMP/enact-shard-manifest/manifest.json" ]; then
+          enact ci handoff shard-manifest --publish --artifact "$ENACT_HANDOFF_ARTIFACT" --directory "$RUNNER_TEMP/enact-shard-manifest"
+        fi
+      env:
+        ENACT_HANDOFF_ARTIFACT: enact-shard-manifest
+    - name: Hand the Frozen Shard Manifest to the Jobs
+      uses: actions/upload-artifact@v7
+      with:
+        if-no-files-found: ignore
+        name: enact-shard-manifest
+        path: ${{ runner.temp }}/enact-shard-manifest
         retention-days: "30"
     - name: Cache reach Handoff on the Receiving Host
       if: env.ENACT_HOST_CACHE != ''
@@ -2281,7 +2298,7 @@ jobs:
         env:
           ENACT_RUST_HOST_KEY: ${{ runner.os }}-rust-rust_target-${{ hashFiles('enve.lock', 'rust/rust-toolchain.toml', 'rust/rust-toolchain', 'rust/enve.lock') }}-${{ fromJson(needs.detect.outputs.stage_cargo)['preflight'].cargo_cache }}
           ENACT_RUST_TARGET: rust/target
-    - name: Upload Telemetry for [preflight]
+    - name: Upload Telemetry [telemetry-stage-preflight]
       if: always()
       continue-on-error: true
       uses: actions/upload-artifact@v7
@@ -2751,7 +2768,7 @@ jobs:
           path: |-
             .enact/state/pnpm-store
             node_modules/.cache
-    - name: Upload Telemetry for [seed-frontend-typecheck]
+    - name: Upload Telemetry [telemetry-stage-seed-frontend-typecheck]
       if: always()
       continue-on-error: true
       uses: actions/upload-artifact@v7
@@ -3278,7 +3295,7 @@ jobs:
         with:
           key: ${{ steps.cache_mypy.outputs.cache-primary-key }}
           path: .mypy_cache
-    - name: Upload Telemetry for [seed-products-typecheck]
+    - name: Upload Telemetry [telemetry-stage-seed-products-typecheck]
       if: always()
       continue-on-error: true
       uses: actions/upload-artifact@v7

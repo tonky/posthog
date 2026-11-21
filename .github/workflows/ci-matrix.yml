@@ -280,6 +280,16 @@ jobs:
       env:
         ENACT_OUTPUTS_KEY: enact-outputs-${{ matrix.output_slug }}-${{ runner.os }}${{ !matrix.output_arch_independent && format('-{0}', runner.arch) || '' }}-${{ matrix.output_key }}
         ENACT_OUTPUTS_PATHS: ${{ matrix.output_paths }}
+    - name: Look Up Built Outputs in the Remote Cache
+      id: outputs-remote-lookup
+      if: ${{ steps.outputs-host-lookup.outputs.cache-hit != 'true' && matrix.output_key != '' }}
+      continue-on-error: true
+      run: enact ci host-outputs remote-lookup
+      env:
+        ENACT_CACHE_WRITE: read_only
+        ENACT_OUTPUTS_KEY: enact-outputs-${{ matrix.output_slug }}-${{ runner.os }}${{ !matrix.output_arch_independent && format('-{0}', runner.arch) || '' }}-${{ matrix.output_key }}
+        ENACT_OUTPUTS_PATHS: ${{ matrix.output_paths }}
+        ENACT_OUTPUTS_REMOTE_PUBLIC_URL: https://cache.tonky.dev
     - name: Look Up Built Outputs
       id: outputs-lookup
       if: ${{ matrix.output_key != '' }}
@@ -294,7 +304,7 @@ jobs:
       if: ${{ matrix.output_key != '' }}
       run: "[ \"$HIT\" != true ] || echo hit=true >> \"$GITHUB_OUTPUT\""
       env:
-        HIT: ${{ steps.outputs-host-lookup.outputs.cache-hit == 'true' || steps.outputs-lookup.outputs.cache-hit == 'true' }}
+        HIT: ${{ steps.outputs-host-lookup.outputs.cache-hit == 'true' || steps.outputs-remote-lookup.outputs.cache-hit == 'true' || (!(github.event_name == 'workflow_dispatch' && inputs.seed_caches == 'true' && github.ref_name == github.event.repository.default_branch) && steps.outputs-lookup.outputs.cache-hit == 'true') }}
     - name: Ensure enve & enact CLI on PATH
       id: setup-runner
       if: ${{ !steps.skip.outputs.hit }}
@@ -350,9 +360,21 @@ jobs:
         ENACT_OUTPUTS_NEEDED: ${{ toJson(matrix.output_keys) }}
         ENACT_OUTPUTS_PLATFORM: ${{ runner.os }}-${{ runner.arch }}
         ENACT_OUTPUTS_PRODUCERS_FILE: ${{ runner.temp }}/enact-outputs-producers.json
+    - name: Restore Built Outputs from the Remote Cache
+      id: outputs-remote
+      if: ${{ (toJson(matrix.output_keys) != 'null') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
+      continue-on-error: true
+      run: enact ci host-outputs remote-restore
+      env:
+        ENACT_CACHE_WRITE: read_only
+        ENACT_OUTPUTS_NEEDED: ${{ toJson(matrix.output_keys) }}
+        ENACT_OUTPUTS_PLATFORM: ${{ runner.os }}-${{ runner.arch }}
+        ENACT_OUTPUTS_PRODUCERS_FILE: ${{ runner.temp }}/enact-outputs-producers.json
+        ENACT_OUTPUTS_REMOTE_PUBLIC_URL: https://cache.tonky.dev
+        ENACT_OUTPUTS_STEPS: ${{ toJson(steps) }}
     - name: Restore Built Outputs (e2e:build)
       id: outputs-e2e--build
-      if: ${{ (matrix.output_keys['e2e--build'] != '' && steps.outputs-host.outputs['e2e--build'] != 'true') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
+      if: ${{ (matrix.output_keys['e2e--build'] != '' && steps.outputs-host.outputs['e2e--build'] != 'true' && steps.outputs-remote.outputs['e2e--build'] != 'true') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
       continue-on-error: true
       uses: actions/cache/restore@v6
       with:
@@ -369,7 +391,7 @@ jobs:
           .enact/state/outputs/e2e--build.manifest-v1.json
     - name: Restore Built Outputs Artifact (e2e:build)
       id: outputs-artifact-e2e--build
-      if: ${{ (matrix.output_keys['e2e--build'] != '' && steps.outputs-host.outputs['e2e--build'] != 'true' && steps.outputs-e2e--build.outputs.cache-hit != 'true') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
+      if: ${{ (matrix.output_keys['e2e--build'] != '' && steps.outputs-host.outputs['e2e--build'] != 'true' && steps.outputs-remote.outputs['e2e--build'] != 'true' && steps.outputs-e2e--build.outputs.cache-hit != 'true') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
       continue-on-error: true
       uses: actions/download-artifact@v8
       with:
@@ -377,7 +399,7 @@ jobs:
         path: '.'
     - name: Restore Built Outputs (frontend:build)
       id: outputs-frontend--build
-      if: ${{ (matrix.output_keys['frontend--build'] != '' && steps.outputs-host.outputs['frontend--build'] != 'true') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
+      if: ${{ (matrix.output_keys['frontend--build'] != '' && steps.outputs-host.outputs['frontend--build'] != 'true' && steps.outputs-remote.outputs['frontend--build'] != 'true') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
       continue-on-error: true
       uses: actions/cache/restore@v6
       with:
@@ -388,7 +410,7 @@ jobs:
           .enact/state/outputs/frontend--build.manifest-v1.json
     - name: Restore Built Outputs Artifact (frontend:build)
       id: outputs-artifact-frontend--build
-      if: ${{ (matrix.output_keys['frontend--build'] != '' && steps.outputs-host.outputs['frontend--build'] != 'true' && steps.outputs-frontend--build.outputs.cache-hit != 'true') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
+      if: ${{ (matrix.output_keys['frontend--build'] != '' && steps.outputs-host.outputs['frontend--build'] != 'true' && steps.outputs-remote.outputs['frontend--build'] != 'true' && steps.outputs-frontend--build.outputs.cache-hit != 'true') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
       continue-on-error: true
       uses: actions/download-artifact@v8
       with:
@@ -396,7 +418,7 @@ jobs:
         path: '.'
     - name: Restore Built Outputs (mcp:ui_apps)
       id: outputs-mcp--ui_apps
-      if: ${{ (matrix.output_keys['mcp--ui_apps'] != '' && steps.outputs-host.outputs['mcp--ui_apps'] != 'true') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
+      if: ${{ (matrix.output_keys['mcp--ui_apps'] != '' && steps.outputs-host.outputs['mcp--ui_apps'] != 'true' && steps.outputs-remote.outputs['mcp--ui_apps'] != 'true') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
       continue-on-error: true
       uses: actions/cache/restore@v6
       with:
@@ -407,7 +429,7 @@ jobs:
           .enact/state/outputs/mcp--ui_apps.manifest-v1.json
     - name: Restore Built Outputs Artifact (mcp:ui_apps)
       id: outputs-artifact-mcp--ui_apps
-      if: ${{ (matrix.output_keys['mcp--ui_apps'] != '' && steps.outputs-host.outputs['mcp--ui_apps'] != 'true' && steps.outputs-mcp--ui_apps.outputs.cache-hit != 'true') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
+      if: ${{ (matrix.output_keys['mcp--ui_apps'] != '' && steps.outputs-host.outputs['mcp--ui_apps'] != 'true' && steps.outputs-remote.outputs['mcp--ui_apps'] != 'true' && steps.outputs-mcp--ui_apps.outputs.cache-hit != 'true') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
       continue-on-error: true
       uses: actions/download-artifact@v8
       with:
@@ -415,7 +437,7 @@ jobs:
         path: '.'
     - name: Restore Built Outputs (mcp_integration:build)
       id: outputs-mcp_integration--build
-      if: ${{ (matrix.output_keys['mcp_integration--build'] != '' && steps.outputs-host.outputs['mcp_integration--build'] != 'true') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
+      if: ${{ (matrix.output_keys['mcp_integration--build'] != '' && steps.outputs-host.outputs['mcp_integration--build'] != 'true' && steps.outputs-remote.outputs['mcp_integration--build'] != 'true') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
       continue-on-error: true
       uses: actions/cache/restore@v6
       with:
@@ -426,7 +448,7 @@ jobs:
           .enact/state/outputs/mcp_integration--build.manifest-v1.json
     - name: Restore Built Outputs Artifact (mcp_integration:build)
       id: outputs-artifact-mcp_integration--build
-      if: ${{ (matrix.output_keys['mcp_integration--build'] != '' && steps.outputs-host.outputs['mcp_integration--build'] != 'true' && steps.outputs-mcp_integration--build.outputs.cache-hit != 'true') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
+      if: ${{ (matrix.output_keys['mcp_integration--build'] != '' && steps.outputs-host.outputs['mcp_integration--build'] != 'true' && steps.outputs-remote.outputs['mcp_integration--build'] != 'true' && steps.outputs-mcp_integration--build.outputs.cache-hit != 'true') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
       continue-on-error: true
       uses: actions/download-artifact@v8
       with:
@@ -434,7 +456,7 @@ jobs:
         path: '.'
     - name: Restore Built Outputs (plugin_transpiler:build)
       id: outputs-plugin_transpiler--build
-      if: ${{ (matrix.output_keys['plugin_transpiler--build'] != '' && steps.outputs-host.outputs['plugin_transpiler--build'] != 'true') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
+      if: ${{ (matrix.output_keys['plugin_transpiler--build'] != '' && steps.outputs-host.outputs['plugin_transpiler--build'] != 'true' && steps.outputs-remote.outputs['plugin_transpiler--build'] != 'true') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
       continue-on-error: true
       uses: actions/cache/restore@v6
       with:
@@ -446,7 +468,7 @@ jobs:
           .enact/state/outputs/plugin_transpiler--build.manifest-v1.json
     - name: Restore Built Outputs Artifact (plugin_transpiler:build)
       id: outputs-artifact-plugin_transpiler--build
-      if: ${{ (matrix.output_keys['plugin_transpiler--build'] != '' && steps.outputs-host.outputs['plugin_transpiler--build'] != 'true' && steps.outputs-plugin_transpiler--build.outputs.cache-hit != 'true') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
+      if: ${{ (matrix.output_keys['plugin_transpiler--build'] != '' && steps.outputs-host.outputs['plugin_transpiler--build'] != 'true' && steps.outputs-remote.outputs['plugin_transpiler--build'] != 'true' && steps.outputs-plugin_transpiler--build.outputs.cache-hit != 'true') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
       continue-on-error: true
       uses: actions/download-artifact@v8
       with:
@@ -454,7 +476,7 @@ jobs:
         path: '.'
     - name: Restore Built Outputs (quill:build)
       id: outputs-quill--build
-      if: ${{ (matrix.output_keys['quill--build'] != '' && steps.outputs-host.outputs['quill--build'] != 'true') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
+      if: ${{ (matrix.output_keys['quill--build'] != '' && steps.outputs-host.outputs['quill--build'] != 'true' && steps.outputs-remote.outputs['quill--build'] != 'true') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
       continue-on-error: true
       uses: actions/cache/restore@v6
       with:
@@ -471,7 +493,7 @@ jobs:
           .enact/state/outputs/quill--build.manifest-v1.json
     - name: Restore Built Outputs Artifact (quill:build)
       id: outputs-artifact-quill--build
-      if: ${{ (matrix.output_keys['quill--build'] != '' && steps.outputs-host.outputs['quill--build'] != 'true' && steps.outputs-quill--build.outputs.cache-hit != 'true') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
+      if: ${{ (matrix.output_keys['quill--build'] != '' && steps.outputs-host.outputs['quill--build'] != 'true' && steps.outputs-remote.outputs['quill--build'] != 'true' && steps.outputs-quill--build.outputs.cache-hit != 'true') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
       continue-on-error: true
       uses: actions/download-artifact@v8
       with:
@@ -479,7 +501,7 @@ jobs:
         path: '.'
     - name: Restore Built Outputs (storybook:build)
       id: outputs-storybook--build
-      if: ${{ (matrix.output_keys['storybook--build'] != '' && steps.outputs-host.outputs['storybook--build'] != 'true') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
+      if: ${{ (matrix.output_keys['storybook--build'] != '' && steps.outputs-host.outputs['storybook--build'] != 'true' && steps.outputs-remote.outputs['storybook--build'] != 'true') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
       continue-on-error: true
       uses: actions/cache/restore@v6
       with:
@@ -492,7 +514,7 @@ jobs:
           .enact/state/outputs/storybook--build.manifest-v1.json
     - name: Restore Built Outputs Artifact (storybook:build)
       id: outputs-artifact-storybook--build
-      if: ${{ (matrix.output_keys['storybook--build'] != '' && steps.outputs-host.outputs['storybook--build'] != 'true' && steps.outputs-storybook--build.outputs.cache-hit != 'true') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
+      if: ${{ (matrix.output_keys['storybook--build'] != '' && steps.outputs-host.outputs['storybook--build'] != 'true' && steps.outputs-remote.outputs['storybook--build'] != 'true' && steps.outputs-storybook--build.outputs.cache-hit != 'true') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
       continue-on-error: true
       uses: actions/download-artifact@v8
       with:
@@ -800,6 +822,31 @@ jobs:
         exit 1
       env:
         ENACT_SEED_MESSAGE: "cache 'mypy fine-grained cache' needs a seed: its jobs never start cold. Run workflow '${{ github.workflow }}' on the default branch by workflow_dispatch with seed_caches=true, then rerun this one."
+    - name: Restore shard-manifest Handoff
+      id: shard-manifest-native
+      if: ${{ (matrix.shard_manifest_digest != '' && env.ENACT_HOST_CACHE != '') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
+      continue-on-error: true
+      run: enact ci handoff shard-manifest --artifact "$ENACT_HANDOFF_ARTIFACT" --directory "$RUNNER_TEMP/enact-shard-manifest"
+      env:
+        ENACT_HANDOFF_ARTIFACT: enact-shard-manifest
+        GH_TOKEN: ${{ github.token }}
+    - name: Download the Frozen Shard Manifest
+      id: shard-manifest-download
+      if: ${{ (matrix.shard_manifest_digest != '' && steps.shard-manifest-native.outputs.ready != 'true') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
+      uses: actions/download-artifact@v8
+      with:
+        name: enact-shard-manifest
+        path: ${{ runner.temp }}/enact-shard-manifest
+    - name: Cache shard-manifest Handoff on the Receiving Host
+      if: ${{ (matrix.shard_manifest_digest != '' && env.ENACT_HOST_CACHE != '' && steps.shard-manifest-native.outputs.ready != 'true') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
+      continue-on-error: true
+      run: enact ci handoff shard-manifest --publish --artifact "$ENACT_HANDOFF_ARTIFACT" --directory "$RUNNER_TEMP/enact-shard-manifest"
+      env:
+        ENACT_HANDOFF_ARTIFACT: enact-shard-manifest
+    - name: Pin the Frozen Shard Manifest
+      id: shard-manifest-pin
+      if: ${{ (matrix.shard_manifest_digest != '') && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
+      run: echo "ENACT_SHARD_MANIFEST=$RUNNER_TEMP/enact-shard-manifest/manifest.json" >> "$GITHUB_ENV"
     - name: Restore reach Handoff
       id: reach-native
       if: ${{ (toJSON(matrix.needs_reach) != 'false' && (env.ENACT_HOST_CACHE != '')) && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
@@ -929,7 +976,7 @@ jobs:
         ENVE_CACHE_CONCURRENCY: "16"
         ENVE_CACHE_SECRET_KEY: ${{ secrets.ENVE_CACHE_SECRET_KEY || env.ENVE_CACHE_SECRET_KEY }}
         NIX_SECRET_KEY: ${{ secrets.NIX_SECRET_KEY || env.NIX_SECRET_KEY }}
-    - name: Upload Execution Telemetry & Workflow Dashboard
+    - name: Upload Telemetry [telemetry-${{ matrix.task_id }}]
       if: ${{ (always()) && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
       continue-on-error: true
       uses: actions/upload-artifact@v7
@@ -1242,7 +1289,7 @@ jobs:
         ENACT_OUTPUTS_PATHS: ${{ matrix.output_paths }}
     - name: Copy Host-Cached Outputs for GitHub's Cache
       id: outputs-publish
-      if: ${{ success() && steps.outputs-host-lookup.outputs.cache-hit == 'true' && steps.outputs-lookup.outputs.cache-hit != 'true' && matrix.output_key != '' }}
+      if: ${{ success() && steps.outputs-host-lookup.outputs.cache-hit == 'true' && (steps.outputs-lookup.outputs.cache-hit != 'true' || (github.event_name == 'schedule' || github.event_name != 'pull_request' && github.ref_name == github.event.repository.default_branch) && steps.outputs-remote-lookup.outputs.cache-hit != 'true') && matrix.output_key != '' }}
       continue-on-error: true
       run: |
         set -euo pipefail
@@ -1346,3 +1393,15 @@ jobs:
         name: enact-outputs-${{ matrix.output_slug }}-${{ runner.os }}${{ !matrix.output_arch_independent && format('-{0}', runner.arch) || '' }}
         path: ${{ matrix.output_paths }}
         retention-days: "1"
+    - name: Save Built Outputs to the Remote Cache
+      if: ${{ success() && (github.event_name == 'schedule' || github.event_name != 'pull_request' && github.ref_name == github.event.repository.default_branch) && steps.outputs-remote-lookup.outputs.cache-hit != 'true' && (!steps.skip.outputs.hit || steps.outputs-publish.outputs.cache-hit == 'true') && matrix.output_key != '' }}
+      continue-on-error: true
+      run: enact ci host-outputs remote-save
+      env:
+        AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID || env.R2_ACCESS_KEY_ID }}
+        AWS_REGION: auto
+        AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY || env.R2_SECRET_ACCESS_KEY }}
+        ENACT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        ENACT_OUTPUTS_KEY: enact-outputs-${{ matrix.output_slug }}-${{ runner.os }}${{ !matrix.output_arch_independent && format('-{0}', runner.arch) || '' }}-${{ matrix.output_key }}
+        ENACT_OUTPUTS_PATHS: ${{ matrix.output_paths }}
+        ENACT_R2_BUCKET: ${{ secrets.R2_BUCKET || env.R2_BUCKET }}

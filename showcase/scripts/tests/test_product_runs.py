@@ -328,6 +328,69 @@ class ProductRunsTest(unittest.TestCase):
         self.assertTrue(be_temp.endswith("backend/tests/temporal/destinations/s3/test_workflow.py"), be_temp)
         self.assertTrue(be_mgmt.endswith("backend/tests/management/test_update_batch_export_schedules.py"), be_mgmt)
 
+    def test_warehouse_sources_catalog_tests_isolate_from_vendor_tests(self) -> None:
+        self.write(
+            "products/warehouse_sources/package.json",
+            json.dumps(
+                {
+                    "scripts": {
+                        "backend:test": "pytest -c ../../pytest.ini --rootdir ../.. backend/ "
+                        "-m 'not async_migrations' --reruns=2 --reruns-delay=1 -v --tb=short"
+                    }
+                }
+            ),
+        )
+        prefix = "products/warehouse_sources/backend"
+        catalog_targets = [
+            f"{prefix}/temporal/data_imports/sources/tests/test_all_sources_import.py",
+            f"{prefix}/temporal/data_imports/sources/tests/test_connection_string_fields.py",
+            f"{prefix}/temporal/data_imports/sources/tests/test_generated_configs.py",
+            f"{prefix}/temporal/data_imports/sources/tests/test_source_catalog_invariants.py",
+            f"{prefix}/temporal/data_imports/sources/tests/test_source_categories.py",
+            f"{prefix}/temporal/data_imports/sources/tests/test_source_versions.py",
+            f"{prefix}/temporal/data_imports/sources/tests/test_source_loading.py",
+            f"{prefix}/temporal/data_imports/sources/common/test/test_resumable.py",
+            f"{prefix}/temporal/data_imports/workflow_activities/tests/test_import_data_sync.py",
+            f"{prefix}/tests/api/test_external_data_source.py::TestFieldClassification::test_all_registered_sources_have_valid_classification",
+            f"{prefix}/tests/api/test_public_source_configs.py",
+            f"{prefix}/tests/api/test_external_data_source_end_to_end.py",
+            f"{prefix}/temporal/data_imports/tests/e2e/test_google_ads_source.py::test_source_registration_does_not_import_google_ads_sdk",
+            f"{prefix}/temporal/data_imports/tests/e2e/stripe/test_stripe_source.py",
+            f"{prefix}/temporal/data_imports/tests/e2e/test_end_to_end.py",
+            f"{prefix}/temporal/data_imports/tests/e2e/test_external_data_job.py",
+            f"{prefix}/temporal/data_imports/tests/e2e/test_bigquery_source.py",
+            f"{prefix}/temporal/data_imports/tests/e2e/test_import_data.py",
+        ]
+        vendor_targets = [
+            f"{prefix}/temporal/data_imports/sources/lodgify/tests/test_lodgify.py",
+            f"{prefix}/temporal/data_imports/sources/qonto/tests/test_qonto.py",
+            f"{prefix}/temporal/data_imports/sources/stripe/tests/test_stripe_source.py",
+            f"{prefix}/temporal/data_imports/sources/common/test/test_history_window.py",
+        ]
+        all_targets = [vendor_targets[0], *catalog_targets, *vendor_targets[1:]]
+        code, runs = self.run_shard(*all_targets)
+        self.assertEqual(0, code)
+        self.assertEqual(
+            [str(self.repo / "products/warehouse_sources")] * 2,
+            [cwd for cwd, _, _ in runs],
+        )
+        self.assertEqual(["warehouse_sources", "warehouse_sources_catalog"], [group for _, group, _ in runs])
+
+        # Extract the relative targets after `--reruns-delay 1` (last flag added by RETRY_FLAGS)
+        # and verify exact partition: zero dropped, zero duplicated, every target in the right group.
+        marker = "--force-reruns 1 --reruns-delay 1 "
+        by_group: dict[str, list[str]] = {}
+        for _, group, args in runs:
+            self.assertIn(marker, args)
+            rel_targets = args.split(marker, 1)[1].split()
+            by_group[group] = [f"products/warehouse_sources/{t}" for t in rel_targets]
+
+        self.assertEqual(vendor_targets, by_group["warehouse_sources"])
+        self.assertEqual(catalog_targets, by_group["warehouse_sources_catalog"])
+        combined = by_group["warehouse_sources"] + by_group["warehouse_sources_catalog"]
+        self.assertEqual(len(all_targets), len(combined))
+        self.assertEqual(set(all_targets), set(combined))
+
 
 if __name__ == "__main__":
     unittest.main()

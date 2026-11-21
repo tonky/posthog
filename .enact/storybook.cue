@@ -98,7 +98,14 @@ pipeline: components: {
 				}
 				tasks: [{name: "Build Storybook", command: "showcase/scripts/run_storybook_tests.sh --build", timeout: "30m"}]
 			}
-			test:   _storybookTestJob & {name: "Test", shards: 16, recorder: "own"}
+			test: _storybookTestJob & {
+				name:     "Test"
+				shards:   16
+				recorder: "own"
+				// Measured recording peaks are 3.50-3.68 GB; 5120 MiB + 2048 MiB runtime_reserve_mb
+				// resolves to tonky-ci-c2m7g (unlocking l7 and higher mac1/ibp8 concurrency).
+				record_resources: {cpus: 2.0, memory_mb: 5120}
+			}
 			webkit: _storybookTestJob & {
 				name:         "WebKit"
 				events:       ["push", "workflow_dispatch", "merge_group", "schedule"]

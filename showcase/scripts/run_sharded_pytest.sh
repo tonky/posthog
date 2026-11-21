@@ -414,9 +414,13 @@ for run in "${RUNS[@]}"; do
         )
     fi
     code=$?
-    if [ "$SERVICES_ACTIVE" = "1" ] && [ -n "${CLICKHOUSE_DATABASE:-}" ] && [ -s "${ENACT_CH_MAT_BASELINE_FILE:-}" ] && [ "${#RUNS[@]}" -gt 1 ]; then
-        python3 "$ROOT/showcase/pytest_plugins/pytest_snapshot_worker.py" cleanup-clickhouse \
-            "$CLICKHOUSE_DATABASE" "$ENACT_CH_MAT_BASELINE_FILE" || true
+    if [ "$SERVICES_ACTIVE" = "1" ] && [ "${#RUNS[@]}" -gt 1 ]; then
+        if [ -n "${CLICKHOUSE_DATABASE:-}" ] && [ -s "${ENACT_CH_MAT_BASELINE_FILE:-}" ]; then
+            python3 "$ROOT/showcase/pytest_plugins/pytest_snapshot_worker.py" cleanup-clickhouse \
+                "$CLICKHOUSE_DATABASE" "$ENACT_CH_MAT_BASELINE_FILE" || true
+        else
+            echo "pytest_snapshot_worker: inter-product ClickHouse cleanup skipped in run_sharded_pytest.sh after [$group]: CLICKHOUSE_DATABASE=${CLICKHOUSE_DATABASE:-<unset>} baseline_exists=$([ -s "${ENACT_CH_MAT_BASELINE_FILE:-}" ] && echo yes || echo no) (${ENACT_CH_MAT_BASELINE_FILE:-<unset>})" >&2
+        fi
     fi
     if [ "$code" -eq 5 ]; then
         echo "✗ pytest [$group] in $dir collected no tests from its targets" >&2

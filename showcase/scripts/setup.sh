@@ -28,7 +28,12 @@ case "${1:-frontend}" in
             mkdir -p "$UV_CACHE_DIR/work"
             rm -rf "$UV_CACHE_DIR"/venv-[0-9a-f]* 2>/dev/null || true
             prune_venv_cache
-            find "$UV_CACHE_DIR/work" -mindepth 1 -maxdepth 1 -mmin +120 -exec rm -rf {} + 2>/dev/null || true
+            # On managed workers (`ENACT_HOST_CACHE`), lease-aware `cache-gc.sh` + entrypoint
+            # own `uv/work/venv.*` cleanup; never blind-sweep active leased venvs on startup.
+            if [ -z "${ENACT_HOST_CACHE:-}" ]; then
+                find "$UV_CACHE_DIR/work" -mindepth 1 -maxdepth 1 -mmin +120 -type d \
+                    -exec sh -c 'for d do [ -f "$d/.gha-job-lease" ] || rm -rf "$d"; done' _ {} + 2>/dev/null || true
+            fi
         fi
         clone_tree() {
             rm -rf "$2"
@@ -36,10 +41,19 @@ case "${1:-frontend}" in
                 || { rm -rf "$2"; cp -al "$1" "$2" 2>/dev/null; } \
                 || { rm -rf "$2"; cp -a "$1" "$2"; }
         }
+        write_venv_lease() {
+            # Only managed CI workers (`ENACT_HOST_CACHE` + `GITHUB_ACTIONS=true`) have
+            # entrypoint/cache-gc lease cleanup; unmanaged local runs rely on bounded `-mmin +120` expiry.
+            if [ "${GITHUB_ACTIONS:-}" = "true" ] && [ -n "${ENACT_HOST_CACHE:-}" ]; then
+                local lease_id="${GHA_JOB_LEASE_ID:-${HOSTNAME:-}}"
+                [ -n "$lease_id" ] && printf 'container=%s\n' "$lease_id" > "$1/.gha-job-lease" 2>/dev/null || true
+            fi
+        }
         RESTORED=0
         if [ -n "$VENV_CACHE" ] && [ -d "$VENV_CACHE" ] && [ ! -e .venv ]; then
             WORK_VENV="$(mktemp -d "$UV_CACHE_DIR/work/venv.XXXXXX")"
             if clone_tree "$VENV_CACHE" "$WORK_VENV"; then
+                write_venv_lease "$WORK_VENV"
                 find "$WORK_VENV" -name '*.pth' -type f -delete 2>/dev/null || true
                 # Rewrite cloned entrypoint shebangs on fresh inodes (`uv sync` skips rebuilding
                 # unchanged third-party scripts such as `bin/pytest`) so they invoke this checkout.
@@ -74,6 +88,7 @@ if bin_dir.is_dir():
         if [ "$RESTORED" -eq 0 ]; then
             if [ -n "$VENV_CACHE" ] && [ ! -e .venv ]; then
                 WORK_VENV="$(mktemp -d "$UV_CACHE_DIR/work/venv.XXXXXX")"
+                write_venv_lease "$WORK_VENV"
                 ln -sfn "$WORK_VENV" .venv
             fi
             uv sync --frozen --dev --no-install-package pytest-split --compile-bytecode --python "$PY_BIN"
@@ -82,6 +97,7 @@ if bin_dir.is_dir():
                 TMP_CACHE="$(mktemp -d "$UV_CACHE_DIR/venv-tmp.XXXXXX")"
                 SRC_VENV="$(realpath .venv)"
                 if clone_tree "$SRC_VENV" "$TMP_CACHE"; then
+                    rm -f "$TMP_CACHE/.gha-job-lease"
                     mv -T "$TMP_CACHE" "$VENV_CACHE" 2>/dev/null || { [ ! -d "$VENV_CACHE" ] && mv "$TMP_CACHE" "$VENV_CACHE" 2>/dev/null; } || rm -rf "$TMP_CACHE"
                 else
                     rm -rf "$TMP_CACHE"

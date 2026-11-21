@@ -237,10 +237,12 @@ def _clickhouse_baseline_path(ch_db: str) -> Path | None:
 def _query_materialized_columns(exec_fn, ch_db: str) -> dict[str, list[str]]:
     """Current materialized columns (`mat_*`, `pmat_*`, `dmat_*`) on `_MAT_TABLES` in `ch_db`."""
     tables_sql = ", ".join(f"'{t}'" for t in _MAT_TABLES)
+    # Use startsWith() rather than LIKE '..._%': clickhouse-driver applies Python `%`-formatting
+    # whenever `params` is passed, so unescaped `%` in LIKE raises TypeError during baseline capture.
     rows = exec_fn(
         "SELECT table, name FROM system.columns "
         f"WHERE database = %(db)s AND table IN ({tables_sql}) "
-        "AND (name LIKE 'mat\\_%' OR name LIKE 'pmat\\_%' OR name LIKE 'dmat\\_%') "
+        "AND (startsWith(name, 'mat_') OR startsWith(name, 'pmat_') OR startsWith(name, 'dmat_')) "
         "ORDER BY table, name",
         {"db": ch_db},
     )
@@ -377,11 +379,20 @@ def _sync_materialized_columns_via_django(phase: str) -> None:
     tests or migrated defaults on `events`, `person`, and `groups`."""
     ch_db = os.environ.get("CLICKHOUSE_DATABASE")
     if not ch_db:
+        print(
+            f"pytest_snapshot_worker: materialized-column sync skipped ({phase}): CLICKHOUSE_DATABASE not set",
+            file=sys.stderr,
+        )
         return
     baseline_path = _clickhouse_baseline_path(ch_db)
     # On finish without a baseline file, only act if this process actually imported ClickHouse.
     if phase == "finish" and (baseline_path is None or not baseline_path.is_file()):
         if "posthog.clickhouse.client" not in sys.modules:
+            print(
+                f"pytest_snapshot_worker: materialized-column sync skipped ({phase}): "
+                f"no baseline file and posthog.clickhouse.client not imported",
+                file=sys.stderr,
+            )
             return
     try:
         from posthog.clickhouse.client import sync_execute
@@ -390,11 +401,20 @@ def _sync_materialized_columns_via_django(phase: str) -> None:
             return sync_execute(sql, params) if params is not None else sync_execute(sql)
 
         if not _clickhouse_events_exists(_exec, ch_db):
+            print(
+                f"pytest_snapshot_worker: materialized-column sync skipped ({phase}): {ch_db}.events does not exist",
+                file=sys.stderr,
+            )
             return
         if baseline_path is not None:
             if not baseline_path.is_file():
                 # Capture the clean fresh-migration baseline ONCE before the first DB test runs.
                 if phase != "start":
+                    print(
+                        f"pytest_snapshot_worker: materialized-column sync skipped ({phase}): "
+                        f"baseline file missing at {baseline_path}",
+                        file=sys.stderr,
+                    )
                     return
                 baseline = _query_materialized_columns(_exec, ch_db)
                 baseline_indexes = _query_skip_indexes(_exec, ch_db)
@@ -407,9 +427,20 @@ def _sync_materialized_columns_via_django(phase: str) -> None:
                     )
                 )
                 tmp.replace(baseline_path)
+                total_cols = sum(len(cols) for cols in baseline.values())
+                print(
+                    f"pytest_snapshot_worker: captured ClickHouse baseline in {ch_db} ({phase}) "
+                    f"to {baseline_path} ({total_cols} cols, {len(baseline_indexes)} indexes)",
+                    file=sys.stderr,
+                )
                 return
             saved = json.loads(baseline_path.read_text())
             if saved.get("database") != ch_db:
+                print(
+                    f"pytest_snapshot_worker: materialized-column sync skipped ({phase}): "
+                    f"baseline database {saved.get('database')!r} != {ch_db!r}",
+                    file=sys.stderr,
+                )
                 return
             dropped = _drop_leaked_materialized_columns(
                 _exec, ch_db, saved.get("columns", {}), saved.get("indexes", [])
@@ -421,10 +452,30 @@ def _sync_materialized_columns_via_django(phase: str) -> None:
                     f"in {ch_db} ({phase}): {', '.join(dropped)}",
                     file=sys.stderr,
                 )
+            else:
+                if phase == "start":
+                    # Clear shared Redis materialized-column cache even when inter-product CLI
+                    # cleanup already dropped leaked columns after a prior SIGKILL/OOM writer.
+                    _clear_posthog_materialized_cache()
+                print(
+                    f"pytest_snapshot_worker: materialized-column sync clean in {ch_db} ({phase}): 0 leaked columns",
+                    file=sys.stderr,
+                )
         elif phase == "finish":
             from posthog.test.base import cleanup_materialized_columns
 
             cleanup_materialized_columns()
+            print(
+                f"pytest_snapshot_worker: ran fallback cleanup_materialized_columns() in {ch_db} ({phase}) "
+                f"(ENACT_CH_MAT_BASELINE_FILE not set)",
+                file=sys.stderr,
+            )
+        else:
+            print(
+                f"pytest_snapshot_worker: materialized-column sync skipped ({phase}): "
+                f"ENACT_CH_MAT_BASELINE_FILE not set",
+                file=sys.stderr,
+            )
     except Exception as exc:
         print(f"pytest_snapshot_worker: materialized-column cleanup skipped ({phase}): {exc}", file=sys.stderr)
 
@@ -433,13 +484,32 @@ def cleanup_clickhouse_via_cli(ch_db: str, baseline_file: str) -> int:
     """Inter-process ClickHouse materialized-column cleanup called by `run_sharded_pytest.sh`
     between product subprocesses (zero Django import cost; recovers even after SIGKILL/OOM)."""
     path = Path(baseline_file)
-    if not path.is_file() or not _SAFE_IDENT_RE.match(ch_db):
+    if not path.is_file():
+        print(
+            f"pytest_snapshot_worker: inter-product ClickHouse cleanup skipped: baseline file missing at {baseline_file}",
+            file=sys.stderr,
+        )
+        return 0
+    if not _SAFE_IDENT_RE.match(ch_db):
+        print(
+            f"pytest_snapshot_worker: inter-product ClickHouse cleanup skipped: unsafe database identifier {ch_db!r}",
+            file=sys.stderr,
+        )
         return 0
     saved = json.loads(path.read_text())
     if saved.get("database") != ch_db:
+        print(
+            f"pytest_snapshot_worker: inter-product ClickHouse cleanup skipped: "
+            f"baseline database {saved.get('database')!r} != {ch_db!r}",
+            file=sys.stderr,
+        )
         return 0
     port = os.environ.get("CLICKHOUSE_TCP_PORT")
     if not port:
+        print(
+            "pytest_snapshot_worker: inter-product ClickHouse cleanup skipped: CLICKHOUSE_TCP_PORT not set",
+            file=sys.stderr,
+        )
         return 0
     host = os.environ.get("CLICKHOUSE_HOST", "127.0.0.1")
 
@@ -462,6 +532,10 @@ def cleanup_clickhouse_via_cli(ch_db: str, baseline_file: str) -> int:
         return rows
 
     if not _clickhouse_events_exists(_exec, ch_db):
+        print(
+            f"pytest_snapshot_worker: inter-product ClickHouse cleanup skipped: {ch_db}.events does not exist",
+            file=sys.stderr,
+        )
         return 0
     dropped = _drop_leaked_materialized_columns(
         _exec, ch_db, saved.get("columns", {}), saved.get("indexes", [])
@@ -470,6 +544,11 @@ def cleanup_clickhouse_via_cli(ch_db: str, baseline_file: str) -> int:
         print(
             f"pytest_snapshot_worker: dropped {len(dropped)} leaked materialized column(s) "
             f"in {ch_db} (inter-product): {', '.join(dropped)}",
+            file=sys.stderr,
+        )
+    else:
+        print(
+            f"pytest_snapshot_worker: inter-product ClickHouse cleanup clean in {ch_db}: 0 leaked columns",
             file=sys.stderr,
         )
     return len(dropped)

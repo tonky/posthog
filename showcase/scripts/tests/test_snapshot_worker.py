@@ -331,6 +331,10 @@ class RuntimeHooksTest(unittest.TestCase):
         }
 
         def fake_sync_execute(sql: str, params=None):
+            if params is not None:
+                # Match clickhouse_driver's `%`-formatting (`query % params`): any unescaped `%`
+                # (such as `LIKE 'mat\_%'`) must fail here instead of silently breaking in CI.
+                sql = sql % params
             executed.append(sql)
             if "FROM system.tables" in sql:
                 return [(table_count[0],)]
@@ -489,6 +493,8 @@ class RuntimeHooksTest(unittest.TestCase):
         }
 
         def fake_sync_execute(sql: str, params=None):
+            if params is not None:
+                sql = sql % params
             if "FROM system.tables" in sql:
                 return [(1,)]
             if "FROM system.columns" in sql:
@@ -611,6 +617,136 @@ class RuntimeHooksTest(unittest.TestCase):
         ids = asyncio.run(_run())
         self.assertEqual(["w1", "w2", "w3"], ids)
         self.assertEqual(['TemporalScheduledById="sched-1"'], recorded_queries)
+
+    def test_materialized_column_sync_percent_formatting_and_stderr_diagnostics(self) -> None:
+        import io
+        from contextlib import redirect_stderr
+        from types import ModuleType, SimpleNamespace
+        from unittest.mock import patch
+
+        columns: dict[str, set[str]] = {
+            "events": {"dmat_string_0"},
+            "sharded_events": {"dmat_string_0"},
+            "person": set(),
+            "groups": set(),
+        }
+        cache_clears: list[str] = []
+
+        def fake_sync_execute(sql: str, params=None):
+            if params is not None:
+                sql = sql % params
+            if "FROM system.tables" in sql:
+                return [(1,)]
+            if "FROM system.columns" in sql:
+                return [
+                    (tbl, col)
+                    for tbl in ("events", "sharded_events", "person", "groups")
+                    for col in sorted(columns[tbl])
+                ]
+            if "FROM system.data_skipping_indices" in sql:
+                return []
+            if "DROP COLUMN IF EXISTS" in sql:
+                for tbl in columns:
+                    if f".`{tbl}`" in sql:
+                        for col in list(columns[tbl]):
+                            if f"`{col}`" in sql:
+                                columns[tbl].remove(col)
+                return []
+            return []
+
+        client_mod = ModuleType("posthog.clickhouse.client")
+        client_mod.sync_execute = fake_sync_execute
+        posthog_mod = ModuleType("posthog")
+        clickhouse_mod = ModuleType("posthog.clickhouse")
+        clickhouse_mod.client = client_mod
+        posthog_mod.clickhouse = clickhouse_mod
+
+        ee_mod = ModuleType("ee")
+        ee_ch_mod = ModuleType("ee.clickhouse")
+        ee_mat_mod = ModuleType("ee.clickhouse.materialized_columns")
+        ee_cols_mod = ModuleType("ee.clickhouse.materialized_columns.columns")
+        ee_cols_mod.MATERIALIZATION_VALID_TABLES = ("events", "person", "groups")
+        ee_cols_mod._clear_materialized_columns_cache = lambda tbl: cache_clears.append(tbl)
+
+        mods = {
+            "posthog": posthog_mod,
+            "posthog.clickhouse": clickhouse_mod,
+            "posthog.clickhouse.client": client_mod,
+            "ee": ee_mod,
+            "ee.clickhouse": ee_ch_mod,
+            "ee.clickhouse.materialized_columns": ee_mat_mod,
+            "ee.clickhouse.materialized_columns.columns": ee_cols_mod,
+        }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            baseline_file = Path(tmp) / "ch-mat-baseline-s57.json"
+            env = {
+                "CLICKHOUSE_DATABASE": "posthog_test_products_test_shard6",
+                "ENACT_CH_MAT_BASELINE_FILE": str(baseline_file),
+            }
+
+            # (1) Skip when CLICKHOUSE_DATABASE is unset emits explicit stderr line.
+            buf = io.StringIO()
+            with patch.dict(os.environ, {}, clear=False), redirect_stderr(buf):
+                os.environ.pop("CLICKHOUSE_DATABASE", None)
+                self.plugin._sync_materialized_columns_via_django("start")
+            self.assertIn("CLICKHOUSE_DATABASE not set", buf.getvalue())
+
+            with patch.dict(sys.modules, mods), patch.dict(os.environ, env):
+                # (2) Baseline capture on start succeeds under `%`-formatting and logs capture line.
+                buf = io.StringIO()
+                with redirect_stderr(buf):
+                    self.plugin._sync_materialized_columns_via_django("start")
+                self.assertTrue(baseline_file.is_file())
+                self.assertIn("captured ClickHouse baseline", buf.getvalue())
+
+                # (3) Writer leaks mat_$exception_issue_id; finish drops it and logs drop line.
+                columns["events"].add("mat_$exception_issue_id")
+                columns["sharded_events"].add("mat_$exception_issue_id")
+                buf = io.StringIO()
+                with redirect_stderr(buf):
+                    self.plugin._sync_materialized_columns_via_django("finish")
+                self.assertIn("dropped 2 leaked materialized column(s)", buf.getvalue())
+                self.assertIn("events.mat_$exception_issue_id", buf.getvalue())
+                self.assertEqual({"dmat_string_0"}, columns["events"])
+                self.assertEqual({"dmat_string_0"}, columns["sharded_events"])
+
+                # (4) Observer start with 0 leaked columns logs clean AND still clears Redis mat cache.
+                cache_clears.clear()
+                buf = io.StringIO()
+                with redirect_stderr(buf):
+                    self.plugin._sync_materialized_columns_via_django("start")
+                self.assertIn("materialized-column sync clean", buf.getvalue())
+                self.assertEqual(["events", "person", "groups"], cache_clears)
+
+            # (5) CLI cleanup skip diagnostics (missing baseline / missing port).
+            buf = io.StringIO()
+            with redirect_stderr(buf):
+                self.plugin.cleanup_clickhouse_via_cli("posthog_test_products_test_shard6", str(Path(tmp) / "missing.json"))
+            self.assertIn("baseline file missing", buf.getvalue())
+
+            buf = io.StringIO()
+            with patch.dict(os.environ, {}, clear=False), redirect_stderr(buf):
+                os.environ.pop("CLICKHOUSE_TCP_PORT", None)
+                self.plugin.cleanup_clickhouse_via_cli("posthog_test_products_test_shard6", str(baseline_file))
+            self.assertIn("CLICKHOUSE_TCP_PORT not set", buf.getvalue())
+
+            # (6) CLI cleanup clean diagnostic.
+            def fake_run(cmd, **_kwargs):
+                sql = cmd[-1]
+                rows = fake_sync_execute(sql)
+                out = "\n".join("\t".join(str(x) for x in r) for r in rows)
+                return SimpleNamespace(stdout=out, returncode=0)
+
+            buf = io.StringIO()
+            with (
+                patch.object(subprocess, "run", side_effect=fake_run),
+                patch.dict(os.environ, {"CLICKHOUSE_TCP_PORT": "9000"}),
+                redirect_stderr(buf),
+            ):
+                dropped = self.plugin.cleanup_clickhouse_via_cli("posthog_test_products_test_shard6", str(baseline_file))
+            self.assertEqual(0, dropped)
+            self.assertIn("inter-product ClickHouse cleanup clean", buf.getvalue())
 
 
 if __name__ == "__main__":
