@@ -254,11 +254,17 @@ pipeline: components: {
 				record_resources: resources
 				tasks: [{command: "../showcase/scripts/run_nodejs_tests.sh --rust-ingestion-e2e {targets}", timeout: "45m"}]
 			}
-		}
-		build: {
-			dir:     "."
-			lock:    "nodejs-build"
-			command: "showcase/scripts/build_hogvm.sh && showcase/scripts/exclusive.sh nodejs-build bin/turbo --filter=@posthog/nodejs prepare && pnpm --filter=@posthog/nodejs build"
+			build: {
+				services:  false
+				resources: {cpus: 4, memory_mb: 6144}
+				tasks: [{
+					name:    "Build Package"
+					dir:     "."
+					lock:    "nodejs-build"
+					command: "showcase/scripts/build_hogvm.sh && showcase/scripts/exclusive.sh nodejs-build bin/turbo --filter=@posthog/nodejs prepare && pnpm --filter=@posthog/nodejs build"
+					timeout: "25m"
+				}]
+			}
 		}
 		uses:  _nodejsServices
 	}

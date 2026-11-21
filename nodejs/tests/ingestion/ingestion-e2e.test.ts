@@ -33,6 +33,18 @@ jest.mock('~/common/utils/token-bucket', () => {
 
 jest.mock('~/common/utils/logger')
 
+let clickhouse: Clickhouse
+beforeAll(async () => {
+    console.log('Creating Clickhouse client')
+    clickhouse = Clickhouse.create()
+    await ensureIngestionE2EInfraReady()
+    process.env.SITE_URL = 'https://example.com'
+})
+
+afterAll(() => {
+    clickhouse.close()
+})
+
 // Two diagonal arms rather than a full cross: one with every optimization off
 // and one with them all on, keeping CI cost flat while both modes stay fully
 // covered. Batched group updates default to on, so the off arm pins them off
@@ -97,17 +109,6 @@ describe.each([
     // (version 1 + a follow-up update) versus a single deferred batched insert
     // carrying the accumulated properties (version 1, no update needed).
     const groupBatchCreates = pipelineConfig.GROUP_BATCH_WRITING_USE_BATCH_CREATES
-    let clickhouse: Clickhouse
-    beforeAll(async () => {
-        console.log('Creating Clickhouse client')
-        clickhouse = Clickhouse.create()
-        await ensureIngestionE2EInfraReady()
-        process.env.SITE_URL = 'https://example.com'
-    })
-
-    afterAll(() => {
-        clickhouse.close()
-    })
 
     testWithTeamIngester(
         'should process events without a team_id',
