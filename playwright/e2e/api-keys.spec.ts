@@ -60,3 +60,5 @@ test.describe('Personal API keys', () => {
         })
     })
 })
+
+// Wave 4.2 Check 1 canary PR 2 (keyless R2 outputs hit + C-e2e-stamp)
