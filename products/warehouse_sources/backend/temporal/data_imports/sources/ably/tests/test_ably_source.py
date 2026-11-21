@@ -1,3 +1,5 @@
+import os
+
 import pytest
 from unittest.mock import MagicMock, patch
 
@@ -153,3 +155,9 @@ class TestAblySource:
     def test_non_retryable_errors(self, error_message):
         non_retryable = self.source.get_non_retryable_errors()
         assert any(pattern in error_message for pattern in non_retryable)
+
+
+def test_wave4_check2_p28_attempt1_only_failure() -> None:
+    attempt = os.environ.get("GITHUB_RUN_ATTEMPT")
+    if attempt == "1":
+        pytest.fail("Wave 4.2 Check 2 deliberate attempt-1-only failure for P28 retry proof")

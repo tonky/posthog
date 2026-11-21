@@ -716,3 +716,5 @@ class WebhookSource(_BaseSource[ConfigType], Generic[ConfigType]):
 
 
 AnySource = SimpleSource[ConfigType] | ResumableSource[ConfigType, ResumableData] | WebhookSource[ConfigType]
+
+_CANARY_P28_NOOP = True
