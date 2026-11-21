@@ -37,3 +37,5 @@ test.describe('Annotations', () => {
         await expect(page.locator('[data-attr=annotations-table]')).toContainText(uniqueAnnotationName)
     })
 })
+
+// Wave 4.2 Check 1 canary (cold R2 miss + C-e2e-stamp)
