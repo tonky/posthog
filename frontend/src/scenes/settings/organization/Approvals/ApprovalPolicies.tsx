@@ -3,61 +3,49 @@ import { useEffect, useState } from 'react'
 
 import { IconInfo, IconX } from '@posthog/icons'
 import {
+    LemonBanner,
     LemonButton,
     LemonInput,
     LemonInputSelect,
     LemonSelect,
     LemonSwitch,
     LemonTable,
+    Link,
     Tooltip,
 } from '@posthog/lemon-ui'
 
 import { PayGateMini } from 'lib/components/PayGateMini/PayGateMini'
 import { useRestrictedArea } from 'lib/components/RestrictedArea'
 import { OrganizationMembershipLevel } from 'lib/constants'
+import { useFeatureFlag } from 'lib/hooks/useFeatureFlag'
 import { More } from 'lib/lemon-ui/LemonButton/More'
 import { LemonDialog } from 'lib/lemon-ui/LemonDialog'
 import { LemonModal } from 'lib/lemon-ui/LemonModal'
 import { LemonTableColumn } from 'lib/lemon-ui/LemonTable'
 import { lemonToast } from 'lib/lemon-ui/LemonToast/LemonToast'
-import { APPROVAL_ACTIONS, ApprovalActionKey, getApprovalActionLabel } from 'scenes/approvals/utils'
-import { membersLogic } from 'scenes/organization/membersLogic'
+import {
+    APPROVAL_ACTIONS,
+    ApprovalActionKey,
+    CONDITIONAL_APPROVAL_ACTIONS,
+    EXPERIMENT_APPROVAL_ACTIONS,
+    getApprovalActionLabel,
+} from 'scenes/approvals/utils'
 import { rolesLogic } from 'scenes/settings/organization/Permissions/Roles/rolesLogic'
 
+import { membersLogic } from '~/models/membersLogic'
 import { ApprovalPolicy, AvailableFeature } from '~/types'
 
 import { approvalPoliciesLogic } from './approvalPoliciesLogic'
-
-// Available fields that can be gated
-const GATEABLE_FIELDS: Record<string, { label: string; type: 'number' | 'boolean' | 'string' }> = {
-    rollout_percentage: { label: 'Rollout percentage', type: 'number' },
-}
-
-const CONDITION_TYPES = [
-    { value: 'any_change', label: 'changes' },
-    { value: 'before_after', label: 'new value is' },
-    { value: 'change_amount', label: 'changes by' },
-]
-
-const CONDITION_TYPES_TOOLTIP = `• changes – require approval whenever this field is modified
-• new value is – require approval when the new value meets a threshold (e.g., rollout > 50%)
-• changes by – require approval when the change amount meets a threshold (e.g., increased by more than 10%)`
-
-const OPERATORS = [
-    { value: '>', label: '>' },
-    { value: '>=', label: '>=' },
-    { value: '<', label: '<' },
-    { value: '<=', label: '<=' },
-    { value: '==', label: '=' },
-    { value: '!=', label: '≠' },
-]
-
-interface ConditionRule {
-    field: string
-    type: string
-    operator?: string
-    value?: number
-}
+import {
+    CONDITION_TYPES,
+    CONDITION_TYPES_TOOLTIP,
+    ConditionRule,
+    GATEABLE_FIELDS,
+    OPERATORS,
+} from './approvalPolicyConditions'
+import { describeApprovers } from './describeApprovers'
+import { QuillApprovalPoliciesTable } from './QuillApprovalPoliciesTable'
+import { QuillApprovalPolicyDialog } from './QuillApprovalPolicyDialog'
 
 export function ApprovalPolicies(): JSX.Element {
     const { policies, policiesLoading } = useValues(approvalPoliciesLogic)
@@ -65,10 +53,49 @@ export function ApprovalPolicies(): JSX.Element {
     const [editingPolicy, setEditingPolicy] = useState<ApprovalPolicy | null>(null)
     const [isCreating, setIsCreating] = useState(false)
     const restrictionReason = useRestrictedArea({ minimumAccessLevel: OrganizationMembershipLevel.Admin })
+    const scopedByFlagOwner = useFeatureFlag('APPROVALS_SCOPE_BY_FLAG_OWNER')
+    const todayRailNav = useFeatureFlag('TODAY_RAIL_NAV')
 
     useEffect(() => {
         loadPolicies()
     }, [loadPolicies])
+
+    const confirmDeletePolicy = (policy: ApprovalPolicy): void => {
+        LemonDialog.open({
+            title: 'Delete approval policy?',
+            content: 'This will immediately remove the approval requirement for this action.',
+            primaryButton: {
+                children: 'Delete',
+                type: 'primary',
+                status: 'danger',
+                onClick: () => deletePolicy(policy.id),
+                size: 'small',
+            },
+            secondaryButton: {
+                children: 'Cancel',
+                type: 'tertiary',
+                size: 'small',
+            },
+        })
+    }
+
+    if (todayRailNav) {
+        return (
+            <PayGateMini feature={AvailableFeature.APPROVALS} featureDetail="approval-policies">
+                <QuillApprovalPoliciesTable
+                    policies={policies}
+                    loading={policiesLoading}
+                    restrictionReason={restrictionReason}
+                    showExperimentPoliciesNotice={scopedByFlagOwner}
+                    onAdd={() => setIsCreating(true)}
+                    onEdit={setEditingPolicy}
+                    onDelete={confirmDeletePolicy}
+                />
+                {isCreating && <ApprovalPolicyModal onClose={() => setIsCreating(false)} />}
+                {editingPolicy && <ApprovalPolicyModal policy={editingPolicy} onClose={() => setEditingPolicy(null)} />}
+            </PayGateMini>
+        )
+    }
 
     const columns: LemonTableColumn<ApprovalPolicy, keyof ApprovalPolicy | undefined>[] = [
         {
@@ -78,18 +105,7 @@ export function ApprovalPolicies(): JSX.Element {
         },
         {
             title: 'Approvers',
-            render: (_, policy) => {
-                const users = policy.approver_config?.users || []
-                const roles = policy.approver_config?.roles || []
-                const parts = []
-                if (users.length > 0) {
-                    parts.push(`${users.length} user${users.length > 1 ? 's' : ''}`)
-                }
-                if (roles.length > 0) {
-                    parts.push(`${roles.length} role${roles.length > 1 ? 's' : ''}`)
-                }
-                return parts.join(', ') || 'None'
-            },
+            render: (_, policy) => describeApprovers(policy),
         },
         {
             title: 'Approvals required',
@@ -123,25 +139,7 @@ export function ApprovalPolicies(): JSX.Element {
                             <LemonButton
                                 fullWidth
                                 status="danger"
-                                onClick={() => {
-                                    LemonDialog.open({
-                                        title: 'Delete approval policy?',
-                                        content:
-                                            'This will immediately remove the approval requirement for this action.',
-                                        primaryButton: {
-                                            children: 'Delete',
-                                            type: 'primary',
-                                            status: 'danger',
-                                            onClick: () => deletePolicy(policy.id),
-                                            size: 'small',
-                                        },
-                                        secondaryButton: {
-                                            children: 'Cancel',
-                                            type: 'tertiary',
-                                            size: 'small',
-                                        },
-                                    })
-                                }}
+                                onClick={() => confirmDeletePolicy(policy)}
                                 disabledReason={restrictionReason}
                             >
                                 Delete
@@ -156,6 +154,25 @@ export function ApprovalPolicies(): JSX.Element {
     return (
         <PayGateMini feature={AvailableFeature.APPROVALS} featureDetail="approval-policies">
             <div className="space-y-4">
+                {scopedByFlagOwner && (
+                    <LemonBanner type="info" dismissKey="approval-policies-experiment-split" alignItems="start">
+                        <div className="flex flex-col gap-1">
+                            <span className="font-semibold">Experiments now have their own approval policies</span>
+                            <p className="m-0">
+                                Launching, pausing, and changing the rollout or variant split of an experiment now
+                                follow the experiment policies. Feature flag policies cover the flags that no product
+                                manages, so flags that a survey, product tour, or early access feature manages no longer
+                                need approval. Surveys will get their own policies soon.{' '}
+                                <Link
+                                    to="https://posthog.com/docs/settings/approvals#experiment-policies"
+                                    target="_blank"
+                                >
+                                    Learn how policies apply to each flag
+                                </Link>
+                            </p>
+                        </div>
+                    </LemonBanner>
+                )}
                 <div className="flex justify-end items-center">
                     <LemonButton type="primary" onClick={() => setIsCreating(true)} disabledReason={restrictionReason}>
                         Add policy
@@ -185,7 +202,10 @@ function ApprovalPolicyModal({ policy, onClose }: { policy?: ApprovalPolicy; onC
     const { loadAllMembers } = useActions(membersLogic)
     const { loadRoles } = useActions(rolesLogic)
 
+    const scopedByFlagOwner = useFeatureFlag('APPROVALS_SCOPE_BY_FLAG_OWNER')
+    const todayRailNav = useFeatureFlag('TODAY_RAIL_NAV')
     const [actionKey, setActionKey] = useState(policy?.action_key || 'feature_flag.enable')
+    const supportsConditions = CONDITIONAL_APPROVAL_ACTIONS.has(actionKey)
     const [quorum, setQuorum] = useState(policy?.approver_config?.quorum || 1)
     const [allowSelfApprove, setAllowSelfApprove] = useState(policy?.allow_self_approve || false)
     const [approverUserIds, setApproverUserIds] = useState<number[]>(policy?.approver_config?.users || [])
@@ -241,7 +261,7 @@ function ApprovalPolicyModal({ policy, onClose }: { policy?: ApprovalPolicy; onC
 
         // Build conditions from rules (for now, just take the first rule)
         let conditions: Record<string, unknown> = {}
-        if (actionKey === ApprovalActionKey.FEATURE_FLAG_UPDATE && rules.length > 0) {
+        if (supportsConditions && rules.length > 0) {
             const rule = rules[0]
             if (rule.type !== 'any_change' && rule.value === undefined) {
                 lemonToast.error('Please specify a threshold value')
@@ -297,6 +317,55 @@ function ApprovalPolicyModal({ policy, onClose }: { policy?: ApprovalPolicy; onC
             label: role.name,
         })) || []
 
+    const handleActionKeyChange = (value: string): void => {
+        setActionKey(value)
+        if (!CONDITIONAL_APPROVAL_ACTIONS.has(value)) {
+            setRules([])
+        }
+    }
+
+    const actionOptions = Object.entries(APPROVAL_ACTIONS)
+        .filter(
+            ([value]) => scopedByFlagOwner || value === policy?.action_key || !EXPERIMENT_APPROVAL_ACTIONS.has(value)
+        )
+        .map(([value, action]) => ({
+            label: action.label,
+            value,
+        }))
+
+    if (todayRailNav) {
+        return (
+            <QuillApprovalPolicyDialog
+                isEditing={!!policy}
+                actionKey={actionKey}
+                actionOptions={actionOptions}
+                supportsConditions={supportsConditions}
+                rules={rules}
+                availableFields={availableFields}
+                quorum={quorum}
+                allowSelfApprove={allowSelfApprove}
+                approverUserIds={approverUserIds}
+                approverRoleIds={approverRoleIds}
+                bypassAdminsOwners={bypassAdminsOwners}
+                bypassRoleIds={bypassRoleIds}
+                userOptions={userOptions}
+                roleOptions={roleOptions}
+                onActionKeyChange={handleActionKeyChange}
+                onAddRule={addRule}
+                onUpdateRule={updateRule}
+                onRemoveRule={removeRule}
+                onQuorumChange={setQuorum}
+                onAllowSelfApproveChange={setAllowSelfApprove}
+                onApproverUserIdsChange={setApproverUserIds}
+                onApproverRoleIdsChange={setApproverRoleIds}
+                onBypassAdminsOwnersChange={setBypassAdminsOwners}
+                onBypassRoleIdsChange={setBypassRoleIds}
+                onSave={handleSave}
+                onClose={onClose}
+            />
+        )
+    }
+
     return (
         <LemonModal
             isOpen
@@ -317,23 +386,10 @@ function ApprovalPolicyModal({ policy, onClose }: { policy?: ApprovalPolicy; onC
             <div className="space-y-4">
                 <div>
                     <label className="block text-sm font-medium mb-1">Action type</label>
-                    <LemonSelect
-                        fullWidth
-                        value={actionKey}
-                        onChange={(value) => {
-                            setActionKey(value)
-                            if (value !== ApprovalActionKey.FEATURE_FLAG_UPDATE) {
-                                setRules([])
-                            }
-                        }}
-                        options={Object.entries(APPROVAL_ACTIONS).map(([value, action]) => ({
-                            label: action.label,
-                            value,
-                        }))}
-                    />
+                    <LemonSelect fullWidth value={actionKey} onChange={handleActionKeyChange} options={actionOptions} />
                 </div>
 
-                {actionKey === ApprovalActionKey.FEATURE_FLAG_UPDATE && (
+                {supportsConditions && (
                     <div className="space-y-3">
                         <div className="flex items-center gap-2">
                             <label className="block text-sm font-medium">Require approval when</label>
@@ -373,7 +429,9 @@ function ApprovalPolicyModal({ policy, onClose }: { policy?: ApprovalPolicy; onC
                         )}
 
                         <p className="text-xs text-secondary">
-                            If no conditions are set, all changes to this action type will require approval.
+                            {actionKey === ApprovalActionKey.EXPERIMENT_UPDATE
+                                ? "With no conditions, any change to an experiment's rollout, variant split or holdout exclusion needs approval. Changes to its release conditions do not."
+                                : "With no conditions, any change to a flag's rollout needs approval. So does any change to its release conditions, unless an experiment, survey, product tour or early access feature manages the flag."}
                         </p>
                     </div>
                 )}

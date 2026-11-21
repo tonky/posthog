@@ -118,7 +118,7 @@ export type Option = {
     searchInput?: string
 }
 
-const getPropertyKey = (
+export const getPropertyKey = (
     type: PropertyDefinitionType,
     propertyName?: BreakdownKeyType,
     groupTypeIndex?: number | null
@@ -252,16 +252,14 @@ export interface propertyDefinitionsModelActions {
         type: PropertyDefinitionType
     }) => {
         endpoint: string | undefined
-        eventNames?: string[] | undefined
+        eventNames?: string[]
         newInput: string | undefined
-        properties?:
-            | {
-                  key: string
-                  values: string | string[]
-              }[]
-            | undefined
+        properties?: {
+            key: string
+            values: string | string[]
+        }[]
         propertyKey: string
-        refresh?: string | undefined
+        refresh?: string
         type: PropertyDefinitionType
     }
     setOptions: (

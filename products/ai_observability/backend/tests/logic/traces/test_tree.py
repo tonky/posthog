@@ -44,12 +44,10 @@ def test_promotes_orphans_to_roots_including_children_of_the_trace_event_span() 
     assert shape(tree) == [("orphan", [("grandchild", [])])]
 
 
-def test_excludes_feedback_metric_and_trace_events() -> None:
+def test_excludes_the_trace_event() -> None:
     tree = build_tree(
         events(
             {"uuid": "span"},
-            {"uuid": "feedback", "event": "$ai_feedback"},
-            {"uuid": "metric", "event": "$ai_metric"},
             {"uuid": "trace-event", "event": "$ai_trace", "parent_id": None},
         ),
         "trace-1",
@@ -92,6 +90,24 @@ def test_events_sharing_a_span_id_each_appear_and_share_children_once(_name: str
     assert [node.event.id for node in tree] == [f"dup-{i}" for i in range(count)]
     assert [child.event.id for child in tree[0].children] == [f"child-{i}" for i in range(count)]
     assert all(not node.children for node in tree[1:])
+
+
+@parameterized.expand([("shallow", 3), ("deeper than the recursion limit", 1_500)])
+def test_nests_a_chain_of_spans_to_any_depth(_name: str, depth: int) -> None:
+    chain = [
+        {"uuid": f"s{i}", "span_id": f"s{i}", "parent_id": f"s{i - 1}" if i else None, "timestamp": T0}
+        for i in range(depth)
+    ]
+
+    tree = build_tree(events(*chain), "trace-1")
+
+    reached: list[str] = []
+    level = tree
+    while level:
+        [node] = level
+        reached.append(node.event.id)
+        level = node.children
+    assert reached == [f"s{i}" for i in range(depth)]
 
 
 def test_a_non_finite_latency_does_not_break_ordering() -> None:

@@ -1,23 +1,26 @@
 import { useActions, useValues } from 'kea'
 import posthog from 'posthog-js'
 
-import { IconPlusSmall } from '@posthog/icons'
+import { IconPlus, IconPlusSmall } from '@posthog/icons'
 import { LemonButton, LemonLabel, Link } from '@posthog/lemon-ui'
+import { Button, Heading, Text } from '@posthog/quill'
 
 import { RestrictionScope, useRestrictedArea } from 'lib/components/RestrictedArea'
 import { TaxonomicFilterGroupType } from 'lib/components/TaxonomicFilter/types'
 import { FEATURE_FLAGS, TeamMembershipLevel } from 'lib/constants'
 import { useOnMountEffect } from 'lib/hooks/useOnMountEffect'
+import { LinkPrimitive } from 'lib/lemon-ui/Link'
 import { featureFlagLogic } from 'lib/logic/featureFlagLogic'
+import { useQuillSurface } from 'lib/ui/QuillSurface/quillSurfaceContext'
 import { eventUsageLogic } from 'lib/utils/eventUsageLogic'
-import { ActionFilter } from 'scenes/insights/filters/ActionFilter/ActionFilter'
+import { SeriesActionFilter } from 'scenes/insights/filters/ActionFilter/ActionFilter'
 import { MathAvailability } from 'scenes/insights/filters/ActionFilter/ActionFilterRow/types'
+import { SeriesNode } from 'scenes/insights/filters/ActionFilter/seriesNode'
 import { teamLogic } from 'scenes/teamLogic'
 import { urls } from 'scenes/urls'
 
-import { actionsAndEventsToSeries } from '~/queries/nodes/InsightQuery/utils/actionsAndEventsToSeries'
-import { ProductIntentContext, ProductKey } from '~/queries/schema/schema-general'
-import { EntityTypes, FilterType } from '~/types'
+import { NodeKind, ProductIntentContext, ProductKey } from '~/queries/schema/schema-general'
+import { ChartDisplayCategory, InsightType } from '~/types'
 
 import { ConfigureWithAIButton } from 'products/customer_analytics/frontend/components/ConfigureWithAIButton'
 import { isPageviewWithoutFilters } from 'products/customer_analytics/frontend/utils'
@@ -30,14 +33,14 @@ function reportCustomerAnalyticsDashboardEventPickerClicked({ event }: { event: 
 
 export interface EventSelectorProps {
     caption?: string
-    filters: FilterType | null
-    setFilters: (filters: FilterType) => void
+    series: SeriesNode[] | null
+    setSeries: (series: SeriesNode[]) => void
     title: string
     prompt: string
     relatedSeries: string[]
 }
 
-function EventSelector({ filters, setFilters, title, caption, prompt }: EventSelectorProps): JSX.Element {
+function EventSelector({ series, setSeries, title, caption, prompt }: EventSelectorProps): JSX.Element {
     const { eventsToHighlight } = useValues(customerAnalyticsDashboardEventsLogic)
     const highlight = eventsToHighlight.includes(title) ? 'border rounded border-dashed border-danger' : ''
 
@@ -46,8 +49,68 @@ function EventSelector({ filters, setFilters, title, caption, prompt }: EventSel
         minimumAccessLevel: TeamMembershipLevel.Admin,
     })
 
-    const shouldShowAIButton =
-        !filters || isPageviewWithoutFilters(actionsAndEventsToSeries(filters as any, true, MathAvailability.None)[0])
+    const todayRailNav = useQuillSurface()
+
+    const shouldShowAIButton = !series?.[0] || isPageviewWithoutFilters(series[0])
+
+    const handleSeriesChange = (nextSeries: SeriesNode[]): void => {
+        setSeries(nextSeries)
+        reportCustomerAnalyticsDashboardEventPickerClicked({ event: title })
+    }
+
+    const handleSelectDefault = (): void => {
+        setSeries([{ kind: NodeKind.EventsNode, event: '$pageview', name: '$pageview' }])
+        reportCustomerAnalyticsDashboardEventPickerClicked({ event: title })
+    }
+
+    const seriesActionFilter = series ? (
+        <SeriesActionFilter
+            hideRename
+            hideDuplicate
+            hideFilter={false}
+            propertyFiltersPopover
+            series={series}
+            onChange={handleSeriesChange}
+            insightType={InsightType.TRENDS}
+            trendsDisplayCategory={ChartDisplayCategory.TimeSeries}
+            typeKey={`customer-analytics-${title.toLowerCase()}`}
+            mathAvailability={MathAvailability.None}
+            actionsTaxonomicGroupTypes={[TaxonomicFilterGroupType.Events, TaxonomicFilterGroupType.Actions]}
+            buttonCopy="Select event or action"
+            entitiesLimit={1}
+            disabled={!!restrictedReason}
+        />
+    ) : null
+
+    if (todayRailNav) {
+        return (
+            <div className={`flex flex-col gap-2 py-2 ${highlight}`}>
+                <div className="flex flex-col gap-1">
+                    <div className="flex items-center gap-2">
+                        <Heading size="sm" render={<h3 className="m-0" />}>
+                            {title}
+                        </Heading>
+                        {shouldShowAIButton && (
+                            <ConfigureWithAIButton event={title} prompt={prompt} disabledReason={restrictedReason} />
+                        )}
+                    </div>
+                    {caption && (
+                        <Text size="xs" variant="muted" render={<p className="m-0" />}>
+                            {caption}
+                        </Text>
+                    )}
+                </div>
+                <div className="flex">
+                    {seriesActionFilter ?? (
+                        <Button onClick={handleSelectDefault} disabledReason={restrictedReason}>
+                            <IconPlus />
+                            Select event or action
+                        </Button>
+                    )}
+                </div>
+            </div>
+        )
+    }
 
     return (
         <div className={`py-2 ${highlight}`}>
@@ -60,43 +123,14 @@ function EventSelector({ filters, setFilters, title, caption, prompt }: EventSel
                 </div>
                 <p className="text-xs text-muted-alt">{caption}</p>
             </div>
-            {filters ? (
-                <div className="flex">
-                    <ActionFilter
-                        hideRename
-                        hideDuplicate
-                        hideFilter={false}
-                        propertyFiltersPopover
-                        filters={filters}
-                        setFilters={(filters) => {
-                            setFilters(filters)
-                            reportCustomerAnalyticsDashboardEventPickerClicked({ event: title })
-                        }}
-                        typeKey={`customer-analytics-${title.toLowerCase()}`}
-                        mathAvailability={MathAvailability.None}
-                        actionsTaxonomicGroupTypes={[TaxonomicFilterGroupType.Events, TaxonomicFilterGroupType.Actions]}
-                        buttonCopy="Select event or action"
-                        entitiesLimit={1}
-                        disabled={!!restrictedReason}
-                    />
-                </div>
+            {series ? (
+                <div className="flex">{seriesActionFilter}</div>
             ) : (
                 <div className="flex">
                     <LemonButton
                         type="tertiary"
                         icon={<IconPlusSmall />}
-                        onClick={() => {
-                            setFilters({
-                                events: [
-                                    {
-                                        id: '$pageview',
-                                        name: '$pageview',
-                                        type: EntityTypes.EVENTS,
-                                    },
-                                ],
-                            })
-                            reportCustomerAnalyticsDashboardEventPickerClicked({ event: title })
-                        }}
+                        onClick={handleSelectDefault}
                         disabledReason={restrictedReason}
                     >
                         Select event or action
@@ -120,6 +154,7 @@ export function CustomerAnalyticsDashboardEvents(): JSX.Element {
         scope: RestrictionScope.Project,
         minimumAccessLevel: TeamMembershipLevel.Admin,
     })
+    const todayRailNav = useQuillSurface()
 
     const handleSave = (): void => {
         saveEvents()
@@ -139,6 +174,63 @@ export function CustomerAnalyticsDashboardEvents(): JSX.Element {
     useOnMountEffect(() => {
         reportCustomerAnalyticsDashboardConfigurationViewed()
     })
+
+    const actionDisabledReason = hasChanges ? restrictedReason : 'No changes'
+
+    if (todayRailNav) {
+        return (
+            <div className="flex flex-col gap-4">
+                <Text size="xs" render={<p className="m-0" />}>
+                    Need to combine multiple events into one definition?{' '}
+                    <Button
+                        variant="link"
+                        size="inline"
+                        nativeButton={false}
+                        render={<LinkPrimitive to={urls.createAction()} target="_blank" />}
+                    >
+                        Create an action
+                    </Button>{' '}
+                    first, then select it here.
+                </Text>
+                {featureFlags[FEATURE_FLAGS.SCHEMA_MANAGEMENT] && (
+                    <Text size="xs" render={<p className="m-0" />}>
+                        Don't have events yet? You can{' '}
+                        <Button
+                            variant="link"
+                            size="inline"
+                            nativeButton={false}
+                            render={<LinkPrimitive to={urls.eventDefinitions()} target="_blank" />}
+                        >
+                            create event definitions
+                        </Button>{' '}
+                        upfront and configure your dashboard now.
+                        <br />
+                        Metrics will populate once you start capturing events.
+                    </Text>
+                )}
+
+                <div className="flex flex-col gap-2">
+                    {eventSelectors.map((eventSelector, index) => (
+                        <EventSelector key={index} {...eventSelector} />
+                    ))}
+                </div>
+
+                <div className="flex flex-wrap gap-2 pt-4">
+                    <Button variant="outline" onClick={handleClear} disabledReason={actionDisabledReason}>
+                        Clear changes
+                    </Button>
+                    <Button
+                        data-attr="save-customer-analytics-dashboard-events"
+                        variant="primary"
+                        onClick={handleSave}
+                        disabledReason={actionDisabledReason}
+                    >
+                        Save events
+                    </Button>
+                </div>
+            </div>
+        )
+    }
 
     return (
         <div className="space-y-4">
@@ -168,18 +260,14 @@ export function CustomerAnalyticsDashboardEvents(): JSX.Element {
             </div>
 
             <div className="flex flex-row gap-2 pt-4">
-                <LemonButton
-                    type="secondary"
-                    onClick={handleClear}
-                    disabledReason={hasChanges ? restrictedReason : 'No changes'}
-                >
+                <LemonButton type="secondary" onClick={handleClear} disabledReason={actionDisabledReason}>
                     Clear changes
                 </LemonButton>
                 <LemonButton
                     data-attr="save-customer-analytics-dashboard-events"
                     type="primary"
                     onClick={handleSave}
-                    disabledReason={hasChanges ? restrictedReason : 'No changes'}
+                    disabledReason={actionDisabledReason}
                 >
                     Save events
                 </LemonButton>

@@ -65,6 +65,7 @@ with temporalio.workflow.unsafe.imports_passed_through():
         record_teams_discovered,
     )
     from posthog.temporal.ai_observability.shared_activities import (
+        CLUSTERING_OPT_IN_PATCH_ID,
         FetchAllClusteringFiltersInput,
         FetchAllClusteringJobsInput,
         JobConfig,
@@ -185,10 +186,17 @@ class BatchTraceSummarizationCoordinatorWorkflow(PostHogWorkflow):
                 window_minutes=inputs.window_minutes,
             )
 
+            # Discover only teams with AI events in the window the children summarize, because the
+            # discovery lookback is days and most of those teams have nothing in this window.
+            window = (
+                inputs
+                if inputs.window_start and inputs.window_end
+                else _with_summarization_window(inputs, temporalio.workflow.info().workflow_start_time)
+            )
             try:
                 team_ids = await temporalio.workflow.execute_activity(
                     get_team_ids_for_ai_observability,
-                    TeamDiscoveryInput(),
+                    TeamDiscoveryInput(window_start=window.window_start, window_end=window.window_end),
                     start_to_close_timeout=DISCOVERY_ACTIVITY_TIMEOUT,
                     retry_policy=DISCOVERY_ACTIVITY_RETRY_POLICY,
                 )
@@ -383,6 +391,7 @@ class BatchTraceSummarizationCoordinatorWorkflow(PostHogWorkflow):
             team_jobs=per_team_jobs.get(team_id, []),
             analysis_level=inputs.analysis_level,
             legacy_event_filters=per_team_filters.get(team_id, []),
+            allow_legacy_fallback=not temporalio.workflow.patched(CLUSTERING_OPT_IN_PATCH_ID),
         )
         if not level_jobs:
             logger.info(

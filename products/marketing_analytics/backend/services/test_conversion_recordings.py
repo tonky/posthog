@@ -17,13 +17,14 @@ from posthog.schema import (
     MarketingAnalyticsTableQuery,
 )
 
+from posthog.api.query import CONCURRENCY_LIMIT_RETRY_AFTER_SECONDS
 from posthog.clickhouse.client.execute import sync_execute, validated_client_query_id
 from posthog.clickhouse.client.limit import ConcurrencyLimitExceeded
 from posthog.clickhouse.preaggregation.marketing_conversions_sql import TRUNCATE_MARKETING_CONVERSIONS_TABLE_SQL
 from posthog.clickhouse.preaggregation.marketing_touchpoints_sql import TRUNCATE_MARKETING_TOUCHPOINTS_TABLE_SQL
 from posthog.clickhouse.query_tagging import get_query_tag_value, tags_context
 
-from products.actions.backend.models.action import Action
+from products.actions.backend.facade.testing import create_action
 from products.analytics_platform.backend.lazy_computation.lazy_computation_executor import LazyComputationResult
 from products.analytics_platform.backend.models.preaggregation_job import PreaggregationJob
 from products.marketing_analytics.backend.hogql_queries.errors import MarketingPrecomputeNotReady
@@ -174,11 +175,15 @@ class TestConversionRecordings(ClickhouseTestMixin, APIBaseTest):
             with self.subTest(invalid_fields=invalid_fields):
                 invalid = self.client.post(url, {**payload, **invalid_fields}, format="json")
                 self.assertEqual(invalid.status_code, 400)
-        for limiter in ("get_app_org_rate_limiter", "get_api_team_rate_limiter"):
-            with self.subTest(limiter=limiter), patch(f"products.marketing_analytics.backend.api.{limiter}") as mock:
+        for limiter in (
+            "posthog.clickhouse.client.limit.get_app_org_rate_limiter",
+            "products.marketing_analytics.backend.api.get_api_team_rate_limiter",
+        ):
+            with self.subTest(limiter=limiter), patch(limiter) as mock:
                 mock.return_value.run.side_effect = ConcurrencyLimitExceeded("internal limiter detail")
                 throttled = self.client.post(url, payload, format="json")
                 self.assertEqual(throttled.status_code, 429)
+                self.assertEqual(throttled["Retry-After"], str(CONCURRENCY_LIMIT_RETRY_AFTER_SECONDS))
                 self.assertNotIn("internal limiter detail", throttled.json()["detail"])
 
     def test_campaign_mapping_and_missing_row(self) -> None:
@@ -289,7 +294,7 @@ class TestConversionRecordings(ClickhouseTestMixin, APIBaseTest):
             self.addCleanup(sync_execute, TRUNCATE_MARKETING_TOUCHPOINTS_TABLE_SQL())
             self.addCleanup(sync_execute, TRUNCATE_MARKETING_CONVERSIONS_TABLE_SQL())
         if action_goal:
-            action = Action.objects.create(team=self.team, name="Purchases", steps_json=[{"event": "purchase"}])
+            action = create_action(team=self.team, name="Purchases", steps_json=[{"event": "purchase"}])
             config = self.team.marketing_analytics_config
             config.conversion_goals[0].update(kind="ActionsNode", id=action.id)
             config.conversion_goals[0].pop("event")

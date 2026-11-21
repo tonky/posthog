@@ -30,6 +30,8 @@ const {
     isTripwire,
     listIsolatedProducts,
     loadContractSurfaces,
+    loadWarehouseSourceRegistryFiles,
+    loadWarehouseSourceSdkImports,
     parseCrateName,
     parsePytestIgnores,
     parseSemgrepLanguages,
@@ -43,6 +45,7 @@ const {
     PROTO_TREES,
     PYTHON,
     REPO_ROOT,
+    stripJsonComments,
     RUST,
     UNIVERSAL,
 } = require('./trunk-impacted-targets')
@@ -130,16 +133,11 @@ test('a universal tripwire claims every known target', () => {
     const tripwireFiles = [
         // Runs in backend, frontend, nodejs, and rust CI alike.
         'bin/download-mmdb',
-        // The stack every suite tests against, the rust integration suites
-        // included.
-        'docker-compose.base.yml',
         // Trees that steer what every suite runs or what it runs against: the
-        // Depot shadow of an action every workflow uses, the toolchain, the
-        // service configs the stack mounts, and the markdownlint config every
-        // tree's prose obeys.
+        // Depot mirror of an action every workflow uses, the toolchain, and the
+        // markdownlint config every tree's prose obeys.
         '.depot/actions/pnpm-install/action.yml',
         '.flox/env/manifest.toml',
-        'docker/clickhouse/config.d/default.xml',
         'devenv/duckgres.yaml',
         '.config/.markdownlint-cli2.jsonc',
         // A workflow nobody has placed in a domain keeps the old radius.
@@ -183,7 +181,7 @@ test('the tach graph claims the python lanes rather than every lane', () => {
 // Only the root files narrow: a product's own manifests keep the product's lanes.
 test('a lockfile claims its own toolchain rather than every lane', () => {
     for (const file of ['pnpm-lock.yaml', 'pnpm-workspace.yaml', 'package.json']) {
-        assert.deepEqual(computeTargets([file], CONTEXT), computeTargets(['.oxlintrc.json'], CONTEXT), file)
+        assert.deepEqual(computeTargets([file], CONTEXT), computeTargets(['tsconfig.json'], CONTEXT), file)
     }
     for (const file of ['uv.lock', 'pyproject.toml']) {
         assert.deepEqual(computeTargets([file], CONTEXT), computeTargets(['mypy.ini'], CONTEXT), file)
@@ -383,7 +381,7 @@ test('every proto tree declaring a stub consumer has stubs there, and no other t
 // serializes against Rust, and a backend one no longer serializes against the
 // frontend.
 test('a language-scoped tripwire claims only that language', () => {
-    const javascript = computeTargets(['.oxlintrc.json'], CONTEXT)
+    const javascript = computeTargets(['tsconfig.json'], CONTEXT)
     assert.equal(javascript.includes('fe:core'), true)
     assert.equal(javascript.includes('fe:product:alpha'), true)
     assert.equal(javascript.includes('node:ingestion'), true)
@@ -451,7 +449,7 @@ test('the generated frontend product artifacts claim only the frontend lanes', (
 // story the workflows tell: a tool's own settings can only fail the code that
 // tool reads, so they no longer serialize a PR against the whole repo.
 test('single-language root configuration claims that language', () => {
-    const javascript = computeTargets(['.oxlintrc.json'], CONTEXT)
+    const javascript = computeTargets(['tsconfig.json'], CONTEXT)
     for (const file of ['postcss.config.js', '.stylelintrc.js', '.stylelintignore', '.kearc', 'posthog.json']) {
         assert.deepEqual(computeTargets([file], CONTEXT), javascript, file)
     }
@@ -461,11 +459,30 @@ test('single-language root configuration claims that language', () => {
     }
 })
 
+test('the root oxc configs claim the JS lanes except node', () => {
+    const javascript = computeTargets(['tsconfig.json'], CONTEXT)
+    for (const file of ['.oxlintrc.json', '.oxfmtrc.json']) {
+        assert.deepEqual(
+            computeTargets([file], CONTEXT),
+            javascript.filter((target) => !target.startsWith('node:')),
+            file
+        )
+    }
+})
+
+test('the root oxc configs keep ignoring nodejs', () => {
+    for (const file of ['.oxlintrc.json', '.oxfmtrc.json']) {
+        const config = JSON.parse(stripJsonComments(fs.readFileSync(path.join(REPO_ROOT, file), 'utf8')))
+        const ignored = (config.ignorePatterns || []).map((pattern) => pattern.replace(/\/(\*\*)?$/, ''))
+        assert.equal(ignored.includes('nodejs'), true, `${file} must ignore nodejs/`)
+    }
+})
+
 // Root files whose reader is the stack, the image, or the ownership data every
 // suite runs on. The narrowing above stops here: these keep the full set, but
 // by decision rather than for want of a rule.
 test('stack and image configuration at the root stays universal', () => {
-    for (const file of ['.env.development', '.env.services', '.envrc', 'otel-collector-config.dev.yaml']) {
+    for (const file of ['.env.development', '.env.services', '.envrc']) {
         assert.equal(tripwireDomain(file), UNIVERSAL, file)
         assert.deepEqual(computeTargets([file], CONTEXT), EVERYTHING, file)
     }
@@ -505,11 +522,13 @@ test('the quarantine list claims the fullstack lanes and no rust crate', () => {
 
 // paths-filter decides which jobs run inside a single run's own diff, so no
 // run's outcome depends on it jointly with another queue entry. Its own CI and
-// its .depot shadow share the lane.
+// its .depot mirror share the lane.
 test('the paths-filter action and its CI share the ci-tooling lane', () => {
     for (const file of [
         '.github/actions/paths-filter/src/filter.ts',
         '.github/actions/paths-filter/dist/index.js',
+        '.github/actions/shared-image-releases/src/inspect.ts',
+        '.github/actions/shared-image-releases/dist/index.js',
         '.github/workflows/ci-paths-filter.yml',
         '.depot/actions/paths-filter/src/filter.ts',
     ]) {
@@ -523,7 +542,7 @@ test('the paths-filter action and its CI share the ci-tooling lane', () => {
 test('pnpm patches take the JS lanes and depot.json the repo-config lane', () => {
     assert.deepEqual(
         computeTargets(['patches/dayjs@1.11.11.patch'], CONTEXT),
-        computeTargets(['.oxlintrc.json'], CONTEXT)
+        computeTargets(['tsconfig.json'], CONTEXT)
     )
     assert.deepEqual(computeTargets(['depot.json'], CONTEXT), ['repo-config'])
 })
@@ -559,7 +578,7 @@ test('the cargo-dist manifest shares the cli lane', () => {
 })
 
 test('a single-language workflow claims that language rather than everything', () => {
-    const javascript = computeTargets(['.oxlintrc.json'], CONTEXT)
+    const javascript = computeTargets(['tsconfig.json'], CONTEXT)
     for (const file of [
         '.github/workflows/ci-frontend.yml',
         '.github/workflows/ci-storybook.yml',
@@ -579,7 +598,7 @@ test('a single-language workflow claims that language rather than everything', (
         )
     }
     for (const file of [
-        '.github/workflows/ci-backend.yml',
+        '.depot/workflows/ci-backend.yml',
         '.github/workflows/ci-python.yml',
         '.github/workflows/ci-clickhouse-multinode-migrations.yml',
         '.github/workflows/ci-clickhouse-util-udfs.yml',
@@ -588,6 +607,8 @@ test('a single-language workflow claims that language rather than everything', (
         '.github/scripts/optimize_test_durations.py',
         '.github/scripts/test_optimize_test_durations.py',
         '.github/scripts/check-idor-model-coverage.py',
+        // Only ci-backend's events_json leg reads the native-schema test list.
+        '.github/new-events-schema-targets.txt',
     ]) {
         assert.deepEqual(computeTargets([file], CONTEXT), computeTargets(['mypy.ini'], CONTEXT), file)
     }
@@ -599,7 +620,7 @@ test('a single-language workflow claims that language rather than everything', (
 test('a full-stack suite claims both language families and no rust crate', () => {
     for (const file of [
         '.github/workflows/ci-e2e-playwright.yml',
-        '.github/workflows/ci-hog.yml',
+        '.github/workflows/ci-hoglang.yml',
         '.github/workflows/container-images-ci.yml',
         '.github/workflows/cd-sandbox-base-image.yml',
         '.github/workflows/ci-recording-rasterizer-container.yml',
@@ -757,20 +778,9 @@ test('the schema codegen scripts claim the product-surface lanes', () => {
     )
 })
 
-// A Depot shadow is kept apples-to-apples with its canonical by the
-// shadow-drift check and posts non-blocking statuses, so it can only affect
-// what the canonical affects. The narrowing direction is the guard: a shadow
-// of something no rule has placed must stay on the .github blanket rather
-// than fall through unclaimed.
-test('a depot shadow resolves through its canonical workflow rules', () => {
-    assert.deepEqual(
-        computeTargets(['.depot/workflows/ci-backend.yml'], CONTEXT),
-        computeTargets(['.github/workflows/ci-backend.yml'], CONTEXT)
-    )
-    assert.deepEqual(
-        computeTargets(['.depot/workflows/ci-backend-update-test-timing.yml'], CONTEXT),
-        computeTargets(['mypy.ini'], CONTEXT)
-    )
+// A Depot action mirror resolves through its canonical action, and a Depot workflow no rule
+// has placed stays on its own blanket rather than falling through unclaimed.
+test('depot mirrors and unplaced depot workflows resolve to everything', () => {
     assert.deepEqual(computeTargets(['.depot/actions/pnpm-install/action.yml'], CONTEXT), EVERYTHING)
     assert.deepEqual(computeTargets(['.depot/workflows/some-new-shadow.yml'], CONTEXT), EVERYTHING)
     // Shadow markdown is prose like any other.
@@ -836,7 +846,7 @@ test('the agent-skills workflow claims both language families', () => {
     assert.equal(targets.includes('agents'), false)
     assert.equal(targets.includes('py:core'), true)
     assert.equal(targets.includes('fe:core'), true)
-    assert.deepEqual(targets, computeTargets(['mypy.ini', '.oxlintrc.json'], CONTEXT))
+    assert.deepEqual(targets, computeTargets(['mypy.ini', 'tsconfig.json'], CONTEXT))
 })
 
 test('the ml-mirror sidecar image and its workflow stay on the node lanes', () => {
@@ -1218,7 +1228,7 @@ test('a semgrep rule claims the lanes of the languages it declares', () => {
     )
     assert.deepEqual(
         computeTargets(['.semgrep/rules/devex/ts-rule.yaml'], CONTEXT),
-        computeTargets(['.oxlintrc.json'], CONTEXT)
+        computeTargets(['tsconfig.json'], CONTEXT)
     )
     // A rule spanning languages with no single lane mapping, and a rule file
     // the context never resolved, both keep the old radius.
@@ -1374,7 +1384,7 @@ test('an incomplete context falls back to the ALL sentinel', () => {
 
 test('tripwire domains are reported for telemetry', () => {
     assert.equal(tripwireDomain('hogli.yaml'), UNIVERSAL)
-    assert.equal(tripwireDomain('.oxlintrc.json'), JAVASCRIPT)
+    assert.equal(tripwireDomain('tsconfig.json'), JAVASCRIPT)
     assert.equal(tripwireDomain('mypy.ini'), PYTHON)
     assert.equal(tripwireDomain('.github/workflows/ci-rust.yml'), RUST)
     assert.equal(tripwireDomain('.github/pull_request_template.md'), null)
@@ -1906,6 +1916,169 @@ test('the cascade names direct importers and stops before the next hop', () => {
     ])
 })
 
+// A vendor imports only the SDK, so the SDK is its one direct importer edge and
+// core sits a hop beyond it. If a reader below loses the vendor lane, a change
+// that can break a vendor merges in parallel with one, which is the failure
+// lanes exist to prevent. If core gains it, every vendor PR queues behind core
+// PRs again and the queue runs the full backend suite for it.
+test('a warehouse source vendor claims only the vendor lane, which every vendor reader shares', () => {
+    const vendorLane = 'py:warehouse-source-vendors'
+    const registry = 'products/warehouse_sources/backend/facade/credential_kinds.py'
+    const context = {
+        ...CONTEXT,
+        products: [...CONTEXT.products, 'warehouse_sources'],
+        warehouseSourceRegistryFiles: new Set([registry]),
+    }
+    const vendorDir = 'products/warehouse_sources/sources/acme'
+    assert.deepEqual(
+        computeTargets(
+            [
+                `${vendorDir}/source.py`,
+                `${vendorDir}/icon.png`,
+                `${vendorDir}/tests/test_acme.py`,
+                `${vendorDir}/README.md`,
+                registry,
+            ],
+            context
+        ),
+        [vendorLane]
+    )
+
+    const readers = [
+        'products/warehouse_sources/sources/sdk/source.py',
+        'products/warehouse_sources/sources/conftest.py',
+        'products/warehouse_sources/backend/facade/api.py',
+        'products/conftest.py',
+        'posthog/test/repo_invariants/test_dataclass_defaults.py',
+        'mypy.ini',
+        'bin/download-mmdb',
+    ]
+    for (const file of readers) {
+        assert.equal(computeTargets([file], context).includes(vendorLane), true, file)
+    }
+    // The SDK and the plugin root import core, so they also keep the product
+    // lane that core PRs overlap.
+    for (const file of readers.slice(0, 2)) {
+        assert.equal(computeTargets([file], context).includes('py:product:warehouse_sources'), true, file)
+    }
+    assert.equal(allKnownTargets(context).includes(vendorLane), true)
+    for (const file of ['posthog/models/user.py', 'products/alpha/backend/api.py']) {
+        assert.equal(computeTargets([file], context).includes(vendorLane), false, file)
+    }
+
+    // A core module the SDK imports claims the vendor lane on top of its own.
+    const sdkImport = 'posthog/integrations/__init__.py'
+    const withSdkImports = { ...context, warehouseSourceSdkImports: new Set([sdkImport]) }
+    const sdkImportTargets = computeTargets([sdkImport], withSdkImports)
+    assert.equal(sdkImportTargets.includes(vendorLane), true)
+    assert.equal(sdkImportTargets.includes('py:core'), true)
+    assert.equal(computeTargets(['posthog/models/user.py'], withSdkImports).includes(vendorLane), false)
+
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sdk-imports-'))
+    try {
+        const write = (file, text) => {
+            fs.mkdirSync(path.dirname(path.join(root, file)), { recursive: true })
+            fs.writeFileSync(path.join(root, file), text)
+        }
+        write(
+            'products/warehouse_sources/sources/sdk/__init__.py',
+            [
+                'from posthog.integrations import IntegrationKind',
+                'from posthog.security.url_validation import (',
+                '    is_url_allowed,',
+                ')',
+                'from products.warehouse_sources.backend.facade import api',
+                'from dlt.common import json',
+                '',
+            ].join('\n')
+        )
+        // Every vendor test collects the root and products/ conftest files too.
+        // The second import names a module, not a symbol, inside a function.
+        write(
+            'conftest.py',
+            [
+                'from posthog.test.junit import set_junit_report_location',
+                'from posthog import redis',
+                'def pytest_configure(config):',
+                '    from posthog.test import authentication_checks  # noqa: PLC0415',
+                '',
+            ].join('\n')
+        )
+        write('products/conftest.py', 'from posthog.conftest import *  # noqa: F403\n')
+        write(sdkImport, '')
+        write('posthog/conftest.py', '')
+        write('posthog/redis.py', '')
+        write('posthog/test/__init__.py', '')
+        write('posthog/test/authentication_checks.py', '')
+        write('posthog/test/junit.py', '')
+        write('posthog/security/url_validation.py', '')
+        write('products/warehouse_sources/backend/facade/api.py', '')
+        assert.deepEqual([...loadWarehouseSourceSdkImports(root)].sort(), [
+            'posthog/conftest.py',
+            sdkImport,
+            'posthog/redis.py',
+            'posthog/security/url_validation.py',
+            'posthog/test/__init__.py',
+            'posthog/test/authentication_checks.py',
+            'posthog/test/junit.py',
+        ])
+    } finally {
+        fs.rmSync(root, { recursive: true, force: true })
+    }
+
+    // The registry set comes from the selector, which ci-scripts.yml checks out.
+    // The registries themselves are not in that checkout.
+    const registries = loadWarehouseSourceRegistryFiles(REPO_ROOT)
+    assert.ok(registries.size > 0)
+    for (const file of registries) {
+        assert.ok(file.startsWith('products/warehouse_sources/'), file)
+    }
+
+    assert.equal(computeTargets([`${vendorDir}/source.py`], CONTEXT).includes(vendorLane), false)
+    assert.equal(allKnownTargets(CONTEXT).includes(vendorLane), false)
+})
+
+// Files that no check of a vendor PR reads, and whose own suites load no vendor.
+// Each keeps the lanes it claimed before except the vendor lane. If one of them
+// claims the vendor lane again, vendor PRs wait behind it for nothing. If one
+// loses its own lane, it merges in parallel with the PRs it can break.
+test('files no vendor check reads keep their own lanes but not the vendor lane', () => {
+    const vendorLane = 'py:warehouse-source-vendors'
+    const context = { ...CONTEXT, products: [...CONTEXT.products, 'warehouse_sources'] }
+    const cases = [
+        // Suites that run Python but load no vendor.
+        ['.github/workflows/ci-dagster.yml', 'py:core'],
+        ['.github/workflows/build-hogql-parser.yml', 'py:core'],
+        ['.github/scripts/check-idor-model-coverage.py', 'py:product:warehouse_sources'],
+        ['.github/new-events-schema-targets.txt', 'py:core'],
+        // The docker services, which the warehouse sources job runs without.
+        ['docker-compose.base.yml', 'fe:core'],
+        ['docker/clickhouse/config.d/default.xml', 'node:ingestion'],
+        ['otel-collector-config.dev.yaml', 'py:core'],
+        // A ledger of imports between products, which a vendor cannot make.
+        ['products/model_crossing_uses_baseline.txt', 'py:product:warehouse_sources'],
+        // Release, bot, and local-only files.
+        ['.github/workflows/release-toolbar-extension.yml', 'deploy'],
+        ['.github/workflows/renovate-dashboard-digest.yml', 'repo-automation'],
+        ['.github/scripts/eng-analytics-weekly-digest.test.mjs', 'repo-automation'],
+        ['bin/devbox-worktree-hook', 'dev-env'],
+    ]
+    for (const [file, lane] of cases) {
+        const targets = computeTargets([file], context)
+        assert.equal(targets.includes(vendorLane), false, file)
+        assert.equal(targets.includes(lane), true, `${file} should keep ${lane}`)
+    }
+    assert.deepEqual(
+        computeTargets(['docker-compose.base.yml'], context),
+        allKnownTargets(context).filter((lane) => lane !== vendorLane)
+    )
+    // The vendor checks read the products/ ruff config, the database routing
+    // that Django setup loads, and the conftest every vendor test collects.
+    for (const file of ['products/ruff.toml', 'products/db_routing.yaml', 'products/conftest.py']) {
+        assert.equal(computeTargets([file], context).includes(vendorLane), true, file)
+    }
+})
+
 // The base CONTEXT keeps an empty tach graph, so no product is declared in it.
 // A product `tach check` does not constrain has no bounded importer set: any
 // module may import it, so its change still has to reach every backend lane.
@@ -2216,6 +2389,7 @@ test('test-selection scripts claim the lanes of the suite they select for', () =
         'tools/snob_backend_test_selection_shadow.py',
         'tools/test_selection_verdict.py',
         'tools/dagster_test_selection.py',
+        'tools/warehouse_sources_vendor_selection.py',
         'tools/testmon_high_fanout_files.txt',
     ]) {
         assert.deepEqual(computeTargets([file], CONTEXT), computeTargets(['mypy.ini'], CONTEXT), file)
@@ -2321,3 +2495,29 @@ test('playwright changes overlap the frontend domain', () => {
         true
     )
 })
+
+for (const writable of [true, false]) {
+    test(`the CLI preserves targets when the telemetry output is ${writable ? 'writable' : 'unwritable'}`, () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lane-telemetry-'))
+        try {
+            const telemetryFile = path.join(root, writable ? 'properties.json' : 'missing/properties.json')
+            const output = execFileSync(process.execPath, [path.join(__dirname, 'trunk-impacted-targets.js')], {
+                input: 'README.md\n',
+                env: { ...process.env, PATH: '', LANE_TELEMETRY_FILE: telemetryFile },
+                encoding: 'utf8',
+                stdio: ['pipe', 'pipe', 'pipe'],
+            })
+            assert.deepEqual(JSON.parse(output), ['prose'])
+            if (writable) {
+                const properties = JSON.parse(fs.readFileSync(telemetryFile, 'utf8'))
+                assert.equal(properties.is_prose, true)
+                assert.equal(properties.changed_file_count, 1)
+                assert.equal(properties.cross_lane, false)
+            } else {
+                assert.equal(fs.existsSync(telemetryFile), false)
+            }
+        } finally {
+            fs.rmSync(root, { recursive: true, force: true })
+        }
+    })
+}

@@ -50,10 +50,10 @@ if [ "${1:-}" = --run ]; then
     selected=("$@")
     if [ "${#selected[@]}" -eq 0 ]; then
         # The harness's verification logic (cargo test's, its binary run as cargo runs it);
-        # its ignored test needs the etcd.
+        # its ignored tests need etcd and kafka.
         (cd rust/personhog-test-harness &&
             CARGO_MANIFEST_DIR="$PWD" CARGO_PKG_NAME=personhog-test-harness ETCD_ENDPOINTS="$GATE_ETCD" \
-                "$GATE_HARNESS_TESTS" --include-ignored)
+                KAFKA_HOSTS="$GATE_KAFKA" "$GATE_HARNESS_TESTS" --include-ignored)
         for i in "${!scenarios[@]}"; do selected+=("$((i + 1))"); done
     fi
     # The stack listens at fixed offsets from one base (upstream's 24051-24170): a block of

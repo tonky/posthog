@@ -9,6 +9,8 @@ use std::time::Duration;
 use axum::{extract::DefaultBodyLimit, http::Method, routing::get, routing::post, Router};
 use capture::metrics_middleware::track_metrics;
 use capture_apm_metrics::config::Config;
+use capture_apm_metrics::k8s_resource_attributes::K8sResourceAttributes;
+use capture_apm_metrics::label_cardinality::LabelCardinality;
 use capture_apm_metrics::management;
 use capture_apm_metrics::prometheus;
 use capture_apm_metrics::series_label_gate::{spawn_redis_writer, CacheLimits, SeriesLabelGate};
@@ -27,7 +29,7 @@ use tokio::signal;
 use tower_http::cors::{AllowHeaders, AllowOrigin, CorsLayer};
 use tower_http::decompression::RequestDecompressionLayer;
 use tracing::level_filters::LevelFilter;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Layer};
 
 use limiters::token_dropper::TokenDropper;
@@ -104,7 +106,7 @@ async fn start_series_label_gate(config: &Config) -> Arc<SeriesLabelGate> {
     let pull_timeout = Duration::from_millis(config.metrics_series_redis_pull_timeout_ms);
     let pull_interval = Duration::from_secs(config.metrics_series_redis_pull_interval_secs);
     let client: Arc<dyn Client> = match RedisClient::with_config(
-        redis_url,
+        redis_url.clone(),
         CompressionConfig::disabled(),
         RedisValueFormat::Utf8,
         Some(pull_timeout),
@@ -123,12 +125,39 @@ async fn start_series_label_gate(config: &Config) -> Arc<SeriesLabelGate> {
         }
     };
 
+    let writer_client: Arc<dyn Client> = match RedisClient::with_config(
+        redis_url,
+        CompressionConfig::disabled(),
+        RedisValueFormat::Utf8,
+        Some(redis_timeout),
+        Some(redis_timeout),
+    )
+    .await
+    {
+        Ok(client) => Arc::new(client),
+        Err(e) => {
+            warn!("Could not open a second Redis connection, series label writer shares the pull connection: {e}");
+            Arc::clone(&client)
+        }
+    };
+
     let (gate, rx) = SeriesLabelGate::new(window, enabled, limits);
     gate.seed_from_redis(client.as_ref(), seed_budget).await;
-    gate.spawn_redis_puller(Arc::clone(&client), pull_interval, pull_timeout);
+    gate.spawn_redis_puller(client, pull_interval, pull_timeout);
     gate.spawn_pruner();
-    spawn_redis_writer(client, rx, redis_timeout, window);
+    spawn_redis_writer(writer_client, rx, redis_timeout, window);
     gate
+}
+
+fn start_label_cardinality(config: &Config) -> Arc<LabelCardinality> {
+    let settings = config.label_cardinality_settings();
+    info!(
+        "Label cardinality detector in {:?} mode (limit {} values, new-series share {})",
+        settings.mode, settings.value_limit, settings.min_new_share
+    );
+    let detector = LabelCardinality::new(settings);
+    detector.spawn_pruner();
+    detector
 }
 
 fn main() {
@@ -223,6 +252,7 @@ async fn run(
     let management_router = setup_metrics_routes(management_router);
 
     let series_label_gate = start_series_label_gate(&config).await;
+    let label_cardinality = start_label_cardinality(&config);
     let token_dropper =
         TokenDropper::new(&config.base.drop_events_by_token.clone().unwrap_or_default());
     let authorizer = Authorizer::new(Arc::new(token_dropper));
@@ -230,7 +260,13 @@ async fn run(
         kafka_sink,
         authorizer,
         config.base.max_request_body_size_bytes,
+        config.remote_write_max_expanded_bytes,
         series_label_gate,
+        label_cardinality,
+        Arc::new(K8sResourceAttributes::from_token_list(
+            &config.remote_write_k8s_resource_attribute_tokens,
+        )),
+        config.prometheus_keep_stale_markers,
     );
     let http_bind = format!("{}:{}", config.base.host, config.base.port);
     info!("Listening on {}", http_bind);

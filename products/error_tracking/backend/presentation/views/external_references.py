@@ -89,7 +89,9 @@ class ErrorTrackingExternalReferenceSerializer(ErrorTrackingExternalReferenceRes
             "linear -> {team_id, title, description}; jira -> {project_key, title, description}. Examples: "
             'github {"repository":"posthog","title":"Checkout TypeError","body":"Stack trace"}; '
             'linear {"team_id":"team-id","title":"Checkout TypeError","description":"Stack trace"}; '
-            'jira {"project_key":"ENG","title":"Checkout TypeError","description":"Stack trace"}.'
+            'jira {"project_key":"ENG","title":"Checkout TypeError","description":"Stack trace"}. '
+            "Every kind also accepts an optional assignee key: a Linear user ID, a GitHub login, a GitLab user ID, "
+            "or a Jira account ID."
         ),
     )
     issue = serializers.UUIDField(write_only=True, help_text="ID of the error tracking issue to link the reference to.")
@@ -107,7 +109,8 @@ class ErrorTrackingExternalReferenceLinkSerializer(serializers.Serializer):
         help_text=(
             "Identifier and optional title of the existing external issue to link, as returned by the search-issues endpoint. "
             "Required keys depend on the integration kind: github -> {repository, number}; gitlab -> {issue_id}; "
-            "linear -> {id}; jira -> {key}."
+            "linear -> {id}; jira -> {key}. For GitHub, add resource_type 'pull_request' to link a pull request "
+            "instead of an issue."
         ),
     )
 
@@ -122,7 +125,7 @@ class ErrorTrackingExternalIssueSearchQuerySerializer(serializers.Serializer):
         default="",
         help_text=(
             "Text to match against existing issue titles or identifiers in the provider. GitHub matches titles "
-            "as an exact phrase. Leave blank for recent issues."
+            "as an exact phrase and returns issues only, not pull requests. Leave blank for recent issues."
         ),
     )
     repository = serializers.CharField(

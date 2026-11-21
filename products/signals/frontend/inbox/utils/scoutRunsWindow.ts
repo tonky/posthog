@@ -5,13 +5,25 @@
 // fleet findings feed reads `loadRunsWindow` (a fixed lookback assembled by walking
 // the runs endpoint's `date_to` cursor past its 100-row page cap).
 
+import { scoutDisplayName } from '@posthog/agent-contracts/scout-names'
+
 import { humanFriendlyDuration } from 'lib/utils/durations'
-import { humanFriendlyCurrency } from 'lib/utils/numbers'
 import { pluralize } from 'lib/utils/strings'
 
 import type { SignalScoutConfigApi as SignalScoutConfig } from 'products/signals/frontend/generated/api.schemas'
 
 import { SignalScoutRunStatus, SignalScoutRunSummary } from '../types'
+import { formatCredits, usdToCredits } from './credits'
+
+export {
+    prettifyScoutSkillName,
+    scoutDisplayName,
+    scoutNameForSkill,
+    scoutNamesBySkill,
+    SIGNALS_SCOUT_SKILL_PREFIX,
+    stripScoutPrefix,
+    withScoutNoun,
+} from '@posthog/agent-contracts/scout-names'
 
 /**
  * How many of each scout's most recent runs the per-scout stats describe — the count the
@@ -108,16 +120,6 @@ export function mostRecentEmittedRuns(runs: SignalScoutRunSummary[]): SignalScou
 
 // ── Scout skill-name helpers ──────────────────────────────────────────────────
 
-/** The shared `signals-scout-*` skill-name prefix. The fleet prefix is noise inside the scouts surface. */
-export const SIGNALS_SCOUT_SKILL_PREFIX = 'signals-scout-'
-
-/** Strip the fleet prefix, leaving the bare scout code name verbatim. `signals-scout-apm` → `apm`. */
-export function stripScoutPrefix(skillName: string): string {
-    return skillName.startsWith(SIGNALS_SCOUT_SKILL_PREFIX)
-        ? skillName.slice(SIGNALS_SCOUT_SKILL_PREFIX.length)
-        : skillName
-}
-
 /** The prefix on a report-pipeline stage's writer identity, such as `pipeline:report-research`. A
  * stage writes scout memory but is not a scout. */
 export const PIPELINE_WRITER_PREFIX = 'pipeline:'
@@ -127,21 +129,8 @@ export function isPipelineWriter(skillName: string): boolean {
     return skillName.startsWith(PIPELINE_WRITER_PREFIX)
 }
 
-/** "signals-scout-error-tracking" → "Error tracking" */
-export function prettifyScoutSkillName(skillName: string): string {
-    const cleaned = stripScoutPrefix(skillName).replace(/[-_]/g, ' ').trim()
-    if (!cleaned) {
-        return skillName
-    }
-    return cleaned.charAt(0).toUpperCase() + cleaned.slice(1)
-}
-
 /** Mirrors `SignalScoutConfig.MAX_DISPLAY_NAME_LENGTH`, so the field reports the cap the server enforces. */
 export const MAX_SCOUT_DISPLAY_NAME_LENGTH = 200
-
-export function scoutDisplayName(config: Pick<SignalScoutConfig, 'skill_name' | 'display_name'>): string {
-    return config.display_name || prettifyScoutSkillName(config.skill_name)
-}
 
 // ── Run status / outcome ─────────────────────────────────────────────────────
 
@@ -190,54 +179,8 @@ export function formatRunDuration(seconds: number | null): string {
     return humanFriendlyDuration(seconds, { maxUnits: 2 })
 }
 
-/**
- * What a run spent on model calls. A run costing less than a cent gets more digits, since at two
- * decimals it would read as "$0.00", which says the run was free.
- */
 export function formatRunCost(costUsd: number): string {
-    return humanFriendlyCurrency(costUsd, costUsd > 0 && costUsd < 0.01 ? 4 : 2)
-}
-
-/**
- * The costs of the runs the roster holds right now. A cost batch that fails keeps the previous
- * poll's entries, so the cost map can outlive the runs it priced. A run that has left the roster is
- * invisible on the strip, so it must not move the cost line or count toward the minimum that turns
- * the line on.
- */
-export function rosterRunCosts(runs: SignalScoutRunSummary[], costs: Map<string, number>): Map<string, number> {
-    const onRoster = new Map<string, number>()
-    for (const run of runs) {
-        const cost = costs.get(run.run_id)
-        if (cost !== undefined) {
-            onRoster.set(run.run_id, cost)
-        }
-    }
-    return onRoster
-}
-
-// Below this many priced runs the top decile moves with every run that lands, so the marker would
-// point at a different box each poll and mean nothing.
-const MIN_PRICED_RUNS_FOR_COST_MARKER = 20
-
-/**
- * What the fleet's priciest tenth of runs starts at, or null while too few runs are priced to rank
- * them. Scout spend is heavily skewed: most runs cost about a cent, so a top-decile line is what
- * separates a run worth opening from the cheap majority.
- */
-export function expensiveRunCostThreshold(costs: Map<string, number>): number | null {
-    if (costs.size < MIN_PRICED_RUNS_FOR_COST_MARKER) {
-        return null
-    }
-    const sorted = [...costs.values()].sort((a, b) => a - b)
-    // The cheapest run inside the priciest tenth, so a line here marks that tenth and no more.
-    const decileStart = sorted[sorted.length - Math.ceil(sorted.length * 0.1)]
-    if (decileStart > sorted[0]) {
-        return decileStart
-    }
-    // More than nine tenths of the fleet costs the cheapest price, so a line at the decile would
-    // mark every box. Mark what costs more than that price instead, which is nothing at all when
-    // every run costs the same.
-    return sorted.find((cost) => cost > sorted[0]) ?? null
+    return formatCredits(usdToCredits(costUsd))
 }
 
 /**

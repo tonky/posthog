@@ -4,15 +4,16 @@ One request can run several ClickHouse queries (a trends insight runs one per se
 opens ``query_stats_scope()`` around the run, ``sync_execute`` calls ``record()`` after each query,
 and the runner reads the totals at the end. With no scope open, ``record()`` does nothing.
 
-A new thread does not see the scope its parent opened, so a runner that runs its queries in threads
-reads the totals with ``get_active()`` and installs them in each thread with ``use()``.
+A new thread does not see the scope its parent opened unless it runs in a copy of the parent's
+context, as ``run_in_parallel_threads`` does. Threads that run in such copies all record into the
+parent's ``QueryStats``.
 """
 
 from __future__ import annotations
 
 import threading
 import contextlib
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextvars import ContextVar
 from dataclasses import field
 from typing import TYPE_CHECKING
@@ -61,6 +62,15 @@ class QueryStats:
     # References only, filled by the executor, so the job can explain each execution without rerunning it.
     executions: list[RecordedExecution] = field(default_factory=list, repr=False, compare=False)
     workloads: set[str] = field(default_factory=set, repr=False, compare=False)
+    warehouse_table_ids: set[str] = field(default_factory=set, repr=False, compare=False)
+    saved_query_ids: set[str] = field(default_factory=set, repr=False, compare=False)
+    # Queries on a direct connection never reach ClickHouse or bind warehouse tables, so the source is the only trace.
+    direct_source_ids: set[str] = field(default_factory=set, repr=False, compare=False)
+    query_start_listeners: list[Callable[[], None]] = field(default_factory=list, repr=False, compare=False)
+
+    def notify_query_started(self) -> None:
+        for listener in list(self.query_start_listeners):
+            listener()
 
     def add(self, *, rows_read: int, duration_ms: float, lookup: bool = False, workload: str | None = None) -> None:
         with self.lock:
@@ -72,6 +82,15 @@ class QueryStats:
                 self.lookup_duration_ms += duration_ms
             if workload is not None:
                 self.workloads.add(workload)
+
+    def add_reads(self, *, warehouse_table_ids: set[str], saved_query_ids: set[str]) -> None:
+        with self.lock:
+            self.warehouse_table_ids |= warehouse_table_ids
+            self.saved_query_ids |= saved_query_ids
+
+    def add_direct_source(self, source_id: str) -> None:
+        with self.lock:
+            self.direct_source_ids.add(source_id)
 
     def record_execution(
         self,
@@ -133,18 +152,11 @@ def get_active() -> QueryStats | None:
     return _accumulator.get()
 
 
-@contextlib.contextmanager
-def use(stats: QueryStats | None) -> Iterator[None]:
-    """Record into ``stats`` inside this block, for a thread that does not see its parent's scope.
-    Does nothing for None."""
-    if stats is None:
-        yield
-        return
-    token = _accumulator.set(stats)
-    try:
-        yield
-    finally:
-        _accumulator.reset(token)
+def notify_query_started() -> None:
+    """Tell the open scope's listeners that a query is about to start. Does nothing without one."""
+    stats = _accumulator.get()
+    if stats is not None:
+        stats.notify_query_started()
 
 
 def record(*, rows_read: int, duration_ms: float, lookup: bool = False, workload: str | None = None) -> None:

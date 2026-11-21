@@ -1,12 +1,12 @@
 import { DEFAULT_Y_AXIS_ID } from '@posthog/quill-charts'
 import type { Series, TimeSeriesLineChartConfig, TooltipConfig, YAxisConfig } from '@posthog/quill-charts'
 
-import type { SeriesDatum } from 'scenes/insights/InsightTooltip/insightTooltipUtils'
-
 import { ChartDisplayType } from '~/types'
 
+import type { SeriesDatum } from 'products/product_analytics/frontend/insights/shared/InsightTooltip/insightTooltipUtils'
+
 import { INSIGHT_TOOLTIP_CONFIG } from '../../shared/tooltipConfig'
-import { COMPARE_PREVIOUS_DIM_OPACITY, dimHexColor } from '../../trends/shared/compareDimming'
+import { COMPARE_PREVIOUS_DIM_OPACITY, compareLegendTag, dimHexColor } from '../../trends/shared/compareDimming'
 import { humanizeSeriesLabel } from '../../trends/shared/humanizeSeriesLabel'
 import { computeMagnitudeAxisIds } from '../../trends/shared/magnitudeAxisIds'
 
@@ -18,7 +18,6 @@ export interface StickinessResultLike {
     count: number
     days?: Array<string | number>
     compare_label?: string | null
-    action?: { order?: number } | null
     breakdown_value?: unknown
     filter?: unknown
 }
@@ -62,6 +61,7 @@ export function buildStickinessMainSeries<R extends StickinessResultLike, M = un
     return {
         key: String(r.id),
         label: opts.getLabel ? opts.getLabel(r) : humanizeSeriesLabel(r.label),
+        legendTag: compareLegendTag(r),
         data: toPercentData(r.data, r.count),
         color,
         yAxisId,

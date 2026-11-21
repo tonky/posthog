@@ -5,6 +5,7 @@ import { featureFlagLogic } from 'lib/logic/featureFlagLogic'
 import { sceneLogic } from 'scenes/sceneLogic'
 import { userLogic } from 'scenes/userLogic'
 
+import type { SceneConfig } from '../../scenes/sceneTypes'
 import type { UserTheme, UserType } from '../../types'
 import type { FeatureFlagsSet } from './featureFlagLogic'
 import { Theme, themes } from './themes'
@@ -27,8 +28,10 @@ export interface themeLogicValues {
 export interface themeLogicActions {
     updateUser: (
         user: Partial<UserType>,
-        successCallback?: (() => void) | undefined
+        successCallback?: (() => void) | undefined,
+        failureCallback?: (() => void) | undefined
     ) => {
+        failureCallback: (() => void) | undefined
         successCallback: (() => void) | undefined
         user: Partial<UserType>
     } // userLogic
@@ -61,7 +64,7 @@ export interface themeLogicMeta {
         isDarkModeOn: (
             themeMode: UserTheme,
             darkModeSystemPreference: boolean,
-            sceneConfig: null | import('../../scenes/sceneTypes').SceneConfig,
+            sceneConfig: SceneConfig | null,
             theme: Theme | null
         ) => boolean
     }

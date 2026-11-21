@@ -39,6 +39,15 @@ class RunPurpose(StrEnum):
     OBSERVE = "observe"  # Tracking only — not approvable
 
 
+class RunReviewFilter(StrEnum):
+    """Where a run stands in review, as the run lists filter it."""
+
+    NEEDS_REVIEW = "needs_review"  # Completed PR run with changes nobody approved yet
+    CLEAN = "clean"  # No changes, or approved
+    PROCESSING = "processing"  # Diffs still computing
+    STALE = "stale"  # Superseded by a newer run while its changes were unapproved
+
+
 class ReviewDecision(StrEnum):
     """Run-level review outcome."""
 
@@ -117,8 +126,7 @@ class FlakinessState(StrEnum):
     BROKEN = "broken"  # Fails nearly every run: the baseline is wrong, not the story
     UNSTABLE = "unstable"  # Fails some runs and not others: the classic flake
     AT_RISK = "at_risk"  # Never fails, but its diff is already touching the threshold
-    NOISY = "noisy"  # Renders variants, absorbed with room to spare
-    CLEAN = "clean"  # Matched its baseline on every run in the window
+    CLEAN = "clean"  # No gate failure in the window, and any absorbed diff is far below the threshold
 
 
 class ActorType(StrEnum):
@@ -144,6 +152,74 @@ class QuarantineLiftState(LabeledStrEnum):
     CANCELLED = "cancelled", "cancelled"
     # The quarantine ended some other way, or another request lifted it
     SUPERSEDED = "superseded", "superseded"
+
+
+class AutoQuarantineMode(LabeledStrEnum):
+    """Whether a repo quarantines a proven flaky snapshot, and lifts a quarantine that went clean, without a person.
+
+    The OpenAPI component name (AutoQuarantineModeEnum) derives from this class, so the field does
+    not collide with other products' `mode` enums. Each label repeats its value, because the API
+    documents these choices as plain values.
+    """
+
+    OFF = "off", "off"
+    # Finds proofs and clean streaks and records them in logs and analytics, and changes nothing
+    PREVIEW = "preview", "preview"
+    ON = "on", "on"
+
+
+class BaselineMode(LabeledStrEnum):
+    """Which record of approved baselines decides a repo's runs.
+
+    Each label repeats its value, as the other labeled enums here do.
+    """
+
+    YAML = "yaml", "yaml"
+    SHADOW = "shadow", "shadow"
+    LEDGER = "ledger", "ledger"
+
+
+class RunGate(LabeledStrEnum):
+    """What turns a run's verdict into a merge gate. Set when the run is created and never changed."""
+
+    CI_JOB = "ci_job", "ci_job"
+    COMMIT_STATUS = "commit_status", "commit_status"
+
+
+class NoRunNeededOutcome(LabeledStrEnum):
+    """What a "no visual run needed" report did."""
+
+    POSTED = "posted", "posted"
+    RUN_EXISTS = "run_exists", "run_exists"
+    STATUS_GATE_OFF = "status_gate_off", "status_gate_off"
+
+
+class BaselineEntrySource(LabeledStrEnum):
+    """How an entry got into the baseline ledger."""
+
+    SEED = "seed", "seed"
+    MERGE = "merge", "merge"
+    REPAIR = "repair", "repair"
+
+
+class BaselineApprovalState(LabeledStrEnum):
+    """Where an approved baseline change of one pull request stands."""
+
+    OPEN = "open", "open"
+    PROMOTED = "promoted", "promoted"
+    # The merge-queue run did not reproduce the approved hash
+    VOIDED = "voided", "voided"
+    # The ledger baseline moved under the approval before it landed
+    CONFLICTED = "conflicted", "conflicted"
+    SUPERSEDED = "superseded", "superseded"
+    ABANDONED = "abandoned", "abandoned"
+
+
+class BaselineEvidence(LabeledStrEnum):
+    """Whether a full observe run off the default branch rendered an approved hash."""
+
+    REPRODUCED = "reproduced", "reproduced"
+    NOT_REPRODUCED = "not_reproduced", "not_reproduced"
 
 
 class ToleratedReason(StrEnum):

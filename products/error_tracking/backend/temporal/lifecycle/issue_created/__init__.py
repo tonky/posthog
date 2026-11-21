@@ -3,9 +3,12 @@ from products.error_tracking.backend.temporal.lifecycle.issue_created.activities
     emit_issue_created_internal_event_activity,
     emit_issue_created_signal_activity,
     generate_issue_created_embedding_activity,
+    generate_issue_created_summary_activity,
     infer_issue_created_severity_activity,
     merge_issue_created_fingerprint_activity,
     persist_issue_created_embedding_activity,
+    tag_issue_created_activity,
+    tag_issue_created_merge_target_activity,
 )
 from products.error_tracking.backend.temporal.lifecycle.issue_created.workflow import ErrorTrackingIssueCreatedWorkflow
 
@@ -19,7 +22,10 @@ __all__ = [
     "emit_issue_created_internal_event_activity",
     "emit_issue_created_signal_activity",
     "generate_issue_created_embedding_activity",
+    "generate_issue_created_summary_activity",
     "infer_issue_created_severity_activity",
     "merge_issue_created_fingerprint_activity",
     "persist_issue_created_embedding_activity",
+    "tag_issue_created_activity",
+    "tag_issue_created_merge_target_activity",
 ]

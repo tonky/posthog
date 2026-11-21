@@ -40,7 +40,7 @@ class ScannerResult(BaseModel, frozen=True):
     model_output: AnyScannerOutput
     signals_count: int = Field(default=0, ge=0)
     # The problem type of each signal actually emitted, in emission order and with repeats kept, so the
-    # watch feed can count the kinds of issue a row carries. Empty on non-signal rows and on old rows.
+    # highlight feed can count the kinds of issue a row carries. Empty on non-signal rows and on old rows.
     signal_problem_types: list[str] = Field(default_factory=list)
     # The same signals with their headline and confidence, so the feed can name them rather than count them
     # and can rank a weak finding below a strong one. Empty on non-signal rows and on rows scanned before
@@ -86,6 +86,15 @@ class CreateObservationOutput(BaseModel, frozen=True):
     observation_id: UUID | None
     was_created: bool
     scanner_type: ScannerType
+    # Whether the scan's scope names an experiment, so the workflow can gate variant attribution on
+    # the scope rather than the scanner type. Recorded here because the workflow needs the answer to
+    # be deterministic across replays, and reading a scope in workflow code would not be.
+    #
+    # `None` means the field predates this change. A history written before it deserializes to None
+    # on replay, and the workflow then falls back to the scanner type, which is what that run was
+    # gated on when it started. Defaulting to False instead would skip attribution for an in-flight
+    # experiment scan and leave its session unlabeled.
+    watches_experiment: bool | None = None
 
 
 class MarkObservationRunningInputs(BaseModel, frozen=True):
@@ -104,6 +113,8 @@ class ObservationProgress(TypedDict):
     step: int  # index of `phase` in OBSERVATION_PHASE_ORDER
     total_steps: int  # len(OBSERVATION_PHASE_ORDER)
     rasterizer_workflow_id: str | None  # set while rendering, so the stream can read the child's frame heartbeats
+    # Workflow-clock epoch seconds, so a client that joins mid-phase still sees the true elapsed time.
+    phase_started_at: float | None
 
 
 class MarkObservationFailedInputs(BaseModel, frozen=True):
@@ -211,17 +222,6 @@ class SessionIdentity(BaseModel, frozen=True):
         return self.model_dump(mode="json")
 
 
-class NavigationEntry(BaseModel, frozen=True):
-    """One page-URL change in the session, precomputed for the prompt's navigation timeline."""
-
-    rec_t: int = Field(ge=0)
-    # Interned `window_N` token, matching what the events tool returns. None when the session has no window ids.
-    window: str | None = None
-    url: str
-    # First entry seen for a window token other than the session's initial one (a tab or window opening).
-    new_window: bool = False
-
-
 class ScannerLlmInputs(BaseModel, frozen=True):
     """Per-session analytics events + recording metadata, stashed in Redis between activities."""
 
@@ -232,10 +232,7 @@ class ScannerLlmInputs(BaseModel, frozen=True):
     url_mapping: dict[str, str] = Field(default_factory=dict)
     window_mapping: dict[str, str] = Field(default_factory=dict)
     event_timestamps: dict[str, int] = Field(default_factory=dict)
-    # Chronological URL-change timeline rendered into the preamble. Defaults keep pre-existing Redis blobs loadable.
-    navigation: list[NavigationEntry] = Field(default_factory=list)
-    navigation_dropped: int = Field(default=0, ge=0)
-    # True when the session hit the fetch row cap, so the events tool can't see the whole session.
+    # True when the session hit the fetch row cap, so the event lookups can't see the whole session.
     events_truncated: bool = False
     # Customer product context rendered into the preamble; empty for teams without core memory / descriptions.
     product_context: str = ""
@@ -245,10 +242,11 @@ class ScannerLlmInputs(BaseModel, frozen=True):
     # Carried for signal emission, not the prompt — kept off `SessionMetadata` so it never reaches the LLM.
     distinct_id: str | None = None
     # Who the session belongs to. Rendered into the preamble, and persisted onto the observation row.
-    # Defaults keep Redis blobs written before this field existed loadable.
     identity: SessionIdentity = Field(default_factory=SessionIdentity)
     # Group keys by group type index, for the observation row's group attribution.
     group_keys: dict[int, str] = Field(default_factory=dict)
+    # `$geoip_*` of the recorded session, for the emitted event. Kept off `SessionIdentity` so it never reaches the LLM.
+    session_geoip: dict[str, str] = Field(default_factory=dict)
 
 
 class EnsureSessionAssetInputs(BaseModel, frozen=True):
@@ -277,11 +275,8 @@ class CallScannerProviderInputs(BaseModel, frozen=True):
     exported_asset_id: int
     file_uri: str
     mime_type: str
-    # When set, replaces the observation row's snapshot (evaluations re-run rated sessions with the suggested prompt).
-    snapshot_override: ScannerSnapshot | None = None
     # Experiment scanners only: scan-time context the workflow resolved before this call, injected
-    # into the scanner's prompt (see `ExperimentScanner`). Both stay None for the other types and
-    # for histories that predate variant attribution.
+    # into the scanner's prompt (see `ExperimentScanner`). Both stay None for the other types.
     experiment_variant: str | None = None
     experiment_context: dict[str, Any] | None = None
 
@@ -362,3 +357,42 @@ class EmitObservationEventInputs(BaseModel, frozen=True):
 
     observation_id: UUID
     model_output: AnyScannerOutput
+
+
+class PrepareObservationInputs(BaseModel, frozen=True):
+    observation_id: UUID
+    team_id: int
+    session_id: str
+    resolve_experiment: bool
+
+
+class PrepareObservationOutput(BaseModel, frozen=True):
+    asset: EnsureSessionAssetOutput
+    experiment_resolution: ResolveExperimentVariantOutput | None = None
+
+
+class FinalizeObservationInputs(BaseModel, frozen=True):
+    team_id: int
+    session_id: str
+    scanner_id: UUID
+    observation_id: UUID
+    scanner_type: ScannerType
+    exported_asset_id: int
+    call_output: ScannerCallOutput
+    experiment_resolution: ResolveExperimentVariantOutput | None = None
+    gemini_file_name: str | None = None
+
+
+def scanner_result(
+    model_output: AnyScannerOutput,
+    signal_summaries: list[EmittedSignal],
+    experiment_resolution: ResolveExperimentVariantOutput | None,
+) -> ScannerResult:
+    return ScannerResult(
+        model_output=model_output,
+        signals_count=len(signal_summaries),
+        signal_problem_types=[signal.problem_type for signal in signal_summaries],
+        signal_summaries=signal_summaries,
+        experiment_variant=experiment_resolution.experiment_variant if experiment_resolution is not None else None,
+        session_duration_s=experiment_resolution.session_duration_s if experiment_resolution is not None else None,
+    )

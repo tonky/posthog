@@ -12,7 +12,7 @@ cd "${DATA_DIR:-${TMPDIR:-/tmp}}" && export GIT_CEILING_DIRECTORIES="${PWD%/*}"
 master="127.0.0.1:${PORT_MASTER:?the master port slot}.${PORT_MASTER_GRPC:?the master gRPC port slot}"
 key="${OBJECT_STORAGE_ACCESS_KEY_ID:-object_storage_root_user}"
 secret="${OBJECT_STORAGE_SECRET_ACCESS_KEY:-object_storage_root_password}"
-buckets=(posthog ducklake-dev ai-blobs)
+buckets=(posthog ducklake-dev ai-blobs email-attachments)
 
 for _ in $(seq 60); do
     {

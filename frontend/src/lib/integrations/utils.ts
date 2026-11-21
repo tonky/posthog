@@ -28,6 +28,7 @@ import IconLinear from 'public/services/linear.png'
 import IconLinkedIn from 'public/services/linkedin.png'
 import IconMailjet from 'public/services/mailjet.png'
 import IconMetaAds from 'public/services/meta-ads.png'
+import IconMotherDuck from 'public/services/motherduck.png'
 import IconPardot from 'public/services/pardot.png'
 import IconPinterest from 'public/services/pinterest_ads.png'
 import IconPostgres from 'public/services/postgres.png'
@@ -80,11 +81,14 @@ export type IntegrationConnectSurface =
     | 'warehouse_source_reconnect'
     | 'onboarding_wizard'
     | 'inbox_welcome'
+    | 'inbox_report'
+    | 'inbox_triage'
     | 'signals_agent_setup'
     | 'task_composer'
     | 'visual_review_settings'
     | 'install_approved_banner'
     | 'unavailable_banner_reconnect'
+    | 'webhook_banner_reconnect'
 
 export const ICONS: Record<IntegrationKind, any> = {
     slack: IconSlack,
@@ -104,6 +108,7 @@ export const ICONS: Record<IntegrationKind, any> = {
     helpscout: IconHelpScout,
     'linkedin-ads': IconLinkedIn,
     email: IconMailjet,
+    email_sandbox: IconMailjet,
     linear: IconLinear,
     github: IconGitHub,
     gitlab: IconGitLab,
@@ -126,17 +131,19 @@ export const ICONS: Record<IntegrationKind, any> = {
     'customerio-webhook': IconCustomerIO,
     'customerio-track': IconCustomerIO,
     apns: IconApple,
+    'apple-ads': IconApple,
     postgresql: IconPostgres,
     'aws-s3': IconAwsS3,
     'aws-redshift': IconRedshift,
     's3-compatible': IconS3Compatible,
     snowflake: IconSnowflake,
+    motherduck: IconMotherDuck,
     'youtube-analytics': IconYouTubeAnalytics,
 }
 
 // Brand marks that are solid black/monochrome on a transparent background — they vanish against a dark
 // surface, so invert them in dark mode (`dark:invert`) wherever the integration icon is rendered.
-export const DARK_MODE_INVERT_ICON_KINDS = new Set<IntegrationKind>(['apns', 'github'])
+export const DARK_MODE_INVERT_ICON_KINDS = new Set<IntegrationKind>(['apns', 'apple-ads', 'github'])
 
 export const getIntegrationNameFromKind = (kind: string): string => {
     switch (kind) {
@@ -154,8 +161,12 @@ export const getIntegrationNameFromKind = (kind: string): string => {
             return 'Google Search Console'
         case 'google-cloud-service-account':
             return 'Google Cloud service account'
+        case 'apple-ads':
+            return 'Apple Ads'
         case 'linkedin-ads':
             return 'LinkedIn Ads'
+        case 'meta-ads':
+            return 'Meta Ads'
         case 'reddit-ads':
             return 'Reddit Ads'
         case 'twitter-ads':
@@ -170,6 +181,8 @@ export const getIntegrationNameFromKind = (kind: string): string => {
             return 'Pinterest Ads'
         case 'email':
             return 'email'
+        case 'email_sandbox':
+            return 'PostHog test sender'
         case 'github':
             return 'GitHub'
         case 'helpscout':
@@ -187,6 +200,8 @@ export const getIntegrationNameFromKind = (kind: string): string => {
             return 'Redshift'
         case 's3-compatible':
             return 'S3-compatible storage'
+        case 'motherduck':
+            return 'MotherDuck'
         case 'youtube-analytics':
             return 'YouTube Analytics'
         default:

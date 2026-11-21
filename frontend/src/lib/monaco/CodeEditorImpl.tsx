@@ -6,10 +6,11 @@ import * as monacoModule from 'monaco-editor'
 import { IDisposable, editor, editor as importedEditor } from 'monaco-editor'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
+import { useBodyIsDark } from 'lib/hooks/useBodyIsDark'
 import { useOnMountEffect } from 'lib/hooks/useOnMountEffect'
 import { usePageVisibility } from 'lib/hooks/usePageVisibility'
 import { Spinner } from 'lib/lemon-ui/Spinner'
-import { themeLogic } from 'lib/logic/themeLogic'
+import { optOutOfBrowserExtensions } from 'lib/monaco/browserExtensionOptOut'
 import { enableClipboardPaste } from 'lib/monaco/clipboardPaste'
 import type { codeEditorLogicType } from 'lib/monaco/codeEditorLogic'
 import { codeEditorLogic } from 'lib/monaco/codeEditorLogic'
@@ -21,6 +22,7 @@ import { initHogJsonLanguage } from 'lib/monaco/languages/hogJson'
 import { initHogQLLanguage } from 'lib/monaco/languages/hogQL'
 import { initHogTemplateLanguage } from 'lib/monaco/languages/hogTemplate'
 import { initLiquidLanguage } from 'lib/monaco/languages/liquid'
+import { initPromQLLanguage } from 'lib/monaco/languages/promql'
 import { clearLogicReference, initModel } from 'lib/monaco/modelLogicReference'
 import { registerMountedCodeEditor } from 'lib/monaco/mountedCodeEditors'
 import 'lib/monaco/monacoEnvironment'
@@ -41,6 +43,7 @@ export interface CodeEditorProps extends Omit<EditorProps, 'loading' | 'theme'> 
     autoFocus?: boolean
     sourceQuery?: AnyDataNode
     globals?: Record<string, any>
+    captureQueryTelemetry?: boolean
     schema?: Record<string, any> | null
     /** Ask for per-filter index eligibility. Costs a second resolution pass server-side, so set it only where the result is rendered. */
     indexUsage?: boolean
@@ -48,6 +51,10 @@ export interface CodeEditorProps extends Omit<EditorProps, 'loading' | 'theme'> 
     onMetadataLoading?: (loading: boolean) => void
     onFixWithAI?: (prompt: string) => void
     onError?: (error: string | null) => void
+    /** How long to wait after an edit before validating. Set it higher where an error interrupts the user. */
+    metadataDebounceMs?: number
+    /** Validate against freshly fetched sources. Set it where the result blocks an action, because it costs a fetch per validation. */
+    metadataFreshSources?: boolean
     /** Override the query sent for metadata validation (e.g. active query in multi-query mode) */
     metadataQuery?: string
     /** Character offset of metadataQuery within the full editor text, for correct marker positioning */
@@ -56,6 +63,8 @@ export interface CodeEditorProps extends Omit<EditorProps, 'loading' | 'theme'> 
     originalValue?: string
     /** Enable vim keybindings */
     enableVimMode?: boolean
+    /** Vim commands to run when vim mode starts, one per line */
+    vimrc?: string
 }
 let codeEditorIndex = 0
 
@@ -101,9 +110,13 @@ function initEditor(
     if (editorProps?.language === 'codeowners') {
         initCodeownersLanguage(monaco)
     }
+    if (editorProps?.language === 'promql') {
+        initPromQLLanguage(monaco)
+    }
 
     editor.onKeyDown((evt) => {
-        if (evt.keyCode === monaco.KeyCode.Space) {
+        // Monaco handles Ctrl+Space on a parent DOM listener, including in an empty editor.
+        if (evt.keyCode === monaco.KeyCode.Space && !evt.ctrlKey) {
             evt.stopPropagation()
         }
 
@@ -152,6 +165,7 @@ export function CodeEditor({
     onPressCmdShiftEnter,
     autoFocus,
     globals,
+    captureQueryTelemetry,
     sourceQuery,
     schema,
     onError,
@@ -159,14 +173,19 @@ export function CodeEditor({
     onMetadata,
     onMetadataLoading,
     onFixWithAI,
+    metadataDebounceMs,
+    metadataFreshSources,
     metadataQuery,
     metadataQueryOffset,
     originalValue,
     enableVimMode,
+    vimrc,
     ...editorProps
 }: CodeEditorProps): JSX.Element {
-    const { isDarkModeOn } = useValues(themeLogic)
-    const scrollbarRendering = !inStorybookTestRunner() ? 'auto' : 'hidden'
+    const isDarkModeOn = useBodyIsDark()
+    const inTestRunner = inStorybookTestRunner()
+    const scrollbarRendering = inTestRunner ? 'hidden' : 'auto'
+    const cursorBlinking = inTestRunner ? 'solid' : 'blink'
     const [monacoAndEditor, setMonacoAndEditor] = useState(
         null as [Monaco, importedEditor.IStandaloneCodeEditor] | null
     )
@@ -196,6 +215,7 @@ export function CodeEditor({
         metadataQueryOffset: metadataQueryOffset,
         language: editorProps.language ?? 'text',
         globals,
+        captureQueryTelemetry,
         sourceQuery,
         monaco: monaco,
         editor: editor,
@@ -204,12 +224,18 @@ export function CodeEditor({
         onMetadata,
         onMetadataLoading,
         onFixWithAI,
+        metadataDebounceMs,
+        metadataFreshSources,
         metadataFilters: sourceQuery?.kind === NodeKind.HogQLQuery ? sourceQuery.filters : undefined,
     })
     useMountedLogic(builtCodeEditorLogic)
 
     const { vimCommandHistory } = useValues(builtCodeEditorLogic)
     const { appendVimCommand } = useActions(builtCodeEditorLogic)
+    // Vim mode reads the history only when it starts. Each ex command appends to the history, so a dependency
+    // on it would restart Vim mode after every command and undo `:set` and `:map` changes made in the editor.
+    const vimCommandHistoryRef = useRef(vimCommandHistory)
+    vimCommandHistoryRef.current = vimCommandHistory
 
     const { isVisible } = usePageVisibility()
 
@@ -402,8 +428,9 @@ export function CodeEditor({
                     return
                 }
                 vimModeRef.current = setupVimMode(editor, statusBar, {
-                    initialHistory: vimCommandHistory,
+                    initialHistory: vimCommandHistoryRef.current,
                     onCommandExecuted: appendVimCommand,
+                    vimrc,
                 })
             })
         } else if (vimModeRef.current) {
@@ -418,7 +445,7 @@ export function CodeEditor({
                 vimModeRef.current = null
             }
         }
-    }, [editor, enableVimMode, vimCommandHistory, appendVimCommand])
+    }, [editor, enableVimMode, vimrc, appendVimCommand])
 
     // The wrapper calls `editor.updateOptions` whenever this object's identity changes, and
     // Monaco revalidates every option on each call, so only rebuild it when an input changes.
@@ -439,6 +466,7 @@ export function CodeEditor({
             hideCursorInOverviewRuler: false,
             overviewRulerLanes: 3,
             overflowWidgetsDomNode: monacoRoot,
+            cursorBlinking,
             ...options,
             padding: { bottom: enableVimMode ? 28 : 8, top: 8 },
             scrollbar: {
@@ -448,7 +476,7 @@ export function CodeEditor({
                 ...options?.scrollbar,
             },
         }),
-        [options, enableVimMode, scrollbarRendering, monacoRoot]
+        [options, enableVimMode, scrollbarRendering, cursorBlinking, monacoRoot]
     )
     const diffEditorOptions = useMemo<editor.IStandaloneDiffEditorConstructionOptions>(
         () => ({
@@ -483,6 +511,7 @@ export function CodeEditor({
             ;(window as any).__monaco = monaco
         }
         trackEditorModels(editor, monaco)
+        optOutOfBrowserExtensions(editor)
         setMonacoAndEditor([monaco, editor])
         initEditor(monaco, editor, editorProps, options ?? {}, builtCodeEditorLogic)
         remeasureFontsWhenReady(monaco)
@@ -607,7 +636,7 @@ export function CodeEditor({
         }
     }, [isVisible])
 
-    if (originalValue) {
+    if (originalValue !== undefined) {
         // If originalValue is provided, we render a diff editor instead
         const diffEditorOnMount = (diff: importedEditor.IStandaloneDiffEditor, monaco: Monaco): void => {
             // Same lazy-facade race as editorOnMount: bail if we already unmounted.
@@ -624,6 +653,7 @@ export function CodeEditor({
             editorRef.current = modifiedEditor
             diffEditorRef.current = diff
             trackEditorModels(modifiedEditor, monaco)
+            optOutOfBrowserExtensions(modifiedEditor)
             monacoDisposables.current.push(trackFindWidgetVisibility(modifiedEditor))
             monacoDisposables.current.push(trackFindWidgetVisibility(diff.getOriginalEditor()))
             const original = diff.getOriginalEditor().getModel()

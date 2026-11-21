@@ -1,6 +1,8 @@
 import pytest
 from unittest.mock import patch
 
+from posthog.models.integration import Integration
+
 from products.slack_app.backend import feature_flags
 from products.slack_app.backend.tests.conftest import SLACK_TEAM_ID
 
@@ -32,11 +34,18 @@ def test_gate_stays_closed_when_a_required_scope_is_missing(workspace_integratio
     assert gate(workspace_integration) is False
 
 
-@pytest.mark.parametrize(
-    "gate",
-    [feature_flags.is_slack_app_agent_design_enabled, feature_flags.is_slack_app_project_picker_enabled],
-    ids=["agent design", "project picker"],
-)
+USER_KEYED_GATES = [
+    feature_flags.is_slack_app_agent_design_enabled,
+    feature_flags.is_slack_app_onboarding_enabled,
+    feature_flags.is_slack_app_link_search_scopes_enabled,
+    feature_flags.is_slack_app_connect_tool_from_chat_enabled,
+    feature_flags.is_slack_app_daily_work_focus_enabled,
+    feature_flags.is_slack_app_slack_mcp_enabled,
+    feature_flags.is_slack_app_daily_summary_enabled,
+]
+
+
+@pytest.mark.parametrize("gate", USER_KEYED_GATES, ids=[gate.__name__ for gate in USER_KEYED_GATES])
 @pytest.mark.parametrize(
     ("distinct_id", "expected_identity"),
     [
@@ -55,8 +64,27 @@ def test_user_keyed_gate_resolves_against_the_acting_user(
     org, _, _ = org_team_user
 
     with patch("posthoganalytics.feature_enabled", return_value=True) as feature_enabled:
-        gate(workspace_integration, distinct_id)
+        assert gate(workspace_integration, distinct_id) is True
 
     assert feature_enabled.call_args.args[1] == expected_identity
     assert feature_enabled.call_args.kwargs["person_properties"] == {"region": "DEV"}
     assert feature_enabled.call_args.kwargs["groups"] == {"organization": str(org.id)}
+
+
+@pytest.mark.parametrize(
+    ("adapter", "distinct_id", "plan_rollout_on", "expected"),
+    [
+        ("codex", "user-1", False, True),
+        ("codex", None, True, False),
+        ("claude", "user-1", True, True),
+        ("claude", "user-1", False, False),
+    ],
+    ids=["codex is open", "codex needs a user", "claude rollout on", "claude rollout off"],
+)
+def test_byos_gate_follows_the_plan_rollout(
+    workspace_integration: Integration, adapter: str, distinct_id: str | None, plan_rollout_on: bool, expected: bool
+) -> None:
+    # A Slack run marked for a plan whose rollout is off fails when it starts, so the gate
+    # must match the tasks rollout for that plan exactly.
+    with patch("posthoganalytics.feature_enabled", return_value=plan_rollout_on):
+        assert feature_flags.is_slack_app_byos_enabled(workspace_integration, distinct_id, adapter=adapter) is expected

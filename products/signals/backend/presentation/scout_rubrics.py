@@ -57,16 +57,16 @@ class ScoutRubricCriterionSerializer(serializers.Serializer):
 
 @extend_schema_serializer(component_name="ScoutRubricReferenceTextDocument")
 class ScoutRubricReferenceTextSerializer(serializers.Serializer):
-    path = serializers.CharField(help_text="Path of the reference supplied to the generator.")
-    content_type = serializers.CharField(help_text="Content type of the supplied reference.")
-    content = serializers.CharField(allow_blank=True, help_text="Exact reference text supplied to the generator.")
+    path = serializers.CharField(help_text="Path of the captured reference file.")
+    content_type = serializers.CharField(help_text="Content type of the captured reference file.")
+    content = serializers.CharField(allow_blank=True, help_text="Saved reference text used for judging.")
 
 
 @extend_schema_serializer(component_name="ScoutRubricReferenceLimitsDocument")
 class ScoutRubricReferenceLimitsSerializer(serializers.Serializer):
-    omitted_files = serializers.IntegerField(min_value=0, help_text="Number of reference files not supplied.")
+    omitted_files = serializers.IntegerField(min_value=0, help_text="Number of files missing from the saved reference.")
     truncated_files = serializers.ListField(
-        child=serializers.CharField(), help_text="Reference paths whose supplied content was truncated."
+        child=serializers.CharField(), help_text="Paths of files truncated in the saved reference."
     )
 
 
@@ -76,25 +76,25 @@ class ScoutRubricReferenceContextSerializer(serializers.Serializer):
     skill_id = serializers.CharField(help_text="Exact skill record used for generation.")
     skill_name = serializers.CharField(help_text="Name of the skill used for generation.")
     skill_version = serializers.IntegerField(help_text="Skill version used for generation.")
-    description = serializers.CharField(allow_blank=True, help_text="Scout description supplied to the generator.")
-    instructions = serializers.CharField(allow_blank=True, help_text="Exact instructions supplied to the generator.")
-    instructions_truncated = serializers.BooleanField(help_text="Whether the supplied instructions were truncated.")
+    description = serializers.CharField(allow_blank=True, help_text="Scout description captured for this reference.")
+    instructions = serializers.CharField(allow_blank=True, help_text="Saved scout instructions used for judging.")
+    instructions_truncated = serializers.BooleanField(help_text="Whether the saved instructions were truncated.")
     report_channel = serializers.ChoiceField(
         choices=ScoutRubricReportChannel.choices, help_text="Report capabilities used to select the source rules."
     )
     report_disposition_instructions = serializers.CharField(
-        allow_blank=True, help_text="Exact report-disposition rules supplied to the generator."
+        allow_blank=True, help_text="Report-disposition rules captured for this reference."
     )
     reference_files = serializers.ListField(
-        child=serializers.CharField(), help_text="Reference-file inventory supplied to the generator."
+        child=serializers.CharField(), help_text="Reference-file inventory captured for this reference."
     )
     reference_files_truncated = serializers.BooleanField(
         help_text="Whether the reference-file inventory was truncated."
     )
-    reference_texts = ScoutRubricReferenceTextSerializer(
-        many=True, help_text="Reference texts supplied to the generator."
+    reference_texts = ScoutRubricReferenceTextSerializer(many=True, help_text="Saved reference texts used for judging.")
+    reference_limits = ScoutRubricReferenceLimitsSerializer(
+        help_text="Missing or truncated text in the saved reference."
     )
-    reference_limits = ScoutRubricReferenceLimitsSerializer(help_text="Limits on the supplied reference texts.")
 
 
 class ScoutRubricGenerationSerializer(serializers.Serializer):
@@ -209,21 +209,21 @@ class SignalScoutRubricViewSet(TeamAndOrgViewSetMixin, viewsets.GenericViewSet):
     scope_object = "signal_scout"
     lookup_field = "id"
     pagination_class = None
+    # signal_scout is not an access-control resource, so no rule names one rubric.
+    records_have_object_access_rules = False
 
     def dangerously_get_required_scopes(self, request: Request, view: APIView) -> list[str]:
         return ["signal_scout:read" if getattr(view, "action", None) == "retrieve" else "signal_scout:write"]
 
-    def get_rubric(self, config_id: str) -> ScoutRubricDocument:
+    def read_object(self) -> ScoutRubricDocument:
         try:
-            document = get_scout_rubric(self.team_id, config_id)
+            return get_scout_rubric(self.team_id, self.kwargs["id"])
         except ScoutRubricNotFound:
             raise exceptions.NotFound() from None
-        self.check_object_permissions(self.request, document)
-        return document
 
     @extend_schema(responses={200: ScoutRubricDocumentSerializer}, operation_id="signals_scout_rubrics_retrieve")
     def retrieve(self, request: Request, id: str, **kwargs: object) -> Response:
-        return rubric_response(self.get_rubric(id))
+        return rubric_response(self.get_object())
 
     @extend_schema(
         request=ScoutRubricSaveSerializer,
@@ -231,7 +231,7 @@ class SignalScoutRubricViewSet(TeamAndOrgViewSetMixin, viewsets.GenericViewSet):
         operation_id="signals_scout_rubrics_update",
     )
     def update(self, request: Request, id: str, **kwargs: object) -> Response:
-        document = self.get_rubric(id)
+        document = self.get_object()
         serializer = ScoutRubricSaveSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         adopt_generation_id = serializer.validated_data.get("adopt_generation_id")
@@ -251,7 +251,7 @@ class SignalScoutRubricViewSet(TeamAndOrgViewSetMixin, viewsets.GenericViewSet):
     )
     @action(detail=True, methods=["post"])
     def generate(self, request: Request, id: str, **kwargs: object) -> Response:
-        document = self.get_rubric(id)
+        document = self.get_object()
         user_id = request.user.pk
         if user_id is None:
             raise exceptions.NotAuthenticated()

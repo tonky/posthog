@@ -5,7 +5,7 @@ This is the deep-dive behind the main skill's [Step 2 (smells)](../SKILL.md) and
 explain _why_ it is slow before you reach for a fix. Where Step 2 scans the SQL for known-bad shapes,
 this reference works the other way round, from the runtime cost back to the cause.
 
-It is written for a query you pulled from production (via `/querying-production-databases-via-metabase` against
+It is written for a query you pulled from production (via `/querying-production-databases` against
 `posthog.query_log_archive`, since the slowest real example beats a synthesized one), but the reasoning
 applies to any slow query. You do not need certainty: a concrete, falsifiable hypothesis ("the sort key
 is function-wrapped, so the date filter can't prune granules") is what drives the next step. Always state
@@ -110,8 +110,9 @@ These tags tell you what triggered the query without reverse-engineering the SQL
 | `lc_access_method`, `lc_api_key_label`                                    | Whether it came from the web, OAuth, or a named API key    |
 | `lc_user_id`                                                              | Who triggered it                                           |
 
-The full `log_comment` (raw, on `system.query_log`) additionally carries `http_referer`, `scene`, and
-`source_file`/`source_line`. These tags are defined in `posthog/clickhouse/query_tagging.py`
+The full `log_comment` additionally carries `http_referer`, `scene`, and `source_file`/`source_line`.
+`system.query_log` keeps it raw, and the archive's `log_comment` column keeps it for one month without `timings` and `query`.
+These tags are defined in `posthog/clickhouse/query_tagging.py`
 (`QueryTags`).
 
 To reverse-engineer SQL, grep the PostHog codebase for the `lc_query__kind` value (e.g. `TrendsQuery`)

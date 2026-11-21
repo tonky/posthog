@@ -27,6 +27,7 @@ pub struct MockRedisClient {
     mget_error: Option<CustomRedisError>,
     pipeline_error: Option<CustomRedisError>,
     pipeline_block: Option<Duration>,
+    batch_incr_by_expire_at_block: Option<Duration>,
     pipeline_errors_by_call: HashMap<usize, CustomRedisError>,
     /// Shared via `Arc` so clones of the mock agree on call sequencing.
     pipeline_call_counter: Arc<AtomicUsize>,
@@ -57,6 +58,7 @@ impl Default for MockRedisClient {
             mget_error: None,
             pipeline_error: None,
             pipeline_block: None,
+            batch_incr_by_expire_at_block: None,
             pipeline_errors_by_call: HashMap::new(),
             pipeline_call_counter: Arc::new(AtomicUsize::new(0)),
             mget_errors_by_call: HashMap::new(),
@@ -206,6 +208,12 @@ impl MockRedisClient {
         self.clone()
     }
 
+    /// Block every `batch_incr_by_expire_at` call for `duration` after recording it.
+    pub fn batch_incr_by_expire_at_block(&mut self, duration: Duration) -> Self {
+        self.batch_incr_by_expire_at_block = Some(duration);
+        self.clone()
+    }
+
     /// Fail the Nth `execute_pipeline` call (0-indexed across the lifetime of
     /// this mock) with the given error. Other calls proceed normally. Takes
     /// precedence over `pipeline_error`. Use to exercise partial-failure
@@ -247,6 +255,10 @@ pub struct MockRedisCall {
 
 #[async_trait]
 impl Client for MockRedisClient {
+    async fn heal(&self) {
+        self.record_call("heal", "", MockRedisValue::None);
+    }
+
     async fn zrangebyscore(
         &self,
         key: String,
@@ -556,6 +568,9 @@ impl Client for MockRedisClient {
             key: recorded,
             value: MockRedisValue::None,
         });
+        if let Some(duration) = self.batch_incr_by_expire_at_block {
+            futures_timer::Delay::new(duration).await;
+        }
 
         match &self.batch_incr_by_expire_at_ret {
             Some(ret) => ret.clone(),
@@ -625,6 +640,27 @@ impl Client for MockRedisClient {
             .map(|k| self.mget_ret.get(k).and_then(|v| v.clone()))
             .collect();
         Ok(results)
+    }
+
+    /// Reads the values set with `mget_ret` and fails with `mget_error`.
+    async fn get_multiple(
+        &self,
+        keys: Vec<String>,
+    ) -> Result<Vec<Option<Vec<u8>>>, CustomRedisError> {
+        self.lock_calls().push(MockRedisCall {
+            op: "get_multiple".to_string(),
+            key: format!("keys={}", keys.len()),
+            value: MockRedisValue::VecString(keys.clone()),
+        });
+
+        if let Some(err) = &self.mget_error {
+            return Err(err.clone());
+        }
+
+        Ok(keys
+            .iter()
+            .map(|k| self.mget_ret.get(k).and_then(|v| v.clone()))
+            .collect())
     }
 
     async fn scard_multiple(&self, keys: Vec<String>) -> Result<Vec<u64>, CustomRedisError> {

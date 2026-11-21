@@ -5,14 +5,7 @@ import { PersonUpdate } from '~/common/persons/person-update-batch'
 import { CreatePersonResult, MoveDistinctIdsResult } from '~/common/utils/db/db'
 import { TransactionClient } from '~/common/utils/db/postgres'
 import { Properties } from '~/plugin-scaffold'
-import {
-    InternalPerson,
-    PersonUpdateFields,
-    PropertiesLastOperation,
-    PropertiesLastUpdatedAt,
-    Team,
-    TeamId,
-} from '~/types'
+import { InternalPerson, PersonUpdateFields, Team, TeamId } from '~/types'
 
 import { InternalPersonWithDistinctId, LifecycleMarkPerson } from './person-repository'
 
@@ -31,8 +24,6 @@ export interface RawPostgresPersonRepository {
     createPerson(
         createdAt: DateTime,
         properties: Properties,
-        propertiesLastUpdatedAt: PropertiesLastUpdatedAt,
-        propertiesLastOperation: PropertiesLastOperation,
         teamId: Team['id'],
         isUserId: number | null,
         isIdentified: boolean,
@@ -52,8 +43,20 @@ export interface RawPostgresPersonRepository {
     updatePersonAssertVersion(personUpdate: PersonUpdate): Promise<[number | undefined, PersonMessage[]]>
 
     updatePersonsBatch(
-        personUpdates: PersonUpdate[]
-    ): Promise<Map<string, { success: boolean; version?: number; kafkaMessage?: PersonMessage; error?: Error }>>
+        personUpdates: PersonUpdate[],
+        tx?: TransactionClient
+    ): Promise<
+        Map<
+            string,
+            {
+                success: boolean
+                version?: number
+                kafkaMessage?: PersonMessage
+                person?: InternalPerson
+                error?: Error
+            }
+        >
+    >
 
     deletePerson(person: InternalPerson, tx?: TransactionClient): Promise<PersonMessage[]>
 
@@ -73,6 +76,16 @@ export interface RawPostgresPersonRepository {
 
     /** See PersonRepository.isPersonLive. */
     isPersonLive(person: InternalPerson, tx?: TransactionClient): Promise<boolean>
+
+    readPerson(teamId: Team['id'], distinctId: string, tx?: TransactionClient): Promise<InternalPerson | undefined>
+
+    /** The target and sources are row-locked, in ascending id order, until the transaction ends. */
+    readMergeRows(
+        teamId: number,
+        targetId: string,
+        sourceIds: string[],
+        tx?: TransactionClient
+    ): Promise<InternalPerson[]>
 
     addDistinctId(
         person: InternalPerson,

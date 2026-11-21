@@ -9,6 +9,7 @@ import { LemonModal } from '~/lib/lemon-ui/LemonModal'
 import { LemonSkeleton } from '~/lib/lemon-ui/LemonSkeleton'
 import { Link } from '~/lib/lemon-ui/Link'
 
+import { TerraformLockToggle } from './TerraformLockToggle'
 import {
     TerraformExportResource,
     TerraformExportResult,
@@ -25,19 +26,52 @@ interface TerraformExportModalProps {
     'data-attr'?: string
 }
 
-function getBaseName(resource: TerraformExportResource): string {
+export function getBaseName(resource: TerraformExportResource): string {
     if (resource.type === 'dashboard') {
         return resource.data.name || `dashboard_${resource.data.id}`
+    }
+    if (resource.type === 'access_control') {
+        return `access_control_project_${resource.data.projectId}`
     }
     return resource.data.name || resource.data.derived_name || 'insight'
 }
 
-function getDescription(resource: TerraformExportResource, result: TerraformExportResult | null): JSX.Element {
-    const providerDocsUrl = 'https://registry.terraform.io/providers/PostHog/posthog/latest/docs'
+type DescriptionLink = (props: { to: string; children: React.ReactNode }) => JSX.Element
+
+function LemonDescriptionLink({ to, children }: { to: string; children: React.ReactNode }): JSX.Element {
+    return (
+        <Link to={to} target="_blank">
+            {children}
+        </Link>
+    )
+}
+
+export function getDescription(
+    resource: TerraformExportResource,
+    result: TerraformExportResult | null,
+    DescriptionLink: DescriptionLink = LemonDescriptionLink
+): JSX.Element {
+    const providerDocsUrl = 'https://posthog.com/docs/terraform'
     const exampleRepoUrl =
         'https://github.com/PostHog/posthog/tree/master/terraform/us/project-2/team-analytics-platform'
 
+    if (resource.type === 'access_control') {
+        return (
+            <>
+                Export the access rules of {resource.data.projectName} to a Terraform configuration. It covers default
+                project access, role and member project access, and rules for whole resource types. Rules on single
+                objects, such as one dashboard, are not included yet. The import blocks let Terraform take over the
+                existing rules without recreating them. See the{' '}
+                <DescriptionLink to={providerDocsUrl}>PostHog Terraform provider</DescriptionLink> docs for every
+                option.
+            </>
+        )
+    }
+
     const getExportPrefix = (): string => {
+        if (!result || !('alerts' in result.resourceCounts)) {
+            return ''
+        }
         const hasRelatedResources =
             result && (result.resourceCounts.alerts > 0 || result.resourceCounts.hogFunctions > 0)
 
@@ -55,13 +89,8 @@ function getDescription(resource: TerraformExportResource, result: TerraformExpo
     return (
         <>
             {prefix} Use this configuration with the{' '}
-            <Link to={providerDocsUrl} target="_blank">
-                PostHog Terraform provider
-            </Link>{' '}
-            to manage this {resource.type} as code. See{' '}
-            <Link to={exampleRepoUrl} target="_blank">
-                how we use it internally
-            </Link>{' '}
+            <DescriptionLink to={providerDocsUrl}>PostHog Terraform provider</DescriptionLink> to manage this{' '}
+            {resource.type} as code. See <DescriptionLink to={exampleRepoUrl}>how we use it internally</DescriptionLink>{' '}
             for an example.
         </>
     )
@@ -111,6 +140,13 @@ export function TerraformExportModal({
             }
         >
             <div className="space-y-4">
+                {resource.type === 'access_control' && (
+                    <TerraformLockToggle
+                        organizationId={resource.data.organizationId}
+                        projectId={resource.data.projectId}
+                    />
+                )}
+
                 {state.loading && (
                     <div className="space-y-2">
                         <LemonSkeleton className="h-4 w-1/2" />

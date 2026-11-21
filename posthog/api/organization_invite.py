@@ -1,4 +1,5 @@
 import concurrent.futures
+from collections.abc import Iterable
 from datetime import timedelta
 from typing import Any, Optional, cast
 from uuid import UUID
@@ -20,6 +21,7 @@ from posthog.email import is_email_available
 from posthog.event_usage import report_bulk_invited, report_team_member_invited
 from posthog.helpers.email_utils import (
     EmailNormalizer,
+    reject_lookalike_email_characters,
     reject_plus_addressed_email,
     validate_display_name,
     validate_message_body,
@@ -38,6 +40,7 @@ from posthog.permissions import (
     OrganizationMemberPermissions,
     TimeSensitiveActionPermission,
     UserCanInvitePermission,
+    request_subject,
 )
 from posthog.rate_limit import (
     OnboardingDelegationThrottle,
@@ -46,7 +49,10 @@ from posthog.rate_limit import (
 )
 from posthog.tasks.email import send_invite
 
-from products.access_control.backend.facade.user_access_control import UserAccessControl, ordered_access_levels
+from products.access_control.backend.facade.user_access_control import ordered_access_levels
+from products.authorization.backend.facade import api as authorization
+from products.authorization.backend.facade.contracts import CheckRequest, Resource
+from products.authorization.backend.facade.enums import Action
 
 logger = structlog.get_logger(__name__)
 
@@ -67,18 +73,9 @@ _DELEGATION_FLAG_MAX_QUEUE = _DELEGATION_FLAG_MAX_WORKERS * 2
 
 class OrganizationInviteManager:
     @staticmethod
-    def combine_invites(
-        organization_id: UUID | str, validated_data: dict[str, Any], combine_pending_invites: bool = True
-    ) -> dict[str, Any]:
-        """Combines multiple pending invites for the same email address."""
-        if not combine_pending_invites:
-            return validated_data
-
-        existing_invites = OrganizationInviteManager._get_invites_for_user_org(
-            organization_id=organization_id, target_email=validated_data["target_email"]
-        )
-
-        if not existing_invites.exists():
+    def combine_invites(validated_data: dict[str, Any], existing_invites: list[OrganizationInvite]) -> dict[str, Any]:
+        """Combines the given pending invites for the same email address into the new invite."""
+        if not existing_invites:
             return validated_data
 
         validated_data["level"] = OrganizationInviteManager._get_highest_level(
@@ -107,13 +104,13 @@ class OrganizationInviteManager:
         return OrganizationInvite.objects.filter(**filters).order_by("-created_at")
 
     @staticmethod
-    def _get_highest_level(existing_invites: QuerySet, new_level: int) -> int:
+    def _get_highest_level(existing_invites: Iterable[OrganizationInvite], new_level: int) -> int:
         levels = [invite.level for invite in existing_invites]
         levels.append(new_level)
         return max(levels)
 
     @staticmethod
-    def _combine_project_access(existing_invites: QuerySet, new_access: list[dict]) -> list[dict]:
+    def _combine_project_access(existing_invites: Iterable[OrganizationInvite], new_access: list[dict]) -> list[dict]:
         combined_access: dict[int, int] = {}
 
         # Add new access first
@@ -133,11 +130,52 @@ class OrganizationInviteManager:
         return [{"id": project_id, "level": level} for project_id, level in combined_access.items()]
 
     @staticmethod
-    def delete_existing_invites(organization_id: UUID | str, target_email: str) -> None:
-        """Deletes all existing invites for a given email in an organization."""
-        OrganizationInviteManager._get_invites_for_user_org(
-            organization_id=organization_id, target_email=target_email, include_expired=True
+    def delete_invites(organization_id: UUID | str, invites: list[OrganizationInvite]) -> None:
+        OrganizationInvite.objects.filter(
+            organization_id=organization_id, id__in=[invite.id for invite in invites]
         ).delete()
+
+
+def _project_access_level_exceeds(*, requested_level: str, granted_level: Optional[str]) -> bool:
+    levels: list[str] = [*ordered_access_levels("project")]
+    granted_rank = levels.index(granted_level) if granted_level in levels else 0
+    requested_rank = levels.index(requested_level) if requested_level in levels else 0
+    return requested_rank > granted_rank
+
+
+# TODO: once only OpenFGA remains, replace these level lookups with one SDK action such as Action.INVITE_MEMBER.
+_LEVEL_ACTIONS = {
+    OrganizationMembership.Level.MEMBER: Action.VIEW,
+    OrganizationMembership.Level.ADMIN: Action.EDIT,
+    OrganizationMembership.Level.OWNER: Action.MANAGE_OWNERS,
+}
+
+
+def _highest_level_held(
+    http_request: request.Request, organization_id: UUID | str
+) -> Optional[OrganizationMembership.Level]:
+    """The highest membership level the user holds in the organization, or None for a non-member."""
+    organization = Resource.organization(organization_id)
+    subject = request_subject(http_request)
+    held = authorization.check(
+        [CheckRequest(resource=organization, action=action, subject=subject) for action in _LEVEL_ACTIONS.values()]
+    )
+    return max((level for level, allowed in zip(_LEVEL_ACTIONS, held, strict=True) if allowed), default=None)
+
+
+def _project_access_level(http_request: request.Request, team: Team) -> str:
+    """The user's access level on the project, as one of the project access levels."""
+    project = Resource.project(team.pk)
+    subject = request_subject(http_request)
+    can_view, can_edit = authorization.check(
+        [
+            CheckRequest(resource=project, action=Action.VIEW, subject=subject),
+            CheckRequest(resource=project, action=Action.EDIT, subject=subject),
+        ]
+    )
+    if can_edit:
+        return "admin"
+    return "member" if can_view else "none"
 
 
 def first_bulk_invite_error(errors: list[Any]) -> exceptions.ValidationError:
@@ -175,6 +213,7 @@ class OrganizationInviteSerializer(serializers.ModelSerializer):
             "target_email",
             "first_name",
             "emailing_attempt_made",
+            "email_suppressed",
             "level",
             "is_expired",
             "created_by",
@@ -188,14 +227,19 @@ class OrganizationInviteSerializer(serializers.ModelSerializer):
         read_only_fields = [
             "id",
             "emailing_attempt_made",
+            "email_suppressed",
             "created_at",
             "updated_at",
         ]
-        extra_kwargs = {"target_email": {"required": True, "allow_null": False}}
+        extra_kwargs = {
+            "target_email": {"required": True, "allow_null": False},
+            "message": {"max_length": 1000, "help_text": "Optional personal message in the invite email."},
+        }
 
     def validate_target_email(self, email: str):
         email = EmailNormalizer.normalize(email)
         reject_plus_addressed_email(email)
+        reject_lookalike_email_characters(email)
         validate_invite_target_email_domain(self.context["get_organization"](), email)
         # Validation runs for every bulk row before any row saves, so one existing member
         # rejects the batch without a partial set of sent invites.
@@ -214,19 +258,13 @@ class OrganizationInviteSerializer(serializers.ModelSerializer):
         return validate_message_body(value)
 
     def validate_level(self, level: int) -> int:
-        # Validate that the user can't invite someone with a higher permission level than their own
-        try:
-            user_membership = OrganizationMembership.objects.get(
-                organization_id=self.context["organization_id"],
-                user=self.context["request"].user,
-            )
-            if level > user_membership.level:
-                raise exceptions.PermissionDenied(
-                    "You cannot invite a user with a higher permission level than your own."
-                )
-        except OrganizationMembership.DoesNotExist:
+        highest_level = _highest_level_held(self.context["request"], self.context["organization_id"])
+        if highest_level is None:
             # This should not happen in normal operation, but we'll handle it just in case
             raise exceptions.PermissionDenied("You must be a member of the organization to send invites.")
+        # Validate that the user can't invite someone with a higher permission level than their own
+        if level > highest_level:
+            raise exceptions.PermissionDenied("You cannot invite a user with a higher permission level than your own.")
 
         return level
 
@@ -269,67 +307,74 @@ class OrganizationInviteSerializer(serializers.ModelSerializer):
             except Team.DoesNotExist:
                 raise exceptions.ValidationError(team_error)
 
-            try:
-                # Check if the user is an org admin/owner - org admins/owners can invite with any level
-                OrganizationMembership.objects.get(
-                    organization_id=self.context["organization_id"],
-                    user=self.context["request"].user,
-                    level__in=[OrganizationMembership.Level.ADMIN, OrganizationMembership.Level.OWNER],
-                )
-                continue
-            except OrganizationMembership.DoesNotExist:
-                # User is not an org admin/owner
-                pass
-
-            from products.access_control.backend.models.access_control import AccessControl
-
-            # Check if the team has an access control row that applies to the entire resource
-            team_access_controls = AccessControl.objects.filter(
-                team_id=item["id"],
-                resource="project",
-                resource_id=str(item["id"]),
-                organization_member=None,
-                role=None,
-            )
-
-            # If no access controls exist, continue (team can be accessed by anyone in the organization)
-            if not team_access_controls.exists():
+            # Org admins/owners can invite with any level
+            if authorization.check(
+                resource=Resource.organization(organization.id),
+                action=Action.EDIT,
+                subject=request_subject(self.context["request"]),
+            ):
                 continue
 
-            # Team is restricted, check if user has sufficient access
-            user_access_control = UserAccessControl(user=self.context["request"].user, team=team)
-            access_level = user_access_control.access_level_for_object(team)
+            access_level = self._inviter_project_access_level(team)
             if access_level == "none":
                 raise exceptions.ValidationError(team_error)
 
             # Check if user is trying to invite with a higher level than their own
-            levels = ordered_access_levels("project")
-            user_level_rank = levels.index(access_level) if access_level in levels else 0
-            requested_level_rank = levels.index(level) if level in levels else 0
-
-            if requested_level_rank > user_level_rank:
+            if _project_access_level_exceeds(requested_level=level, granted_level=access_level):
                 raise exceptions.ValidationError(
                     "You cannot invite to a restricted project with a higher level than your own."
                 )
 
         return private_project_access
 
+    def _inviter_project_access_level(self, team: Team) -> str:
+        return _project_access_level(self.context["request"], team)
+
+    def _inviter_can_grant(self, invite: OrganizationInvite, inviter_level: OrganizationMembership.Level) -> bool:
+        # Combining or replacing a pending invite carries its grants into the new invite, or removes them.
+        # The field validators check only the request, so the inviter may only combine or replace an invite
+        # whose level and project access they could have granted themselves.
+        if invite.level > inviter_level:
+            return False
+        if inviter_level >= OrganizationMembership.Level.ADMIN:
+            return True
+        for item in invite.private_project_access or []:
+            team = Team.objects.filter(organization_id=self.context["organization_id"], id=item["id"]).first()
+            if team is None:
+                return False
+            access_level = self._inviter_project_access_level(team)
+            if access_level == "none" or _project_access_level_exceeds(
+                requested_level=item["level"], granted_level=access_level
+            ):
+                return False
+        return True
+
     def create(self, validated_data: dict[str, Any], *args: Any, **kwargs: Any) -> OrganizationInvite:
         combine_pending_invites = validated_data.pop("combine_pending_invites", False)
         send_email = validated_data.pop("send_email", True)
+        inviter_level = _highest_level_held(self.context["request"], self.context["organization_id"])
+        if inviter_level is None:
+            raise exceptions.PermissionDenied("You must be a member of the organization to send invites.")
+
+        replaceable_invites = [
+            invite
+            for invite in OrganizationInviteManager._get_invites_for_user_org(
+                organization_id=self.context["organization_id"],
+                target_email=validated_data["target_email"],
+                include_expired=True,
+            )
+            if self._inviter_can_grant(invite, inviter_level)
+        ]
 
         # Handle invite combination if requested
         if combine_pending_invites:
             validated_data = OrganizationInviteManager.combine_invites(
-                organization_id=self.context["organization_id"],
                 validated_data=validated_data,
-                combine_pending_invites=True,
+                existing_invites=[invite for invite in replaceable_invites if not invite.is_expired()],
             )
 
         # Delete existing invites for this email
-        OrganizationInviteManager.delete_existing_invites(
-            organization_id=self.context["organization_id"], target_email=validated_data["target_email"]
-        )
+        OrganizationInviteManager.delete_invites(self.context["organization_id"], replaceable_invites)
 
         # Create new invite
         invite: OrganizationInvite = OrganizationInvite.objects.create(
@@ -340,8 +385,10 @@ class OrganizationInviteSerializer(serializers.ModelSerializer):
 
         if is_email_available(with_absolute_urls=True) and send_email:
             invite.emailing_attempt_made = True
-            send_invite(invite_id=invite.id)
-            invite.save()
+            # The send waits on the email provider, so it runs in a worker rather than in this request.
+            send_invite.delay(invite_id=str(invite.id))
+            # A full-row save would overwrite the `email_suppressed` that `send_invite` sets when the provider refuses the address.
+            invite.save(update_fields=["emailing_attempt_made", "updated_at"])
 
         report_team_member_invited(
             self.context["request"].user,
@@ -384,6 +431,7 @@ class OrganizationInviteDelegateSerializer(serializers.Serializer):
     def validate_target_email(self, email: str) -> str:
         email = EmailNormalizer.normalize(email)
         reject_plus_addressed_email(email)
+        reject_lookalike_email_characters(email)
         return email
 
     def validate_message(self, value: str | None) -> str | None:
@@ -450,17 +498,14 @@ class OrganizationInviteViewSet(
         if not user.is_authenticated:
             return queryset.none()
 
-        try:
-            membership = OrganizationMembership.objects.select_related("organization").get(
-                organization_id=self.organization_id, user=user
-            )
-        except OrganizationMembership.DoesNotExist:
+        highest_level = _highest_level_held(self.request, self.organization_id)
+        if highest_level is None:
             return queryset.none()
 
-        if membership.level < OrganizationMembership.Level.ADMIN and not membership.organization.members_can_invite:
+        if highest_level < OrganizationMembership.Level.ADMIN and not self.organization.members_can_invite:
             return queryset.none()
 
-        return queryset.filter(level__lte=membership.level)
+        return queryset.filter(level__lte=highest_level)
 
     def get_throttles(self):
         # Apply invite-specific throttles only to actions that create invites,
@@ -563,11 +608,10 @@ class OrganizationInviteViewSet(
         # Delegation invites grant ADMIN-level access on accept, so the caller must themselves
         # hold ADMIN or higher. Without this check, regular members could escalate an unrelated
         # account to admin via a delegation invite on orgs that allow members to invite.
-        try:
-            membership = OrganizationMembership.objects.get(organization_id=self.organization_id, user=user)
-        except OrganizationMembership.DoesNotExist:
+        resource, subject = Resource.organization(self.organization.id), request_subject(request)
+        if not authorization.check(resource=resource, action=Action.VIEW, subject=subject):
             raise exceptions.PermissionDenied("You must be a member of the organization to delegate setup.")
-        if membership.level < OrganizationMembership.Level.ADMIN:
+        if not authorization.check(resource=resource, action=Action.EDIT, subject=subject):
             raise exceptions.PermissionDenied(
                 "Only organization admins can delegate setup, as delegation grants admin access."
             )

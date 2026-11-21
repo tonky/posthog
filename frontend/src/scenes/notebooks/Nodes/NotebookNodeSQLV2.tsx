@@ -1,15 +1,15 @@
 import { useActions, useMountedLogic, useValues } from 'kea'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
+import { useComponentPanelState } from 'lib/components/MarkdownNotebook/componentPanelContext'
 import { useNotebookJupyterCommands } from 'lib/components/MarkdownNotebook/jupyterMode'
-import { FEATURE_FLAGS } from 'lib/constants'
 import { LemonButton } from 'lib/lemon-ui/LemonButton'
 import { LemonTabs } from 'lib/lemon-ui/LemonTabs'
-import { featureFlagLogic } from 'lib/logic/featureFlagLogic'
 import { OutputTab } from 'scenes/data-warehouse/editor/outputPaneLogic'
 import { createPostHogWidgetNode } from 'scenes/notebooks/Nodes/NodeWrapper'
 import type { NotebookNodeRunTerminalStatus } from 'scenes/notebooks/Notebook/notebookNodeStalenessLogic'
 
+import { applyVisualizationType, columnsFromResponse } from '~/queries/nodes/DataVisualization/dataVisualizationLogic'
 import { Query } from '~/queries/Query/Query'
 import { DataVisualizationNode, HogQLQueryResponse, NodeKind } from '~/queries/schema/schema-general'
 import { ChartDisplayType } from '~/types'
@@ -150,8 +150,8 @@ const Component = ({
     attributes,
     updateAttributes,
 }: NotebookNodeProps<NotebookNodeSQLV2Attributes>): JSX.Element | null => {
+    const outputOnly = !!useComponentPanelState()?.outputOnly
     const nodeLogic = useMountedLogic(notebookNodeLogic)
-    const { featureFlags } = useValues(featureFlagLogic)
     const { nodeId, notebookLogic, expanded, sqlV2ReturnVariable, sqlV2ReturnVariableUsage, isEditable } =
         useValues(nodeLogic)
     const { navigateToNode } = useActions(nodeLogic)
@@ -216,14 +216,14 @@ const Component = ({
         ? pageResult.has_more
         : (result?.has_more ?? (result?.first_page ?? []).length >= SQL_V2_DEFAULT_PAGE_SIZE)
     const cachedResults = useMemo(() => (result ? toCachedResults(result) : null), [result])
-    const activeTab = attributes.outputTab === OutputTab.Visualization ? OutputTab.Visualization : OutputTab.Results
+    const activeTab = attributes.outputTab === OutputTab.Results ? OutputTab.Results : OutputTab.Visualization
 
     // The stored viz config wins, but the source always tracks the node's current code — and the
     // connection it runs on, so anything the viz layer re-queries lands on the same engine.
-    const vizQuery = useMemo(
-        (): DataVisualizationNode => ({
+    const vizQuery = useMemo((): DataVisualizationNode => {
+        const query: DataVisualizationNode = {
             kind: NodeKind.DataVisualizationNode,
-            display: ChartDisplayType.ActionsLineGraph,
+            display: ChartDisplayType.Auto,
             ...attributes.vizQuery,
             source: {
                 kind: NodeKind.HogQLQuery,
@@ -231,9 +231,17 @@ const Component = ({
                 connectionId: attributes.connectionId ?? undefined,
                 sendRawQuery: attributes.connectionId ? !!attributes.sendRawQuery || undefined : undefined,
             },
-        }),
-        [attributes.vizQuery, attributes.code, attributes.connectionId, attributes.sendRawQuery]
-    )
+        }
+        if (cachedResults) {
+            query.chartSettings = applyVisualizationType(
+                query,
+                query.display ?? ChartDisplayType.Auto,
+                columnsFromResponse(cachedResults),
+                cachedResults.results.length
+            ).chartSettings
+        }
+        return query
+    }, [attributes.vizQuery, attributes.code, attributes.connectionId, attributes.sendRawQuery, cachedResults])
 
     // Grow a still-too-short node to fit the result each run lands, so output is readable without
     // a manual resize. Sized to the rows that came back — a scalar stays compact, a wide result
@@ -268,12 +276,17 @@ const Component = ({
             // render at 60vh, dwarfing the node.
             uniqueKey={`SQLEditor-notebook-sqlv2-${nodeId}-${attributes.runId ?? 'initial'}`}
             query={vizQuery}
-            setQuery={(query) => {
-                // DataVisualization pushes default settings during its render;
-                // defer the doc write so we don't update Tiptap mid-render.
-                const vizQuery = query as DataVisualizationNode
-                setTimeout(() => updateAttributes({ vizQuery }), 0)
-            }}
+            readOnly={outputOnly}
+            setQuery={
+                outputOnly
+                    ? undefined
+                    : (query) => {
+                          // DataVisualization pushes default settings during its render;
+                          // defer the doc write so we don't update Tiptap mid-render.
+                          const vizQuery = query as DataVisualizationNode
+                          setTimeout(() => updateAttributes({ vizQuery }), 0)
+                      }
+            }
             cachedResults={cachedResults ?? undefined}
             attachTo={notebookLogic}
         />
@@ -430,36 +443,33 @@ const Component = ({
                     <div className="text-xs text-muted font-mono p-2">Run the query to see execution results.</div>
                 )}
             </div>
-            {(featureFlags[FEATURE_FLAGS.REVAMPED_PY_NOTEBOOKS] ||
-                featureFlags[FEATURE_FLAGS.NOTEBOOK_GENERATED_WIDGETS]) && (
-                <NotebookCellOutputNameFooter
-                    returnVariable={returnVariable}
-                    onChange={(returnVariable) => updateAttributes({ returnVariable })}
-                    inputRef={setReturnVariableInput}
-                >
-                    <NotebookDataframeHintPopover
-                        nodeId={nodeId}
-                        notebookShortId={notebookShortId}
-                        referenceElement={returnVariableInput}
-                    />
-                    {returnVariableError ? <span className="text-danger">{returnVariableError}</span> : null}
-                    {sqlV2ReturnVariableUsage.length > 0 ? (
-                        <span className="text-muted">
-                            Used in{' '}
-                            {sqlV2ReturnVariableUsage.map((usage) => (
-                                <button
-                                    key={usage.nodeId}
-                                    type="button"
-                                    className="text-muted hover:text-default underline underline-offset-2 ml-1"
-                                    onClick={() => navigateToNode(usage.nodeId)}
-                                >
-                                    {usageLabel(usage.nodeIndex, usage.title)}
-                                </button>
-                            ))}
-                        </span>
-                    ) : null}
-                </NotebookCellOutputNameFooter>
-            )}
+            <NotebookCellOutputNameFooter
+                returnVariable={returnVariable}
+                onChange={(returnVariable) => updateAttributes({ returnVariable })}
+                inputRef={setReturnVariableInput}
+            >
+                <NotebookDataframeHintPopover
+                    nodeId={nodeId}
+                    notebookShortId={notebookShortId}
+                    referenceElement={returnVariableInput}
+                />
+                {returnVariableError ? <span className="text-danger">{returnVariableError}</span> : null}
+                {sqlV2ReturnVariableUsage.length > 0 ? (
+                    <span className="text-muted">
+                        Used in{' '}
+                        {sqlV2ReturnVariableUsage.map((usage) => (
+                            <button
+                                key={usage.nodeId}
+                                type="button"
+                                className="text-muted hover:text-default underline underline-offset-2 ml-1"
+                                onClick={() => navigateToNode(usage.nodeId)}
+                            >
+                                {usageLabel(usage.nodeIndex, usage.title)}
+                            </button>
+                        ))}
+                    </span>
+                ) : null}
+            </NotebookCellOutputNameFooter>
         </div>
     )
 }
@@ -522,7 +532,7 @@ export const NotebookNodeSQLV2 = createPostHogWidgetNode<NotebookNodeSQLV2Attrib
             default: null,
         },
         outputTab: {
-            default: OutputTab.Results,
+            default: OutputTab.Visualization,
         },
         vizQuery: {
             default: null,

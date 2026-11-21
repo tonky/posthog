@@ -7,6 +7,7 @@ in-flight run's remaining batches land, and cannot change what the run bills.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 import posthoganalytics
@@ -14,19 +15,37 @@ import posthoganalytics
 from posthog.exceptions_capture import capture_exception
 from posthog.models.team.team import Team
 
-from products.warehouse_sources.backend.models.external_data_destination import resolve_destinations
+from products.warehouse_sources.backend.models.external_data_destination import (
+    ExternalDataDestination,
+    resolve_destinations,
+)
 
 if TYPE_CHECKING:
     from products.warehouse_sources.backend.models.external_data_schema import ExternalDataSchema
 
 WAREHOUSE_MULTI_DESTINATION_FLAG = "warehouse-multi-destination"
 
+# Destination types a team can only create while the type's own flag is on, on top of the
+# feature's flag. A type stays here until its writer has run against the real service.
+DESTINATION_TYPE_FLAGS: dict[str, str] = {
+    str(ExternalDataDestination.Type.MOTHERDUCK): "warehouse-destination-motherduck",
+}
+
+NO_ACTIVE_DESTINATIONS_MESSAGE = (
+    "Every destination this table syncs to is paused, so this sync did not run. "
+    "Fix the destination, then edit it to turn it back on."
+)
+
+
+class NoActiveDestinationsError(Exception):
+    """Every link of the schema is off, so the run has nowhere to deliver."""
+
 
 def is_multi_destination_enabled(team_id: int, source_type: str) -> bool:
     """Whether this team's syncs of this source type deliver to configured destinations.
 
-    Evaluated in an activity and carried into the workflow as recorded history, the same way
-    the v3 rollout flag is — a workflow must never read a flag directly.
+    Evaluated in an activity and carried into the workflow as recorded history — a workflow must
+    never read a flag directly.
     """
     try:
         team = Team.objects.only("uuid", "organization_id").get(id=team_id)
@@ -55,14 +74,74 @@ def is_multi_destination_enabled(team_id: int, source_type: str) -> bool:
         return False
 
 
-def destination_ids_for_run(schema: ExternalDataSchema) -> list[str]:
-    """The destination ids this run delivers to, in a stable order.
+def is_destination_type_enabled(team: Team, destination_type: str) -> bool:
+    """Whether this team may create destinations of this type."""
+    flag = DESTINATION_TYPE_FLAGS.get(destination_type)
+    if flag is None:
+        return True
 
-    Empty when the schema resolves to the PostHog warehouse alone, which keeps a run that
-    nobody configured destinations for byte-for-byte on the path it took before.
+    try:
+        return bool(
+            posthoganalytics.feature_enabled(
+                flag,
+                str(team.uuid),
+                groups={"organization": str(team.organization_id), "project": str(team.id)},
+                group_properties={
+                    "organization": {"id": str(team.organization_id)},
+                    "project": {"id": str(team.id)},
+                },
+                only_evaluate_locally=False,
+                send_feature_flag_events=False,
+            )
+        )
+    except Exception as e:
+        capture_exception(e)
+        return False
+
+
+def destination_ids_for_run(schema: ExternalDataSchema) -> list[str]:
+    """Every destination id this run writes to, the PostHog warehouse included, in a stable order.
+
+    The warehouse is a destination like any other, so a run that writes there says so rather
+    than recording nothing. Readers that still receive an empty list — a job that predates
+    destinations, a CDC companion lane, a run of a team the flag is off for — keep reading it
+    as the warehouse alone, which is what `warehouse_is_a_destination` does.
+
+    This list is the run's whole destination set. Anything that needs the external subset asks
+    `external_destination_ids_for` for it rather than reading "non-empty" as "has external
+    destinations": the warehouse is delivered through delta, not through a destination writer.
+    Raises `NoActiveDestinationsError` when the schema has links but every one of them is off.
     """
     destinations = resolve_destinations(schema)
-    if len(destinations) == 1 and destinations[0].is_posthog_warehouse:
-        return []
+    if not destinations:
+        raise NoActiveDestinationsError(NO_ACTIVE_DESTINATIONS_MESSAGE)
 
     return sorted(str(destination.id) for destination in destinations)
+
+
+def includes_the_warehouse(team_id: int, destination_ids: Sequence[str]) -> bool:
+    """Whether a run that lists these destinations writes to the PostHog warehouse. An empty list means only there."""
+    if not destination_ids:
+        return True
+    return (
+        ExternalDataDestination.objects.for_team(team_id, canonical=True)
+        .filter(id__in=list(destination_ids), type=ExternalDataDestination.Type.POSTHOG_WAREHOUSE, deleted=False)
+        .exists()
+    )
+
+
+def external_destination_ids_for(team_id: int, destination_ids: Sequence[str]) -> list[str]:
+    """The subset of `destination_ids` a destination writer delivers, so without the warehouse.
+
+    Resolved once per run and carried on each batch, because the consumer reads it per batch
+    while deciding what may share a write, and a query there would run for every batch in the
+    fleet.
+    """
+    if not destination_ids:
+        return []
+
+    return sorted(
+        str(destination.id)
+        for destination in ExternalDataDestination.objects.for_team(team_id).filter(id__in=list(destination_ids))
+        if destination.type != ExternalDataDestination.Type.POSTHOG_WAREHOUSE
+    )

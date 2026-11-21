@@ -611,6 +611,7 @@ export const SdkHealthReportHealthEnumApi = {
  * * `posthog-node` - posthog-node
  * * `posthog-python` - posthog-python
  * * `posthog-php` - posthog-php
+ * * `posthog-laravel` - posthog-laravel
  * * `posthog-ruby` - posthog-ruby
  * * `posthog-go` - posthog-go
  * * `posthog-flutter` - posthog-flutter
@@ -625,6 +626,16 @@ export const SdkHealthReportHealthEnumApi = {
  * * `posthog-convex` - posthog-convex
  * * `posthog-rails` - posthog-rails
  * * `posthog-aspnetcore` - posthog-aspnetcore
+ * * `posthog-rs` - posthog-rs
+ * * `posthog-rs-mcp` - posthog-rs-mcp
+ * * `posthog-rs-ffi` - posthog-rs-ffi
+ * * `posthog-electron` - posthog-electron
+ * * `posthog-godot` - posthog-godot
+ * * `posthog-unreal` - posthog-unreal
+ * * `posthog-go-mcp` - posthog-go-mcp
+ * * `posthog-ruby-mcp` - posthog-ruby-mcp
+ * * `posthog-roblox` - posthog-roblox
+ * * `js` - js
  */
 export type LibEnumApi = (typeof LibEnumApi)[keyof typeof LibEnumApi]
 
@@ -637,6 +648,7 @@ export const LibEnumApi = {
     PosthogNode: 'posthog-node',
     PosthogPython: 'posthog-python',
     PosthogPhp: 'posthog-php',
+    PosthogLaravel: 'posthog-laravel',
     PosthogRuby: 'posthog-ruby',
     PosthogGo: 'posthog-go',
     PosthogFlutter: 'posthog-flutter',
@@ -651,6 +663,16 @@ export const LibEnumApi = {
     PosthogConvex: 'posthog-convex',
     PosthogRails: 'posthog-rails',
     PosthogAspnetcore: 'posthog-aspnetcore',
+    PosthogRs: 'posthog-rs',
+    PosthogRsMcp: 'posthog-rs-mcp',
+    PosthogRsFfi: 'posthog-rs-ffi',
+    PosthogElectron: 'posthog-electron',
+    PosthogGodot: 'posthog-godot',
+    PosthogUnreal: 'posthog-unreal',
+    PosthogGoMcp: 'posthog-go-mcp',
+    PosthogRubyMcp: 'posthog-ruby-mcp',
+    PosthogRoblox: 'posthog-roblox',
+    Js: 'js',
 } as const
 
 /**
@@ -723,6 +745,7 @@ export interface SdkAssessmentApi {
      * * `posthog-node` - posthog-node
      * * `posthog-python` - posthog-python
      * * `posthog-php` - posthog-php
+     * * `posthog-laravel` - posthog-laravel
      * * `posthog-ruby` - posthog-ruby
      * * `posthog-go` - posthog-go
      * * `posthog-flutter` - posthog-flutter
@@ -736,7 +759,17 @@ export interface SdkAssessmentApi {
      * * `posthog-edge` - posthog-edge
      * * `posthog-convex` - posthog-convex
      * * `posthog-rails` - posthog-rails
-     * * `posthog-aspnetcore` - posthog-aspnetcore */
+     * * `posthog-aspnetcore` - posthog-aspnetcore
+     * * `posthog-rs` - posthog-rs
+     * * `posthog-rs-mcp` - posthog-rs-mcp
+     * * `posthog-rs-ffi` - posthog-rs-ffi
+     * * `posthog-electron` - posthog-electron
+     * * `posthog-godot` - posthog-godot
+     * * `posthog-unreal` - posthog-unreal
+     * * `posthog-go-mcp` - posthog-go-mcp
+     * * `posthog-ruby-mcp` - posthog-ruby-mcp
+     * * `posthog-roblox` - posthog-roblox
+     * * `js` - js */
     lib: LibEnumApi
     /** Human-readable SDK name matching the SDK Health UI (e.g. 'Python', 'Node.js', 'Web', 'iOS'). */
     readable_name: string
@@ -865,7 +898,7 @@ export const IdentityMatchingLinksListTier = {
 
 export type SdkHealthReportRetrieveParams = {
     /**
-     * When true, bypasses the Redis cache and re-queries ClickHouse for SDK usage. A background job refreshes this data once a day, so the cached answer is usually current. Use sparingly.
+     * When true, bypasses the cache and re-reads SDK usage. The cached answer is at most an hour old, so use this sparingly.
      */
     force_refresh?: boolean
 }

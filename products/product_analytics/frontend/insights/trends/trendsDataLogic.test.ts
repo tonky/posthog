@@ -7,11 +7,19 @@ import { getTrendResultCustomizationKey } from 'scenes/insights/utils'
 
 import { ExportType } from '~/exporter/types'
 import { dataNodeLogic } from '~/queries/nodes/DataNode/dataNodeLogic'
-import { DataNode, LifecycleQuery, NodeKind, ResultCustomizationBy, TrendsQuery } from '~/queries/schema/schema-general'
+import {
+    DataNode,
+    LifecycleQuery,
+    NodeKind,
+    ResultCustomizationBy,
+    TrendsQuery,
+    TrendsQueryResponse,
+} from '~/queries/schema/schema-general'
 import { initKeaTests } from '~/test/init'
 import { ChartDisplayType, InsightLogicProps, InsightModel } from '~/types'
 
 import { breakdownPieResult, lifecycleResult, trendPieResult, trendResult } from './__mocks__/trendsDataLogicMocks'
+import { trendsAxisSettingsLogic } from './shared/trendsAxisSettingsLogic'
 import { trendsDataLogic } from './trendsDataLogic'
 
 let logic: ReturnType<typeof trendsDataLogic.build>
@@ -40,6 +48,86 @@ describe('trendsDataLogic', () => {
         initKeaTests(false)
         await initTrendsDataLogic()
     })
+
+    it.each([ResultCustomizationBy.Value, ResultCustomizationBy.Position])(
+        'groups axes by %s without changing colors, preserves canceled edits, and resets grouping',
+        async (assignmentBy) => {
+            const query: TrendsQuery = {
+                kind: NodeKind.TrendsQuery,
+                series: [],
+                trendsFilter: { display: ChartDisplayType.ActionsLineGraph, resultCustomizationBy: assignmentBy },
+            }
+            await expectLogic(logic, () => {
+                insightVizDataLogic(insightProps).actions.updateQuerySource(query)
+                builtDataNodeLogic.actions.loadDataSuccess({ result: trendPieResult.result })
+            }).toFinishAllListeners()
+            const dataset = logic.values.indexedResults[0]
+            const key = getTrendResultCustomizationKey(logic.values.resultCustomizationBy, dataset, query)
+            await expectLogic(logic, () => {
+                insightVizDataLogic(insightProps).actions.updateInsightFilter({
+                    resultCustomizations:
+                        assignmentBy === ResultCustomizationBy.Value
+                            ? { [key]: { assignmentBy: ResultCustomizationBy.Value, color: 'preset-5', hidden: true } }
+                            : {
+                                  [key]: {
+                                      assignmentBy: ResultCustomizationBy.Position,
+                                      color: 'preset-5',
+                                      hidden: true,
+                                  },
+                              },
+                })
+            }).toFinishAllListeners()
+            const modal = trendsAxisSettingsLogic(insightProps)
+            modal.mount()
+            const rendered = logic.values.indexedResults.map((result) => ({
+                id: String(result.id),
+                label: result.label,
+                position: 'left' as const,
+            }))
+            modal.actions.openModal('left', rendered)
+            await expectLogic(modal, () => modal.actions.save()).toFinishAllListeners()
+            expect(logic.values.getTrendsYAxisPosition(dataset)).toBeUndefined()
+            modal.actions.openModal('right', rendered)
+            modal.actions.setSeriesPosition(key, 'right')
+            await expectLogic(modal, () => modal.actions.save()).toFinishAllListeners()
+            expect(logic.values.resultCustomizations).toMatchObject({
+                [key]: {
+                    color: 'preset-5',
+                    hidden: true,
+                    yAxisPosition: 'right',
+                },
+            })
+            expect(logic.values.indexedResults.map(logic.values.getTrendsYAxisPosition)).toEqual([
+                'right',
+                'left',
+                'left',
+            ])
+            expect(modal.values.axis).toBeNull()
+            modal.actions.openModal('right', [{ id: String(dataset.id), label: dataset.label, position: 'left' }])
+            expect(modal.values.axis).toBe('right')
+            modal.actions.setSeriesPosition(key, 'left')
+            modal.actions.closeModal()
+            expect(logic.values.getTrendsYAxisPosition(dataset)).toBe('right')
+            modal.actions.openModal('left', rendered)
+            const otherKey = getTrendResultCustomizationKey(assignmentBy, logic.values.indexedResults[1], query)
+            modal.actions.setSeriesPosition(otherKey, 'right')
+            await expectLogic(modal, () => modal.actions.save()).toFinishAllListeners()
+            expect(logic.values.indexedResults.map(logic.values.getTrendsYAxisPosition)).toEqual([
+                'right',
+                'right',
+                'left',
+            ])
+            modal.actions.openModal('right', [{ id: String(dataset.id), label: dataset.label, position: 'left' }])
+            await expectLogic(modal, () => modal.actions.resetAxes()).toFinishAllListeners()
+            expect(logic.values.indexedResults.map(logic.values.getTrendsYAxisPosition)).toEqual([
+                'auto',
+                'auto',
+                'auto',
+            ])
+            expect(logic.values.resultCustomizations).toMatchObject({ [key]: { color: 'preset-5', hidden: true } })
+            modal.unmount()
+        }
+    )
 
     describe('showMovingAverage', () => {
         it('is true for area graph with toggle enabled', async () => {
@@ -93,6 +181,19 @@ describe('trendsDataLogic', () => {
             })
         })
 
+        describe('actionNames', () => {
+            it('for a response that names its action series', async () => {
+                await expectLogic(logic, () => {
+                    builtDataNodeLogic.actions.loadDataSuccess({
+                        results: trendResult.result,
+                        action_names: { '7': 'Signed up' },
+                    } as TrendsQueryResponse)
+                }).toMatchValues({
+                    actionNames: { '7': 'Signed up' },
+                })
+            })
+        })
+
         describe('indexedResults', () => {
             it('for standard trend', async () => {
                 const insight: Partial<InsightModel> = {
@@ -103,6 +204,28 @@ describe('trendsDataLogic', () => {
                     builtDataNodeLogic.actions.loadDataSuccess(insight)
                 }).toMatchValues({
                     indexedResults: [{ ...trendResult.result[0], id: 0, seriesIndex: 0, colorIndex: 0 }],
+                })
+            })
+
+            it('leaves the previous period out of a proportion bar saved with compare on', async () => {
+                const query: TrendsQuery = {
+                    kind: NodeKind.TrendsQuery,
+                    series: [],
+                    trendsFilter: { display: ChartDisplayType.ActionsProportionBar },
+                    compareFilter: { compare: true },
+                }
+                const insight: Partial<InsightModel> = {
+                    result: [
+                        { ...trendResult.result[0], compare: true, compare_label: 'current' },
+                        { ...trendResult.result[0], compare: true, compare_label: 'previous' },
+                    ],
+                }
+
+                await expectLogic(logic, () => {
+                    insightVizDataLogic.findMounted(insightProps)?.actions.updateQuerySource(query)
+                    builtDataNodeLogic.actions.loadDataSuccess(insight)
+                }).toMatchValues({
+                    indexedResults: [expect.objectContaining({ compare_label: 'current' })],
                 })
             })
 
@@ -371,8 +494,8 @@ describe('trendsDataLogic', () => {
 
             const indexedResults = logic.values.indexedResults
             const [currentRow, previousRow] = indexedResults
-            expect(getTrendResultCustomizationKey(ResultCustomizationBy.Value, currentRow)).toBe(
-                getTrendResultCustomizationKey(ResultCustomizationBy.Value, previousRow)
+            expect(getTrendResultCustomizationKey(ResultCustomizationBy.Value, currentRow, query)).toBe(
+                getTrendResultCustomizationKey(ResultCustomizationBy.Value, previousRow, query)
             )
 
             await expectLogic(logic, () => {
@@ -435,7 +558,7 @@ describe('trendsDataLogic', () => {
 
             const indexedResults = logic.values.indexedResults
             const { resultCustomizationBy } = logic.values
-            const key0 = getTrendResultCustomizationKey(resultCustomizationBy, indexedResults[0])
+            const key0 = getTrendResultCustomizationKey(resultCustomizationBy, indexedResults[0], query)
 
             await expectLogic(logic, () => {
                 insightVizDataLogic.findMounted(insightProps)?.actions.updateInsightFilter({

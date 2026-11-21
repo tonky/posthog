@@ -120,6 +120,24 @@ class TestMetricAttributesAPI(ClickhouseTestMixin, APIBaseTest):
         assert response.status_code == status.HTTP_200_OK
         assert [r["name"] for r in response.json()["results"]] == ["prod"]
 
+    @parameterized.expand(
+        [
+            ("matching_metric", "http_requests", "region", ["us"]),
+            ("other_metric", "queue_depth", "region", []),
+            ("service_name_matching_metric", "http_requests", "service_name", ["checkout", "billing"]),
+            ("service_name_unknown_metric", "missing_metric", "service_name", []),
+        ]
+    )
+    def test_attribute_values_metric_name_limits_values_to_that_metric(
+        self, _name: str, metric_name: str, key: str, expected: list[str]
+    ) -> None:
+        response = self._get(
+            "attribute_values",
+            {"key": key, "metricName": metric_name, "dateFrom": (self.now - dt.timedelta(hours=6)).isoformat()},
+        )
+        assert response.status_code == status.HTTP_200_OK, response.json()
+        assert [r["name"] for r in response.json()["results"]] == expected
+
     @parameterized.expand([("underscore_spelling", "service_name"), ("dotted_spelling", "service.name")])
     def test_attribute_values_for_service_name_read_the_column(self, _name: str, key: str) -> None:
         response = self._get("attribute_values", {"key": key})
@@ -171,3 +189,160 @@ class TestMetricAttributeDistinctValuesAPI(ClickhouseTestMixin, APIBaseTest):
             {"name": "env", "value_count": 1},
             {"name": "service_name", "value_count": 1},
         ]
+
+    @parameterized.expand(
+        [
+            ("no_search", "job.duration", "", ["service.name", "env"]),
+            ("underscore_search", "job.duration", "service_name", ["service.name"]),
+            ("dotted_search", "job.duration", "service.name", ["service.name"]),
+            ("project_wide_no_search", "", "", ["service.name", "env"]),
+            ("project_wide_underscore_search", "", "service_name", ["service.name"]),
+            ("project_wide_dotted_search", "", "service.name", ["service.name"]),
+        ]
+    )
+    def test_service_name_resource_attribute_is_listed_once(
+        self, _name: str, metric_name: str, search: str, expected: list[str]
+    ) -> None:
+        truncate_metrics_tables()
+        now = timezone.now().replace(second=0, microsecond=0)
+        for service in ("checkout", "billing"):
+            seed_metric(
+                team_id=self.team.id,
+                metric_name="job.duration",
+                service_name=service,
+                points=[(now - dt.timedelta(minutes=2), 1.0)],
+                labels={"env": "prod"},
+                resource_labels={"service.name": service},
+            )
+
+        response = self.client.get(
+            f"/api/projects/{self.team.id}/metrics/attributes/", {"metricName": metric_name, "search": search}
+        )
+
+        assert response.status_code == status.HTTP_200_OK, response.json()
+        assert [r["name"] for r in response.json()["results"]] == expected
+
+    @parameterized.expand(
+        [
+            ("one_metric", "job.duration", "service_name"),
+            ("project_wide", "", "service_name"),
+            ("project_wide_dotted_datapoint_label", "", "service.name"),
+        ]
+    )
+    def test_services_without_dotted_resource_attribute_keep_one_synthetic_key(
+        self, _name: str, metric_name: str, datapoint_service_key: str
+    ) -> None:
+        truncate_metrics_tables()
+        now = timezone.now().replace(second=0, microsecond=0)
+        seed_metric(
+            team_id=self.team.id,
+            metric_name="job.duration",
+            service_name="checkout",
+            points=[(now - dt.timedelta(minutes=2), 1.0)],
+            labels={"env": "prod"},
+            resource_labels={"service.name": "checkout"},
+        )
+        seed_metric(
+            team_id=self.team.id,
+            metric_name="job.duration",
+            service_name="billing",
+            points=[(now - dt.timedelta(minutes=2), 1.0)],
+            labels={"env": "prod", datapoint_service_key: "billing"},
+        )
+
+        response = self.client.get(f"/api/projects/{self.team.id}/metrics/attributes/", {"metricName": metric_name})
+
+        assert response.status_code == status.HTTP_200_OK, response.json()
+        assert response.json()["results"] == [
+            {"name": "env", "value_count": 1},
+            {"name": "service.name", "value_count": 1},
+            {"name": "service_name", "value_count": 1},
+        ]
+
+
+class TestMetricAttributeValueSearchAPI(ClickhouseTestMixin, APIBaseTest):
+    CLASS_DATA_LEVEL_SETUP = True
+    now: dt.datetime
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        truncate_metrics_tables()
+
+        cls.now = timezone.now().replace(second=0, microsecond=0)
+        recent = [(cls.now - dt.timedelta(minutes=m), 1.0) for m in (2, 3)]
+        seed_metric(
+            team_id=cls.team.id,
+            metric_name="http_requests",
+            service_name="checkout",
+            points=recent,
+            labels={"env": "prod", "region": "us-east", "zone": "region-west"},
+            resource_labels={"k8s.pod.name": "pod-1"},
+        )
+        seed_metric(
+            team_id=cls.team.id,
+            metric_name="http_requests",
+            service_name="billing",
+            points=[(cls.now - dt.timedelta(minutes=4), 1.0)],
+            labels={"env": "dev"},
+        )
+        seed_metric(
+            team_id=cls.team.id,
+            metric_name="queue_depth",
+            service_name="checkout",
+            points=[(cls.now - dt.timedelta(minutes=5), 1.0)],
+            labels={"stale_key": "old"},
+        )
+
+    def _results(self, params: dict) -> list[dict]:
+        response = self.client.get(f"/api/projects/{self.team.id}/metrics/attributes/", params)
+        assert response.status_code == status.HTTP_200_OK, response.json()
+        return response.json()["results"]
+
+    def test_value_search_is_off_by_default(self):
+        assert self._results({"search": "checkout"}) == []
+
+    def test_value_search_finds_the_key_that_carries_the_value(self):
+        assert self._results({"search": "checkout", "search_values": "true"}) == [
+            {"name": "service_name", "value_count": 1, "matchedOn": "value", "matchedValue": "checkout"}
+        ]
+
+    def test_value_search_reports_one_sample_value_per_key(self):
+        assert self._results({"metricName": "http_requests", "search": "prod", "search_values": "true"}) == [
+            {"name": "env", "value_count": 1, "matchedOn": "value", "matchedValue": "prod"}
+        ]
+
+    def test_key_matches_come_before_value_matches(self):
+        results = self._results({"metricName": "http_requests", "search": "region", "search_values": "true"})
+
+        # "region" names a key and also appears inside the value of another key.
+        assert results == [
+            {"name": "region", "value_count": 1},
+            {"name": "zone", "value_count": 1, "matchedOn": "value", "matchedValue": "region-west"},
+        ]
+
+    def test_short_search_does_not_probe_values(self):
+        assert self._results({"metricName": "http_requests", "search": "reg", "search_values": "true"}) == [
+            {"name": "region", "value_count": 1}
+        ]
+
+    def test_the_service_key_name_still_matches_in_value_mode(self):
+        assert self._results({"metricName": "http_requests", "search": "service", "search_values": "true"}) == [
+            {"name": "service_name", "value_count": 2}
+        ]
+
+    @parameterized.expand(
+        [
+            ("value_on_the_metric", "http_requests", "prod", ["env"]),
+            ("value_on_another_metric", "queue_depth", "prod", []),
+            ("service_of_the_metric", "queue_depth", "checkout", ["service_name"]),
+        ]
+    )
+    def test_value_search_stays_inside_the_metric(
+        self, _name: str, metric_name: str, search: str, expected: list[str]
+    ) -> None:
+        results = self._results({"metricName": metric_name, "search": search, "search_values": "true"})
+        assert [r["name"] for r in results] == expected
+
+    def test_value_search_with_no_match_returns_nothing(self):
+        assert self._results({"search": "nothing_here", "search_values": "true"}) == []

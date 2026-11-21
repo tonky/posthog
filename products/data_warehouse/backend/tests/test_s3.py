@@ -16,8 +16,8 @@ from products.data_warehouse.backend.s3 import (
 )
 
 
-def _client_error(code: str) -> ClientError:
-    return ClientError({"Error": {"Code": code}}, "operation")
+def _client_error(code: str, message: str = "") -> ClientError:
+    return ClientError({"Error": {"Code": code, "Message": message}}, "operation")
 
 
 class TestAgetS3Client(SimpleTestCase):
@@ -133,19 +133,40 @@ class TestEnsureBucketExists(SimpleTestCase):
 
     @parameterized.expand(
         [
-            ("owned_by_us", "BucketAlreadyOwnedByYou", False),
-            ("owned_by_someone_else", "BucketAlreadyExists", True),
-            ("access_denied", "AccessDenied", True),
+            ("owned_by_us", "BucketAlreadyOwnedByYou", "", False),
+            ("owned_by_someone_else", "BucketAlreadyExists", "", True),
+            (
+                "seaweedfs_shared_namespace_race",
+                "BucketAlreadyExists",
+                "The bucket name can not be an existing collection, and the bucket namespace is "
+                "shared by all users of the system. Please select a different name and try again.",
+                False,
+            ),
+            (
+                "genuine_aws_collision_with_shared_namespace_wording",
+                "BucketAlreadyExists",
+                "The requested bucket name is not available. The bucket namespace is shared by all "
+                "users of the system. Please select a different name and try again.",
+                True,
+            ),
+            ("access_denied", "AccessDenied", "", True),
         ]
     )
     @patch("products.data_warehouse.backend.s3.boto3.client")
-    def test_create_bucket_race_after_a_404(self, _name, create_error_code, should_raise, mock_boto3_client) -> None:
+    def test_create_bucket_race_after_a_404(
+        self, _name, create_error_code, create_error_message, should_raise, mock_boto3_client
+    ) -> None:
         # A concurrent caller can create the bucket between our head_bucket 404 and our own
         # create_bucket call. BucketAlreadyOwnedByYou means we lost that race but still own the
-        # bucket, so it must not surface as a failure; any other create_bucket error is real.
+        # bucket, so it must not surface as a failure. SeaweedFS (the backend behind local/self-hosted
+        # setups) has no per-account ownership check, so it reports the identical race as a bare
+        # BucketAlreadyExists carrying its own "existing collection" wording instead — that must not
+        # raise either. SeaweedFS's message otherwise reuses AWS's own wording for a genuine collision
+        # verbatim, so a BucketAlreadyExists with AWS's wording but no "existing collection" is a real,
+        # unrelated name collision and must still raise.
         s3_client = MagicMock()
         s3_client.head_bucket.side_effect = _client_error("404")
-        s3_client.create_bucket.side_effect = _client_error(create_error_code)
+        s3_client.create_bucket.side_effect = _client_error(create_error_code, create_error_message)
         mock_boto3_client.return_value = s3_client
 
         if should_raise:
@@ -171,27 +192,43 @@ class TestEnsureBucketExists(SimpleTestCase):
 
     @patch("products.data_warehouse.backend.s3.time.sleep")
     @patch("products.data_warehouse.backend.s3.boto3.client")
-    def test_reraises_non_404_head_bucket_errors(self, mock_boto3_client, mock_sleep) -> None:
+    def test_reraises_unretryable_head_bucket_errors(self, mock_boto3_client, mock_sleep) -> None:
         s3_client = MagicMock()
-        s3_client.head_bucket.side_effect = _client_error("403")
+        s3_client.head_bucket.side_effect = _client_error("400")
         mock_boto3_client.return_value = s3_client
 
         with self.assertRaises(ClientError):
             ensure_bucket_exists("s3://my-bucket", "key", "secret")
 
-        # A persistent 403 retries (it's indistinguishable from a transient one, see
-        # test_retries_head_bucket_403_then_succeeds) but still gives up and raises.
+        s3_client.head_bucket.assert_called_once()
+        s3_client.create_bucket.assert_not_called()
+
+    @parameterized.expand([("403",), ("500",), ("503",)])
+    @patch("products.data_warehouse.backend.s3.time.sleep")
+    @patch("products.data_warehouse.backend.s3.boto3.client")
+    def test_reraises_persistent_head_bucket_errors(self, error_code, mock_boto3_client, mock_sleep) -> None:
+        s3_client = MagicMock()
+        s3_client.head_bucket.side_effect = _client_error(error_code)
+        mock_boto3_client.return_value = s3_client
+
+        with self.assertRaises(ClientError):
+            ensure_bucket_exists("s3://my-bucket", "key", "secret")
+
+        # A persistent 403/500/503 retries (none can be told apart from a transient one, see
+        # test_retries_head_bucket_then_succeeds) but still gives up and raises.
         assert s3_client.head_bucket.call_count > 1
         s3_client.create_bucket.assert_not_called()
 
+    @parameterized.expand([("403",), ("500",), ("503",)])
     @patch("products.data_warehouse.backend.s3.time.sleep")
     @patch("products.data_warehouse.backend.s3.boto3.client")
-    def test_retries_head_bucket_403_then_succeeds(self, mock_boto3_client, mock_sleep) -> None:
-        # HeadBucket carries no body, so a 403 from it can't be told apart from a still-registering
-        # local object store (e.g. SeaweedFS's credential bootstrap loop) by message alone. That
-        # transient race must self-heal on retry instead of surfacing as a hard failure.
+    def test_retries_head_bucket_then_succeeds(self, error_code, mock_boto3_client, mock_sleep) -> None:
+        # HeadBucket carries no body, so a 403 (a still-registering local object store's credential
+        # bootstrap loop, e.g. SeaweedFS) or a 500/503 (that same store answering before it's fully
+        # up) can't be told apart from a persistent failure by message alone. That transient race
+        # must self-heal on retry instead of surfacing as a hard failure.
         s3_client = MagicMock()
-        s3_client.head_bucket.side_effect = [_client_error("403"), _client_error("403"), None]
+        s3_client.head_bucket.side_effect = [_client_error(error_code), _client_error(error_code), None]
         mock_boto3_client.return_value = s3_client
 
         ensure_bucket_exists("s3://my-bucket", "key", "secret")

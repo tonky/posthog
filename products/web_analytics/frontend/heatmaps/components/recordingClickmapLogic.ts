@@ -7,6 +7,7 @@ import { RefObject } from 'react'
 
 import { heatmapDataLogic } from 'lib/components/heatmaps/heatmapDataLogic'
 import type { HeatmapUrlFilter } from 'lib/components/heatmaps/heatmapUrlMatch'
+import type { HeatmapUrlMatchMode } from 'lib/components/heatmaps/heatmapUrlMatch'
 import type { CommonFilters } from 'lib/components/heatmaps/types'
 import { FEATURE_FLAGS } from 'lib/constants'
 import { featureFlagLogic } from 'lib/logic/featureFlagLogic'
@@ -20,9 +21,9 @@ import {
     chainConsistencyProperties,
     matchEventToElementUsingIndex,
     matchIsChainConsistent,
-} from '~/toolbar/elements/domElementIndex'
-import type { ElementMatchOptions } from '~/toolbar/elements/domElementIndex'
-import { ElementsEventType } from '~/toolbar/types'
+} from '~/toolbar/shared/elements/domElementIndex'
+import type { ElementMatchOptions } from '~/toolbar/shared/elements/domElementIndex'
+import { ElementsEventType } from '~/toolbar/shared/types'
 import { PropertyFilterType, PropertyOperator } from '~/types'
 import type { TeamPublicType, TeamType } from '~/types'
 
@@ -234,8 +235,8 @@ export interface recordingClickmapLogicActions {
     onIframeLoad: () => {
         value: true
     } // heatmapsBrowserLogic
-    setRecordingUrlMatchMode: (mode: import('lib/components/heatmaps/heatmapUrlMatch').HeatmapUrlMatchMode) => {
-        mode: import('lib/components/heatmaps/heatmapUrlMatch').HeatmapUrlMatchMode
+    setRecordingUrlMatchMode: (mode: HeatmapUrlMatchMode) => {
+        mode: HeatmapUrlMatchMode
     } // heatmapsBrowserLogic
     setReplayIframeData: (replayIframeData: ReplayIframeData | null) => {
         replayIframeData: ReplayIframeData | null

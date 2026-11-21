@@ -1,6 +1,6 @@
 import json
 from collections import defaultdict
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from datetime import timedelta
 from types import SimpleNamespace
 from typing import Any
@@ -16,6 +16,7 @@ from asgiref.sync import async_to_sync
 from parameterized import parameterized
 from temporalio.exceptions import ApplicationError
 
+from posthog.models.instance_setting import _clear_instance_setting_cache
 from posthog.models.team import Team
 
 from products.review_hog.backend.models import ReviewReport, ReviewReportArtefact
@@ -40,6 +41,7 @@ from products.review_hog.backend.reviewer.constants import (
 from products.review_hog.backend.reviewer.models.issues_review import IssuePriority, LineRange
 from products.review_hog.backend.reviewer.outcomes.classify import (
     _ClassifiedOutcome,
+    _CommentSignals,
     _gather_report_inputs,
     _load_persisted_outcomes,
     _mark_outcomes_emitted,
@@ -51,7 +53,7 @@ from products.review_hog.backend.reviewer.outcomes.classify import (
 )
 from products.review_hog.backend.reviewer.outcomes.discovery import unclassified_published_reports
 from products.review_hog.backend.reviewer.outcomes.judge import OutcomeJudgeVerdict
-from products.signals.backend.artefact_attribution import ArtefactAttribution
+from products.signals.backend.facade.taxonomy import ArtefactAttribution
 
 _CLASSIFY = "products.review_hog.backend.reviewer.outcomes.classify"
 # Touches the finding's line 10 → a line-proximity candidate the judge then rules on.
@@ -92,10 +94,22 @@ def _verdict(issue_key: str = _ISSUE_KEY) -> ValidationVerdict:
 class TestClassifyReportDecision:
     """The precedence + emit logic, with the DB helpers mocked so no database or thread is involved."""
 
-    def _inputs(self, *, comment: dict[str, Any] | None, compare_files: list[dict[str, Any]]) -> _ReportInputs:
+    @pytest.fixture(autouse=True)
+    def _our_app_login(self):
+        with patch(f"{_CLASSIFY}.posthog_app_login", return_value="reviewhog[bot]"):
+            yield
+
+    def _inputs(
+        self,
+        *,
+        comment: dict[str, Any] | None,
+        compare_files: list[dict[str, Any]],
+        reactions: list[dict[str, Any]] | None = None,
+    ) -> _ReportInputs:
         return _ReportInputs(
             compares={"base_sha": compare_files},
             review_comments=[comment] if comment else [],
+            reactions_by_comment={comment["id"]: reactions} if comment and reactions else {},
             published=[
                 _PublishedFinding(finding=_finding(), verdict=_verdict(), comment=comment, reviewed_head="base_sha")
             ],
@@ -117,14 +131,22 @@ class TestClassifyReportDecision:
             )
         return captured, judge
 
-    def test_reacted_takes_precedence_and_skips_the_judge(self):
-        # A reaction settles the finding as `reacted` before we spend a judge call — even though the
-        # diff also touched its lines. Precedence inversion here would waste tokens and mislabel.
+    @parameterized.expand(
+        [
+            # A reaction settles the finding as `reacted` before we spend a judge call — even though the
+            # diff also touched its lines. Precedence inversion here would waste tokens and mislabel.
+            ("someone_reacted", {"login": "alice", "type": "User"}, "reacted", "comment_reaction"),
+            ("only_our_queue_marker", {"login": "reviewhog[bot]", "type": "Bot"}, "addressed", "judge_confirmed"),
+        ]
+    )
+    def test_a_reaction_takes_precedence_unless_it_is_ours(
+        self, _name: str, reactor: dict[str, Any], outcome: str, method: str
+    ):
         comment = {"id": 1, "path": "f.py", "body": "### Off-by-one\n\nbody", "reactions": {"total_count": 1}}
-        captured, judge = self._run(inputs=self._inputs(comment=comment, compare_files=_TOUCHING))
-        judge.assert_not_awaited()
-        assert captured[0]["properties"]["outcome"] == "reacted"
-        assert captured[0]["properties"]["classification_method"] == "comment_reaction"
+        reactions = [{"user": reactor, "content": "eyes"}]
+        captured, _judge = self._run(inputs=self._inputs(comment=comment, compare_files=_TOUCHING, reactions=reactions))
+        assert captured[0]["properties"]["outcome"] == outcome
+        assert captured[0]["properties"]["classification_method"] == method
 
     def test_addressed_when_touched_and_judge_confirms(self):
         captured, judge = self._run(inputs=self._inputs(comment=None, compare_files=_TOUCHING), judge_return=True)
@@ -347,6 +369,7 @@ class TestClassifyReportDecision:
         inputs = _ReportInputs(
             compares={"base_sha": _TOUCHING},
             review_comments=[],
+            reactions_by_comment={},
             published=published,
             distinct_id="user-distinct",
             judge_user_id=0,
@@ -368,6 +391,7 @@ class TestClassifyReportDecision:
         return _ReportInputs(
             compares={"base_sha": _TOUCHING},
             review_comments=[],
+            reactions_by_comment={},
             published=[
                 _PublishedFinding(
                     finding=_finding(issue_key=f"r1:f.py:{i}:logic"),
@@ -478,6 +502,36 @@ class TestClassifyReportDecision:
         assert classified == 1
         assert [call.kwargs["report"] for call in classify.await_args_list] == [failing, healthy]
 
+    def test_comment_signals_are_persisted_and_only_their_tone_reaches_the_event(self):
+        comment = {"id": 1, "path": "f.py", "body": "### Off-by-one", "line": None, "reactions": {"total_count": 1}}
+        reply = {"id": 2, "in_reply_to_id": 1, "user": {"login": "alice", "type": "User"}, "body": "Fixed in abc123"}
+        inputs = replace(
+            self._inputs(
+                comment=comment, compare_files=_TOUCHING, reactions=[{"user": {"login": "alice"}, "content": "+1"}]
+            ),
+            review_comments=[comment, reply],
+        )
+        captured: list[dict[str, Any]] = []
+        with (
+            patch(f"{_CLASSIFY}._gather_report_inputs", return_value=inputs),
+            patch(f"{_CLASSIFY}._persist_outcomes") as persist,
+            patch(f"{_CLASSIFY}._mark_outcomes_emitted"),
+        ):
+            async_to_sync(classify_report)(
+                team_id=1,
+                report=ReviewReport(repository="o/r", pr_number=7),
+                final_head="head_sha",
+                capture=lambda **kw: captured.append(kw),
+            )
+
+        [outcome] = persist.call_args.kwargs["outcomes"]
+        assert outcome.signals == _CommentSignals(
+            reaction_sentiment="positive", reply_excerpt="Fixed in abc123", outdated=True
+        )
+        props = captured[0]["properties"]
+        assert (props["comment_reaction_sentiment"], props["comment_outdated"]) == ("positive", True)
+        assert "Fixed in abc123" not in str(props)
+
     def test_event_carries_join_keys_and_finding_metadata(self):
         captured, _judge = self._run(inputs=self._inputs(comment=None, compare_files=_FAR))
         event = captured[0]
@@ -492,6 +546,35 @@ class TestClassifyReportDecision:
         assert props["source_perspective"] == "logic"
         assert props["reviewed_head"] == "base_sha"
         assert props["final_head"] == "head_sha"
+
+
+@pytest.mark.django_db
+def test_our_reaction_is_ignored_when_the_app_login_is_not_cached() -> None:
+    _clear_instance_setting_cache()
+    comment = {"id": 1, "path": "f.py", "body": "### Off-by-one\n\nbody", "reactions": {"total_count": 1}}
+    inputs = _ReportInputs(
+        compares={"base_sha": _FAR},
+        review_comments=[comment],
+        reactions_by_comment={1: [{"user": {"login": "reviewhog[bot]", "type": "Bot"}, "content": "eyes"}]},
+        published=[
+            _PublishedFinding(finding=_finding(), verdict=_verdict(), comment=comment, reviewed_head="base_sha")
+        ],
+        distinct_id="user-distinct",
+        judge_user_id=0,
+    )
+    captured: list[dict[str, Any]] = []
+    with (
+        patch(f"{_CLASSIFY}._gather_report_inputs", return_value=inputs),
+        patch(f"{_CLASSIFY}._persist_outcomes"),
+        patch(f"{_CLASSIFY}._mark_outcomes_emitted"),
+    ):
+        async_to_sync(classify_report)(
+            team_id=1,
+            report=ReviewReport(repository="o/r", pr_number=7),
+            final_head="head_sha",
+            capture=lambda **kw: captured.append(kw),
+        )
+    assert captured[0]["properties"]["outcome"] == "ignored"
 
 
 class TestGatherAndIdempotency(BaseTest):
@@ -524,11 +607,13 @@ class TestGatherAndIdempotency(BaseTest):
 
     def test_gather_selects_published_finding_pairs_its_comment_and_resolves_distinct_id(self):
         report = self._report()
-        comment = {"id": 1, "path": "f.py", "body": "### Off-by-one\n\nbody", "reactions": {"total_count": 0}}
+        comment = {"id": 1, "path": "f.py", "body": "### Off-by-one\n\nbody", "reactions": {"total_count": 1}}
+        reactions = [{"user": {"login": "alice", "type": "User"}, "content": "+1"}]
         with (
             patch(f"{_CLASSIFY}._installation_auth", return_value=("tok", "inst")),
             patch(f"{_CLASSIFY}.fetch_compare_files", return_value=_FAR),
             patch(f"{_CLASSIFY}.fetch_review_comments", return_value=[comment]),
+            patch(f"{_CLASSIFY}.fetch_comment_reactions", return_value=reactions),
         ):
             inputs = _gather_report_inputs(team_id=self.team.id, report=report, final_head="head_sha")
 
@@ -536,6 +621,7 @@ class TestGatherAndIdempotency(BaseTest):
         assert inputs.published[0].reviewed_head == "base_sha"
         assert [pf.finding.issue_key for pf in inputs.published] == [_ISSUE_KEY]
         assert inputs.published[0].comment == comment  # the finding was paired with its posted comment
+        assert inputs.reactions_by_comment == {1: reactions}
         assert inputs.distinct_id == self.user.distinct_id
 
     def test_each_turn_is_compared_from_the_head_it_published_at(self):
@@ -728,6 +814,9 @@ class TestGatherAndIdempotency(BaseTest):
                 method="comment_reply",
                 reviewed_head="base_sha",
                 final_head="head_sha",
+                reaction_sentiment="negative",
+                reply_excerpt="Leaving this as is",
+                comment_outdated=False,
             ),
             attribution=ArtefactAttribution.system(),
         )
@@ -738,5 +827,8 @@ class TestGatherAndIdempotency(BaseTest):
         [outcome] = outcomes
         assert (outcome.outcome, outcome.method) == ("reacted", "comment_reply")
         assert (outcome.reviewed_head, outcome.final_head) == ("base_sha", "head_sha")
+        assert outcome.signals == _CommentSignals(
+            reaction_sentiment="negative", reply_excerpt="Leaving this as is", outdated=False
+        )
         assert outcome.finding.issue_key == _ISSUE_KEY
         assert outcome.verdict.category == "bug"

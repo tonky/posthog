@@ -56,12 +56,13 @@ pipeline: components: {
 		workspace_scope: include: [
 			".github/workflows", ".github/actions", ".depot/actions", "proto", "rust", "nodejs",
 			"docs/onboarding/package.json", "frontend/@posthog/lemon-ui/package.json",
+			"frontend/src/toolbar/extension/release/package.json", "hog/package.json",
 			"packages/llm-normalizer/package.json", "packages/quill/package.json",
 			"packages/quill/apps/storybook/package.json", "packages/quill/packages/blocks/package.json",
 			"packages/quill/packages/charts/package.json", "packages/quill/packages/components/package.json",
 			"packages/quill/packages/primitives/package.json", "packages/quill/packages/quill/package.json",
 			"packages/quill/packages/tokens/package.json", "playwright/package.json",
-			"services/agent-proxy/package.json", "services/integration-service/package.json",
+			"services/agent-proxy/package.json", "services/credentials-service/package.json",
 			"services/oauth-proxy/package.json", "services/stripe-app/package.json",
 			"tools/dagster_test_selection.py", "tools/openapi-codegen/package.json",
 			"tools/query-performance-ai/query_performance_ai/sandboxed_autoresearch_agent/pi_plugin/package.json",
@@ -86,17 +87,23 @@ pipeline: components: {
 		record_resources: _recordPy
 		recorded_by:      ["enact-node"]
 		target_scope: {
-			incidental_reads: ["posthog/**", "products/**", "ee/**", "common/**"]
+			incidental_reads: ["posthog/**", "products/**", "ee/**", "common/**", "services/llm-gateway/**", "services/stripe-mock/**", "tools/*/**"]
 			tests: [
 				".github/scripts/**/test_*.py",
 				".github/scripts/**/*.test.{js,mjs}",
 				"tools/test_snob_backend_test_selection_shadow.py",
 				"tools/test_test_selection_verdict.py",
 			]
-			not_run: [{
-				tests:  [".github/scripts/*/**/*"]
-				reason: "ci-scripts.yml runs the top-level files only (`.github/scripts/test_*.py`, `*.test.js`, `*.test.mjs`); desktop-ci.yml runs none of desktop/'s tests"
-			}]
+			not_run: [
+				{
+					tests:  [".github/scripts/*/**/*"]
+					reason: "ci-scripts.yml runs the top-level files only (`.github/scripts/test_*.py`, `*.test.js`, `*.test.mjs`); desktop-ci.yml runs none of desktop/'s tests"
+				},
+				{
+					tests:  [".github/scripts/ordered-image-alias-alerts.test.js"]
+					reason: "asserts upstream .github/workflows/container-images-cd.yml via yq, which the showcase overlay removes"
+				},
+			]
 		}
 	}
 	"owners_yaml": {
@@ -260,7 +267,7 @@ pipeline: components: {
 						inputs:  ["pyproject.toml", "rust/deltalite/python/pyproject.toml", "rust/deltalite/python/Cargo.toml"]
 						outputs: ["rust/deltalite/python/.venv"]
 					}
-					command: "showcase/scripts/build_once.sh deltalite-venv rust/deltalite/python/.venv/.enact-build-key pyproject.toml rust/deltalite/python/pyproject.toml rust/deltalite/python/Cargo.toml -- bash -c 'uv venv --clear rust/deltalite/python/.venv --python \"$(command -v python3)\" && pin() { grep -oE \"\\\"${1}[^\\\"]*\\\"\" pyproject.toml | tr -d \"\\\"\" | head -1; } && VIRTUAL_ENV=$PWD/rust/deltalite/python/.venv uv pip install pytest \"$(pin \"deltalake\\[pyarrow\\]==\")\" \"$(pin \"pyarrow==\")\" \"$(pin \"duckdb~=\")\" \"$(pin \"deltalite==\")\"'"
+					command: "showcase/scripts/build_once.sh deltalite-venv rust/deltalite/python/.venv/.enact-build-key pyproject.toml rust/deltalite/python/pyproject.toml rust/deltalite/python/Cargo.toml -- bash -c 'uv venv --clear rust/deltalite/python/.venv --python \"$(command -v python3)\" && pin() { grep -oE \"\\\"${1}[^\\\"]*\\\"\" pyproject.toml | tr -d \"\\\"\" | head -1; } && VIRTUAL_ENV=$PWD/rust/deltalite/python/.venv uv pip install pytest \"$(pin \"deltalake\\[pyarrow\\]==\")\" \"$(pin \"pyarrow==\")\" \"$(pin \"duckdb~=\")\" ./rust/deltalite/python'"
 				},
 				{name: "Run Tests", command: "VIRTUAL_ENV=$PWD/.venv uv run --no-sync --active python -m pytest {relative_targets} -q"},
 			]
@@ -289,10 +296,6 @@ pipeline: components: {
 		name: "oauth_proxy", title: "OAuth proxy", root: "services/oauth-proxy"
 		typecheck: "pnpm typecheck"
 	}
-	"integration_service": _tsVitest & {
-		name: "integration_service", title: "Integration service", root: "services/integration-service"
-		fmt: "pnpm run format:check", lint: "pnpm exec oxlint --quiet src tests", typecheck: "pnpm run typecheck", build: "pnpm run build"
-	}
 	"stripe_app": {
 		name: "stripe_app", title: "Stripe app", technology: "typescript"
 		root: "services/stripe-app", depends_on: ["js-root"]
@@ -300,11 +303,6 @@ pipeline: components: {
 	"openapi_codegen": _tsVitest & {
 		name: "openapi_codegen", title: "OpenAPI code generator", root: "tools/openapi-codegen"
 		target_scope: tests: ["tools/openapi-codegen/tests/**/*.test.mjs"]
-	}
-	"hogql_language_service": _goModule & {
-		name:      "hogql_language_service", title: "HogQL language service", root: "services/hogql-language-service"
-		resources: {cpus: 4, memory_mb: 1024}
-		test:      "if [ \"${ENACT_RECORD:-off}\" = \"off\" ]; then export HOGQL_LANGUAGE_SERVICE_ENFORCE_LATENCY_BUDGET=1; fi && (../../showcase/scripts/run_go_tests.sh {targets} || ../../showcase/scripts/run_go_tests.sh {targets})"
 	}
 	"phrocs": _goModule & {
 		name: "phrocs", title: "phrocs process runner", root: "tools/phrocs"
@@ -344,6 +342,40 @@ pipeline: components: {
 	"traffic_sim": {
 		name: "traffic_sim", title: "Traffic simulator", technology: "python"
 		root: "tools/traffic-sim", depends_on: ["root"]
+	}
+	"mobile": {
+		name: "mobile", title: "PostHog Mobile", technology: "typescript"
+		root: "products/mobile", depends_on: ["js-root"]
+		workspace_scope: include: [
+			"products/posthog_ai/frontend/generated",
+			"products/error_tracking/frontend/generated",
+			"products/signals/frontend/generated",
+		]
+	}
+	"hog_cli": {
+		name: "hog_cli", title: "Hog CLI package", technology: "typescript"
+		root: "hog", depends_on: ["js-root"]
+	}
+	"credentials_service": {
+		name: "credentials_service", title: "Credentials service", technology: "python"
+		root: "services/credentials-service", depends_on: ["py-root"]
+	}
+	"tasks_egress_proxy": {
+		name: "tasks_egress_proxy", title: "Tasks egress proxy", technology: "go"
+		root: "products/tasks/services/egress-proxy", depends_on: ["root"]
+	}
+	"change_prover": {
+		name: "change_prover", title: "Change prover", technology: "python"
+		root: "tools/change-prover", depends_on: ["root"]
+	}
+	"deploy_requirements": {
+		name: "deploy_requirements", title: "Deploy requirements", technology: "python"
+		root: "tools/deploy-requirements", depends_on: ["py-root"]
+		workspace_scope: include: ["rust/bin/write-deploy-requirements"]
+	}
+	"herdr_devbox_plugin": {
+		name: "herdr_devbox_plugin", title: "Herdr devbox plugin", technology: "go"
+		root: "tools/herdr-devbox-plugin", depends_on: ["root"]
 	}
 	"mcp_integration_harness": _harness & {
 		name: "mcp_integration_harness", title: "MCP integration runner", technology: ["python", "typescript"]
@@ -397,6 +429,10 @@ pipeline: components: {
 				target_scope: {
 					fallback: "all"
 					tests:    ["services/mcp/tests/**/*.integration.test.ts"]
+					not_run: [{
+						tests:  ["services/mcp/tests/tools/featureFlags.integration.test.ts"]
+						reason: "O1 pin cb94c35517cf: /test_evaluation/ returns 503 without live feature-flags Rust service in mcp_integration harness; revisit on next pin bump (usecases/posthog/LEARNINGS.md)"
+					}]
 					rules: [
 						{match: ["posthog/dags/**", "products/*/dags/**", "frontend/snapshots.yml", "playwright/snapshots.yml"], action: "ignore"},
 						{

@@ -45,6 +45,7 @@ from posthog.models.scoping.manager import resolve_effective_team_id
 from posthog.models.team.team import Team
 from posthog.models.utils import uuid7
 
+from products.signals.backend.constants import SYSTEM_SCOUT_NAMES
 from products.signals.backend.models import (
     SignalReportAction,
     SignalScoutConfig,
@@ -52,7 +53,9 @@ from products.signals.backend.models import (
     SignalSourceConfig,
 )
 from products.signals.backend.scout_harness.lazy_seed import CanonicalSkillParseError, discover_canonical_skills
+from products.signals.backend.scout_harness.operational import operational_config_q
 from products.signals.backend.scout_harness.prompt import SCOUT_PROJECT_SCAN_GUIDANCE
+from products.signals.backend.scout_harness.skill_loader import SIGNALS_SCOUT_SKILL_PREFIX
 from products.signals.backend.scout_harness.team_limits import read_flag_payload, withheld_skills_for_team
 from products.skills.backend.marketplace.packaging import SPEC_DESCRIPTION_MAX_LENGTH
 from products.skills.backend.models.skills import LLMSkill
@@ -76,12 +79,18 @@ MAX_DESCRIPTION_CHARS = SPEC_DESCRIPTION_MAX_LENGTH
 # Resolves a suggestion run to the `signals_scout_suggestions` gateway product.
 SUGGESTIONS_AI_STAGE = "scout_suggestions"
 
-# Row cap on the per-candidate activity read, so the check stays cheap on a large project. The
-# read refuses at the cap rather than truncating: the cap counts rows read while the query counts
-# the rows that pass the window filter, so a truncated read would come back as a small count that
-# reads like a quiet project. A project whose window does not fit the cap is active whatever the
-# refusal hid, and only a read that finishes has numbers — the small projects the check is about.
+# High bound for `min_events_in_window`. An event line above it would ask the check to tell
+# apart projects that the read cannot answer for anyway.
 ACTIVITY_READ_MAX_ROWS = 100_000
+
+# ClickHouse `max_rows_to_read` guard on the per-candidate activity read, so the check stays cheap
+# on a large project. The guard counts rows read, not rows that pass the filter. ClickHouse reads
+# whole granules (up to 8,192 rows), and a quiet project's 14-day window touches about one granule
+# in each of 60 to 100 parts, which other teams' rows mostly fill. So a quiet project reads several
+# hundred thousand rows to count a few dozen events, and the guard must sit well above that. The
+# read refuses at the guard rather than truncating, because a truncated count reads like a quiet
+# project. A project that trips the guard is active, and only a read that finishes has numbers.
+ACTIVITY_READ_MAX_ROWS_READ = 5_000_000
 
 # Wall-clock cap on the same read. `sync_execute` adds none of its own and the pooled client's
 # socket timeout is effectively infinite in production, so a stalled read would hold its worker
@@ -292,12 +301,15 @@ def set_up_team_q() -> Q:
 
     Source configs are environment-scoped, so a project whose Signals setup lives in a child
     environment counts through that child's parent; scout configs already canonicalize.
-    A background-managed scout is not set up: nobody on the project turned it on.
+    A background-managed scout or an operational scout is not set up: nobody on the project turned
+    it on. The first inbox visit seeds the operational scouts enabled, so counting them would drop a
+    background-only project out of the background bands the night after that visit.
     """
     source_teams = SignalSourceConfig.objects.filter(enabled=True).values("team_id")
     user_scout_teams = (
         SignalScoutConfig.all_teams.filter(enabled=True)
         .exclude(managed_by=SignalScoutConfig.ManagedBy.BACKGROUND)
+        .exclude(operational_config_q())
         .values("team_id")
     )
     return (
@@ -536,7 +548,7 @@ def stamp_requested(team_ids: list[int], now: datetime | None = None) -> None:
 LOW_ACTIVITY_SKIP_REASON = "low_activity"
 
 # TOO_MANY_ROWS / TOO_MANY_ROWS_OR_BYTES: what `read_overflow_mode: throw` raises at
-# `ACTIVITY_READ_MAX_ROWS`. Any other failure belongs to the caller's dispatch-anyway path.
+# `ACTIVITY_READ_MAX_ROWS_READ`. Any other failure belongs to the caller's dispatch-anyway path.
 _READ_CAP_ERROR_CODES = (158, 396)
 
 
@@ -546,7 +558,7 @@ class TeamActivity:
 
     event_count: int
     active_days: int
-    # The read refused at `ACTIVITY_READ_MAX_ROWS` rather than answer with a truncated count, so
+    # The read refused at `ACTIVITY_READ_MAX_ROWS_READ` rather than answer with a truncated count, so
     # the two fields above hold nothing the check may read.
     capped: bool
 
@@ -555,6 +567,11 @@ class TeamActivity:
 class ActivitySelection:
     dispatch: tuple[PlannedSuggestionRun, ...]
     skipped_team_ids: tuple[int, ...]
+    # How each activity read ended. A capped read and an answered read look the same downstream,
+    # so these counts are the only place a guard that trips on quiet projects shows.
+    reads_answered: int = 0
+    reads_capped: int = 0
+    reads_failed: int = 0
 
 
 def activity_check_enabled(settings: SuggestionSettings) -> bool:
@@ -590,7 +607,7 @@ def read_team_activity(team_id: int, *, window_days: int) -> TeamActivity:
             # candidate after another, and the per-tick cap is flag-tunable.
             workload=Workload.OFFLINE,
             settings={
-                "max_rows_to_read": ACTIVITY_READ_MAX_ROWS,
+                "max_rows_to_read": ACTIVITY_READ_MAX_ROWS_READ,
                 "read_overflow_mode": "throw",
                 "max_execution_time": ACTIVITY_READ_MAX_EXECUTION_S,
                 # Both overflow modes throw for the same reason: a partial aggregate reads as a
@@ -635,6 +652,7 @@ def select_teams_to_scan(
     exempt = canonical_team_ids(settings.team_allowlist)
     dispatch: list[PlannedSuggestionRun] = []
     skipped: list[int] = []
+    answered = capped = failed = 0
     for run in candidates:
         if len(dispatch) >= limit:
             break
@@ -646,14 +664,25 @@ def select_teams_to_scan(
         except Exception:
             # A read that cannot answer must not cost the project its refresh window.
             logger.warning("scout_suggestions: activity read failed", team_id=run.team_id, exc_info=True)
+            failed += 1
             dispatch.append(run)
             continue
+        if activity.capped:
+            capped += 1
+        else:
+            answered += 1
         if team_is_active_enough(activity, settings):
             dispatch.append(run)
             continue
         skipped.append(run.team_id)
         _record_low_activity(run.team_id, activity=activity, settings=settings, tier=run.tier)
-    return ActivitySelection(dispatch=tuple(dispatch), skipped_team_ids=tuple(skipped))
+    return ActivitySelection(
+        dispatch=tuple(dispatch),
+        skipped_team_ids=tuple(skipped),
+        reads_answered=answered,
+        reads_capped=capped,
+        reads_failed=failed,
+    )
 
 
 def _skip_event_uuid(team_id: int, *, requested_at: datetime | None) -> str:
@@ -746,7 +775,12 @@ class FleetContext:
 
 def enabled_skill_names(team_id: int) -> list[str]:
     """The project's enabled scout skill names, sorted, as `fleet_snapshot` stores them."""
-    return sorted(SignalScoutConfig.objects.for_team(team_id).filter(enabled=True).values_list("skill_name", flat=True))
+    return sorted(
+        SignalScoutConfig.objects.for_team(team_id)
+        .filter(enabled=True)
+        .exclude(skill_name__in=SYSTEM_SCOUT_NAMES)
+        .values_list("skill_name", flat=True)
+    )
 
 
 def reserved_scout_names(team_id: int) -> frozenset[str]:
@@ -775,14 +809,30 @@ def fleet_context(team_id: int) -> FleetContext:
     enabled_set = set(enabled)
     # A held-back canonical scout is not seeded by the sync path and the config API refuses to
     # enable it, so offering it would surface an unreleased scout behind a Create that must fail.
-    withheld = withheld_skills_for_team(resolve_effective_team_id(team_id))
+    withheld = withheld_skills_for_team(resolve_effective_team_id(team_id)) | SYSTEM_SCOUT_NAMES
+    # Companion helper skills ship in the same manifest but never get a scout config, so Create
+    # could never apply them. The parser pins the scout prefix to scouts only.
     available = tuple(
         (skill.name, skill.description)
         for skill in canonical
-        if skill.name not in enabled_set and skill.name not in withheld
+        if skill.name.startswith(SIGNALS_SCOUT_SKILL_PREFIX)
+        and skill.name not in enabled_set
+        and skill.name not in withheld
     )
     return FleetContext(
         enabled_skill_names=enabled, available_canonical=available, reserved_names=reserved_scout_names(team_id)
+    )
+
+
+def local_skill_guidance(skill_name: str) -> str:
+    """Where a cloud task reads a built-in PostHog skill. Built-in skills are installed in the
+    sandbox, not stored as rows in the team's skills store, so `skill-get` answers 404 for them
+    on any project that has not been seeded with them."""
+    return (
+        f"{skill_name} is a built-in PostHog skill installed in this sandbox as a local skill: pick it from "
+        f"your available skills, or read its `SKILL.md` from the installed skills directory. It is not a row in "
+        f"this project's skills store, so do not fetch it with `skill-get`: a 404 from `skill-get` for it is "
+        f"expected and does not mean the skill is unavailable."
     )
 
 
@@ -794,7 +844,7 @@ def build_suggestions_prompt(fleet: FleetContext) -> str:
     )
     return f"""You are preparing the "Suggested for this project" list for the PostHog scouts tab. Nobody is in the chat with you: work headlessly and end your turn with the JSON object described at the bottom.
 
-First, {SCOUT_PROJECT_SCAN_GUIDANCE} Use the read-data, insight, dashboard, and signals-scout MCP tools (config list for the fleet, recent runs and reports for what the scouts already surface). Read the authoring-scouts skill from the PostHog MCP (`skill-get`) before drafting any custom scout; if it is unavailable, write the draft in the same shape as the canonical scout bodies.
+First, {SCOUT_PROJECT_SCAN_GUIDANCE} Use the read-data, insight, dashboard, and signals-scout MCP tools (config list for the fleet, recent runs and reports for what the scouts already surface). Read the authoring-scouts skill before drafting any custom scout. {local_skill_guidance("authoring-scouts")} The canonical `signals-scout-*` skills are installed the same way, so read a local copy when you want an example scout body. Only if no local copy of authoring-scouts is installed, write the draft to cover the sections the custom draft rule below lists.
 
 Scouts currently enabled on this project:
 {enabled_lines}
@@ -975,7 +1025,8 @@ def visible_items(
     normal config API disappears without waiting for `mark_suggestion_created`, and its reserved
     names so a custom draft whose name was since taken (a stored skill or a disabled config, which
     Create answers with 409) is hidden too. Canonical items ignore `reserved_names` — a disabled
-    canonical scout is exactly what those items offer to enable."""
+    canonical scout is exactly what those items offer to enable. A canonical item that names a
+    companion skill is hidden, because no scout config exists for Create to enable."""
     enabled = set(enabled_skill_names)
     reserved = set(reserved_names)
     return [
@@ -986,6 +1037,10 @@ def visible_items(
         and not record.get("created_config_id")
         and record.get("skill_name") not in enabled
         and not (record.get("kind") == "custom" and record.get("skill_name") in reserved)
+        and not (
+            record.get("kind") == "canonical"
+            and not str(record.get("skill_name") or "").startswith(SIGNALS_SCOUT_SKILL_PREFIX)
+        )
     ]
 
 
@@ -1068,6 +1123,7 @@ def mark_stale_if_fleet_changed(team_id: int) -> None:
 
 __all__ = [
     "ACTIVITY_READ_MAX_ROWS",
+    "ACTIVITY_READ_MAX_ROWS_READ",
     "LOW_ACTIVITY_SKIP_REASON",
     "MAX_SUGGESTIONS_PER_BATCH",
     "SIGNALS_SCOUT_SUGGESTIONS_FLAG",

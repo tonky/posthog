@@ -1,3 +1,5 @@
+from collections.abc import Callable
+
 import pytest
 from posthog.test.base import BaseTest
 from unittest.mock import patch
@@ -5,6 +7,7 @@ from unittest.mock import patch
 from clickhouse_driver.errors import ServerException
 from parameterized import parameterized
 
+from posthog.hogql.context import HogQLContext
 from posthog.hogql.database.direct_clickhouse_table import DirectClickHouseTable
 from posthog.hogql.database.direct_mysql_table import DirectMySQLTable
 from posthog.hogql.database.direct_postgres_table import DirectPostgresTable
@@ -16,7 +19,9 @@ from posthog.hogql.database.models import (
     StructDatabaseField,
 )
 from posthog.hogql.database.s3_table import DataWarehouseTable as HogQLDataWarehouseTable
-from posthog.hogql.errors import QueryError
+from posthog.hogql.errors import ExposedHogQLError, QueryError
+
+from posthog.models import Organization, Team
 
 from products.data_warehouse.backend.direct_mysql import DIRECT_MYSQL_SCHEMA_OPTION, DIRECT_MYSQL_TABLE_OPTION
 from products.data_warehouse.backend.direct_postgres import (
@@ -403,6 +408,44 @@ class TestTable(BaseTest):
             columns = table.get_columns()
             assert columns == {"id": {"clickhouse": "Int64", "hogql": "IntegerDatabaseField", "valid": True}}
 
+    @parameterized.expand(
+        [
+            ("get_columns", lambda table: table.get_columns()),
+            ("get_count", lambda table: table.get_count()),
+            ("get_max_value_for_column", lambda table: table.get_max_value_for_column("id")),
+            ("get_function_call", lambda table: table.get_function_call()),
+            (
+                "hogql_definition",
+                lambda table: table.hogql_definition().to_printed_clickhouse(HogQLContext(team_id=table.team_id)),
+            ),
+        ]
+    )
+    def test_a_credential_of_another_team_is_never_used(
+        self, _name: str, read: Callable[[DataWarehouseTable], object]
+    ) -> None:
+        other_team = Team.objects.create(organization=Organization.objects.create(name="other_org"))
+        credential = DataWarehouseCredential.objects.create(
+            access_key="other_key", access_secret="other_secret", team=other_team
+        )
+        created = DataWarehouseTable.objects.create(
+            name="test_table",
+            url_pattern="https://bucket.s3.amazonaws.com/data/*.parquet",
+            credential=credential,
+            format="Parquet",
+            team=self.team,
+            columns={"id": {"clickhouse": "Int64", "hogql": "IntegerDatabaseField", "valid": True}},
+        )
+        table = DataWarehouseTable.objects.get(pk=created.pk)
+
+        with patch("products.warehouse_sources.backend.models.table.sync_execute") as sync_execute:
+            try:
+                result = read(table)
+            except ExposedHogQLError:
+                result = None
+
+        assert result is None
+        sync_execute.assert_not_called()
+
     def test_get_columns_with_nullable(self):
         credential = DataWarehouseCredential.objects.create(access_key="key", access_secret="secret", team=self.team)
         table = DataWarehouseTable.objects.create(
@@ -628,6 +671,47 @@ class TestTable(BaseTest):
                 IntegerDatabaseField(name="offset", nullable=False),
             ],
         )
+
+    @parameterized.expand(
+        [
+            ("history_table", {"history_table": True}, {"id", "_ph_deleted", "valid_from", "valid_to"}),
+            (
+                "consolidated_table_whose_source_has_validity_columns",
+                {},
+                {
+                    "id",
+                    "_ph_deleted",
+                    "valid_from",
+                    "valid_to",
+                    "_ph_cdc_op",
+                    "_ph_cdc_seq",
+                    "_ph_cdc_timestamp",
+                    "_ph_deleted_at",
+                },
+            ),
+        ]
+    )
+    def test_history_table_hides_capture_bookkeeping_columns(
+        self, _name: str, options: dict, expected_visible: set[str]
+    ):
+        capture_columns = ["_ph_cdc_op", "_ph_cdc_seq", "_ph_cdc_timestamp", "_ph_deleted", "_ph_deleted_at"]
+        table = DataWarehouseTable.objects.create(
+            name="orders",
+            url_pattern="https://bucket.s3.amazonaws.com/orders",
+            format=DataWarehouseTable.TableFormat.DeltaS3Wrapper,
+            team=self.team,
+            options=options,
+            columns={
+                name: {"clickhouse": "String", "hogql": "StringDatabaseField"}
+                for name in ["id", *capture_columns, "valid_from", "valid_to"]
+            },
+        )
+
+        fields = table.hogql_definition().fields
+        assert {name for name, field in fields.items() if not field.hidden} == expected_visible
+        assert {column["name"] for column in table.get_user_facing_columns()} == expected_visible
+        # A hidden column must still resolve, so a query saved before it was hidden keeps running.
+        assert set(capture_columns) <= set(fields)
 
     def test_hogql_definition_new_style(self):
         credential = DataWarehouseCredential.objects.create(access_key="test", access_secret="test", team=self.team)
@@ -931,7 +1015,7 @@ class TestTable(BaseTest):
             (
                 "Cannot extract table structure from CSV format file, because there are no files with "
                 "provided path in S3 or all files are empty",
-                "doesn't exist in the bucket",
+                "No files match your Files URL pattern",
             ),
             ("Cannot extract table structure: the file is empty", "contains no data"),
         ]
@@ -956,7 +1040,33 @@ class TestTable(BaseTest):
             with pytest.raises(Exception, match=expected):
                 table._validate_csv_double_quotes_setting()
 
-    def test_validate_csv_double_quotes_reraises_a_non_parse_error(self):
+    @parameterized.expand(
+        [
+            ("rfc_4180_parses", [None], True),
+            ("literal_quotes_parses", ["parse_error", None], False),
+            ("neither_parses", ["parse_error", "parse_error"], None),
+        ]
+    )
+    def test_detect_csv_double_quotes_setting(self, _name, outcomes, expected):
+        from clickhouse_driver.errors import ServerException
+
+        credential = DataWarehouseCredential.objects.create(access_key="key", access_secret="secret", team=self.team)
+        table = DataWarehouseTable.objects.create(
+            name="test_csv",
+            url_pattern="https://example.com/test.csv",
+            credential=credential,
+            format=DataWarehouseTable.TableFormat.CSVWithNames,
+            team=self.team,
+        )
+        side_effect = [
+            ServerException("Expected end of line", code=117) if outcome == "parse_error" else outcome
+            for outcome in outcomes
+        ]
+
+        with patch("products.warehouse_sources.backend.models.table.sync_execute", side_effect=side_effect):
+            assert table.detect_csv_double_quotes_setting() is expected
+
+    def test_validate_csv_double_quotes_hides_the_raw_error_for_a_non_parse_failure(self):
         from clickhouse_driver.errors import ServerException
 
         credential = DataWarehouseCredential.objects.create(access_key="key", access_secret="secret", team=self.team)
@@ -971,10 +1081,18 @@ class TestTable(BaseTest):
 
         with patch(
             "products.warehouse_sources.backend.models.table.sync_execute",
-            side_effect=ServerException("Access Denied", code=499),
+            side_effect=ServerException(
+                "S3 error occurred. (DB::Exception: Failed to get object info: No response body.. "
+                "HTTP response code: 403: while reading 'exports/test.csv')",
+                code=499,
+            ),
         ):
-            with pytest.raises(ServerException):
+            with pytest.raises(Exception) as exc_info:
                 table._validate_csv_double_quotes_setting()
+
+        assert not isinstance(exc_info.value, ServerException)
+        assert "s3:GetObject" in str(exc_info.value)
+        assert "exports/test.csv" not in str(exc_info.value)
 
     @parameterized.expand(
         [
@@ -1049,7 +1167,7 @@ class TestTable(BaseTest):
         assert definition.top_level_settings is not None
         assert definition.top_level_settings.format_csv_allow_double_quotes is True
 
-    def test_hogql_definition_sets_false_for_csv_with_none(self):
+    def test_hogql_definition_sends_no_quote_setting_for_csv_with_none(self):
         credential = DataWarehouseCredential.objects.create(access_key="test", access_secret="test", team=self.team)
         with patch("products.warehouse_sources.backend.models.table.sync_execute", return_value=[]):
             table = DataWarehouseTable.objects.create(
@@ -1060,13 +1178,11 @@ class TestTable(BaseTest):
                 columns={"id": {"clickhouse": "String", "hogql": "StringDatabaseField"}},
                 credential=credential,
             )
-        # Simulate detection having returned None (both failed)
         table.options.pop("csv_allow_double_quotes", None)
         table.save_base(raw=True)
 
         definition = table.hogql_definition()
-        assert definition.top_level_settings is not None
-        assert definition.top_level_settings.format_csv_allow_double_quotes is False
+        assert definition.top_level_settings is None
 
     def test_hogql_definition_reads_a_json_column_as_the_json_type(self):
         credential = DataWarehouseCredential.objects.create(access_key="test", access_secret="test", team=self.team)
@@ -1190,7 +1306,13 @@ class TestTable(BaseTest):
                 "empty_csv",
                 "Cannot extract table structure from CSV format file, because there are no files with provided path in S3 or all files are empty",
                 499,
-                "The provided file doesn't exist in the bucket",
+                "No files match your Files URL pattern",
+            ),
+            (
+                "empty_csv_with_names",
+                "Cannot extract table structure from CSVWithNames format file, because there are no files with provided path in S3 or all files are empty",
+                499,
+                "No files match your Files URL pattern",
             ),
             (
                 "corrupted_parquet_thrift",

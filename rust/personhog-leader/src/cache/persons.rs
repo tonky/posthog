@@ -1,29 +1,19 @@
+use std::collections::HashSet;
 use std::hash::Hash;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 
 use foyer::{Cache, CacheBuilder, Event, EventListener};
 use metrics::counter;
 use personhog_proto::personhog::types::v1::Person;
+
+use super::codec::PropertiesCodec;
+use super::stored::StoredPerson;
 
 /// Key for person cache lookups: (team_id, person_id).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct PersonCacheKey {
     pub team_id: i64,
     pub person_id: i64,
-}
-
-/// Fixed per-entry overhead charged on top of the stored properties
-/// bytes: the struct's scalar fields, the uuid, the key, and foyer's
-/// record bookkeeping.
-const PERSON_ENTRY_OVERHEAD_BYTES: usize = 256;
-
-/// The weight an entry contributes to the cache's byte capacity. The
-/// cache stores properties in serialized form, so this is the real
-/// allocation, not an estimate: entries held as parsed JSON trees cost
-/// a small multiple of their serialized size, and weighing those by
-/// serialized length let a "16MiB" cache hold ~2.7x that in heap.
-pub fn approx_person_bytes(properties_serialized_len: usize) -> usize {
-    PERSON_ENTRY_OVERHEAD_BYTES + properties_serialized_len
 }
 
 /// Cached person state, with properties held in serialized JSON form.
@@ -53,10 +43,6 @@ pub struct CachedPerson {
     /// known (matching `created_at`'s unit). Max-merged on update — the
     /// value only ever advances — and deliberately not a change by itself.
     pub last_seen_at: Option<i64>,
-    /// Byte weight charged against the cache capacity; see
-    /// [`approx_person_bytes`].
-    pub approx_bytes: usize,
-    // TODO: Add properties_last_updated_at and properties_last_operation
 }
 
 impl CachedPerson {
@@ -68,6 +54,12 @@ impl CachedPerson {
             return Ok(serde_json::Value::Object(serde_json::Map::new()));
         }
         serde_json::from_slice(&self.properties)
+    }
+
+    /// Identity creates and revives a person with no properties, and the
+    /// first write through the leader sets them.
+    pub fn has_no_properties(&self) -> bool {
+        self.properties.is_empty() || self.properties == b"{}"
     }
 }
 
@@ -81,7 +73,6 @@ impl TryFrom<Person> for CachedPerson {
         if !person.properties.is_empty() {
             serde_json::from_slice::<serde::de::IgnoredAny>(&person.properties)?;
         }
-        let approx_bytes = approx_person_bytes(person.properties.len());
         Ok(Self {
             id: person.id,
             uuid: person.uuid,
@@ -92,9 +83,14 @@ impl TryFrom<Person> for CachedPerson {
             is_identified: person.is_identified,
             is_deleted: person.is_deleted,
             last_seen_at: person.last_seen_at,
-            approx_bytes,
         })
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct CachedVersion {
+    pub version: i64,
+    pub is_deleted: bool,
 }
 
 /// Counts entries leaving the cache, by reason. Evictions are the
@@ -106,7 +102,7 @@ struct CacheEventMetrics;
 
 impl EventListener for CacheEventMetrics {
     type Key = PersonCacheKey;
-    type Value = Arc<CachedPerson>;
+    type Value = StoredPerson;
 
     fn on_leave(&self, reason: Event, _key: &Self::Key, _value: &Self::Value) {
         let reason = match reason {
@@ -131,52 +127,154 @@ impl EventListener for CacheEventMetrics {
 /// A hybrid (disk+memory) tier remains a possible capacity optimization
 /// by switching to `HybridCache`.
 pub struct PersonCache {
-    inner: Cache<PersonCacheKey, Arc<CachedPerson>>,
+    inner: Cache<PersonCacheKey, StoredPerson>,
+    codec: Arc<PropertiesCodec>,
+    capacity_bytes: usize,
+    /// Present while a fill is pending.
+    put_keys: Mutex<Option<PutTracking>>,
+}
+
+/// Every key put since a pending fill's warm build began.
+struct PutTracking {
+    keys: HashSet<PersonCacheKey>,
+    /// Tracking stops past this many keys, which ends the fill.
+    max_keys: usize,
+}
+
+/// What became of a record a fill offered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FillOutcome {
+    Inserted,
+    /// The key was already put, or the record is a death document, which claims its key.
+    Skipped,
+    /// No fill is pending for this cache.
+    NotTracking,
 }
 
 impl PersonCache {
     /// `capacity_bytes` bounds the cache by the entries' byte weights
-    /// (see [`approx_person_bytes`]), not their count — person documents
+    /// (see `StoredPerson::weight`), not their count. Person documents
     /// vary by orders of magnitude and grow in place across writes, so
     /// an entry-count bound cannot bound memory.
-    pub fn new(capacity_bytes: usize) -> Self {
+    pub(super) fn new(capacity_bytes: usize, codec: Arc<PropertiesCodec>) -> Self {
         let cache = CacheBuilder::new(capacity_bytes)
-            .with_weighter(|_key: &PersonCacheKey, value: &Arc<CachedPerson>| value.approx_bytes)
+            .with_weighter(|_key: &PersonCacheKey, value: &StoredPerson| value.weight())
             .with_event_listener(Arc::new(CacheEventMetrics))
             .build();
-        Self { inner: cache }
+        Self {
+            inner: cache,
+            codec,
+            capacity_bytes,
+            put_keys: Mutex::new(None),
+        }
     }
 
-    pub fn get(&self, key: &PersonCacheKey) -> Option<Arc<CachedPerson>> {
-        match self.inner.get(key) {
-            Some(entry) => {
-                counter!("personhog_leader_cache_hits_total").increment(1);
-                Some(entry.value().clone())
-            }
-            None => {
-                counter!("personhog_leader_cache_misses_total").increment(1);
+    /// Start recording put keys, for a fill that will follow.
+    pub(super) fn track_puts(&self, max_keys: usize) {
+        *self.put_keys.lock().unwrap_or_else(PoisonError::into_inner) = Some(PutTracking {
+            keys: HashSet::new(),
+            max_keys,
+        });
+    }
+
+    pub fn stop_tracking_puts(&self) {
+        *self.put_keys.lock().unwrap_or_else(PoisonError::into_inner) = None;
+    }
+
+    /// Whether a fill would skip the key; lets it drop a record before buffering or encoding.
+    pub fn was_put(&self, key: &PersonCacheKey) -> bool {
+        self.put_keys
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_ref()
+            .is_some_and(|tracking| tracking.keys.contains(key))
+    }
+
+    /// Insert unless the key was put since tracking began; a put records its key first.
+    pub fn fill(&self, key: PersonCacheKey, person: CachedPerson) -> FillOutcome {
+        let is_deleted = person.is_deleted;
+        // Encoded before the lock: live puts on this partition wait on it.
+        let stored = StoredPerson::new(person, &self.codec);
+        let mut put_keys = self.put_keys.lock().unwrap_or_else(PoisonError::into_inner);
+        let Some(tracking) = put_keys.as_mut() else {
+            return FillOutcome::NotTracking;
+        };
+        if !tracking.keys.insert(key.clone()) {
+            return FillOutcome::Skipped;
+        }
+        if tracking.keys.len() > tracking.max_keys {
+            *put_keys = None;
+            return FillOutcome::NotTracking;
+        }
+        if is_deleted {
+            return FillOutcome::Skipped;
+        }
+        self.inner.insert(key, stored);
+        FillOutcome::Inserted
+    }
+
+    /// Bytes left before the resident weight reaches `fraction` of the capacity.
+    pub fn free_room(&self, fraction: f64) -> usize {
+        ((self.capacity_bytes as f64 * fraction) as usize).saturating_sub(self.inner.usage())
+    }
+
+    pub fn get(&self, key: &PersonCacheKey) -> Option<CachedPerson> {
+        self.lookup(key)
+    }
+
+    /// A read for bookkeeping passes such as the death-document settle.
+    /// It does not copy or decompress the properties. It still promotes
+    /// the entry's recency, which is harmless for those passes.
+    pub fn peek(&self, key: &PersonCacheKey) -> Option<CachedVersion> {
+        self.inner
+            .get(key)
+            .map(|entry| entry.value().cached_version())
+    }
+
+    /// An entry that fails to decode is dropped and reads as absent.
+    fn lookup(&self, key: &PersonCacheKey) -> Option<CachedPerson> {
+        let entry = self.inner.get(key)?;
+        match entry.value().to_cached(&self.codec) {
+            Ok(person) => Some(person),
+            Err(reason) => {
+                // Safe to drop: the miss path recovers from the changelog or Postgres.
+                counter!("personhog_leader_cache_decode_failures_total").increment(1);
+                tracing::error!(
+                    team_id = key.team_id,
+                    person_id = key.person_id,
+                    reason,
+                    "dropping cache entry whose properties failed to decode"
+                );
+                self.inner.remove(key);
                 None
             }
         }
     }
 
-    /// A read that skips the hit/miss counters — for bookkeeping passes
-    /// (the death-document settle), not serving. It still promotes the
-    /// entry's recency, which is harmless for those passes.
-    pub fn peek(&self, key: &PersonCacheKey) -> Option<Arc<CachedPerson>> {
-        self.inner.get(key).map(|entry| entry.value().clone())
-    }
-
     pub fn put(&self, key: PersonCacheKey, person: CachedPerson) {
-        self.inner.insert(key, Arc::new(person));
+        let stored = StoredPerson::new(person, &self.codec);
+        let properties = stored.properties();
+        counter!("personhog_leader_cache_properties_put_bytes_total", "form" => "raw")
+            .increment(properties.raw_len() as u64);
+        counter!("personhog_leader_cache_properties_put_bytes_total", "form" => "stored")
+            .increment(properties.stored_len() as u64);
+        let mut put_keys = self.put_keys.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(tracking) = put_keys.as_mut() {
+            tracking.keys.insert(key.clone());
+            if tracking.keys.len() > tracking.max_keys {
+                *put_keys = None;
+            }
+        }
+        drop(put_keys);
+        self.inner.insert(key, stored);
     }
 
     pub fn remove(&self, key: &PersonCacheKey) {
         self.inner.remove(key);
     }
 
-    /// Resident weight in bytes — the sum of entries' `approx_bytes` as
-    /// foyer accounts it against the capacity.
+    /// Resident weight in bytes: the sum of entries' weights as foyer
+    /// accounts it against the capacity.
     pub fn usage_bytes(&self) -> usize {
         self.inner.usage()
     }
@@ -185,6 +283,7 @@ impl PersonCache {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cache::codec::tests::{person_properties, trained_codec};
 
     /// Proto3 encodes an absent bytes field as empty, and every leader
     /// write path serializes at least `{}` — so empty properties can
@@ -207,6 +306,98 @@ mod tests {
         );
     }
 
+    #[test]
+    fn only_an_empty_document_has_no_properties() {
+        for (properties, expected) in [
+            (&b""[..], true),
+            (&b"{}"[..], true),
+            (&br#"{"email":"test@example.com"}"#[..], false),
+        ] {
+            let person = CachedPerson {
+                properties: properties.to_vec(),
+                ..test_person()
+            };
+            assert_eq!(person.has_no_properties(), expected, "{properties:?}");
+        }
+    }
+
+    fn tracking_cache(max_keys: usize) -> PersonCache {
+        let cache = PersonCache::new(1024 * 1024, Arc::new(PropertiesCodec::disabled()));
+        cache.track_puts(max_keys);
+        cache
+    }
+
+    fn key(person_id: i64) -> PersonCacheKey {
+        PersonCacheKey {
+            team_id: 42,
+            person_id,
+        }
+    }
+
+    fn at_version(version: i64) -> CachedPerson {
+        CachedPerson {
+            version,
+            ..test_person()
+        }
+    }
+
+    #[test]
+    fn a_fill_inserts_a_key_once_and_refuses_older_records_for_it() {
+        let cache = tracking_cache(1000);
+        assert_eq!(cache.fill(key(1), at_version(5)), FillOutcome::Inserted);
+        assert_eq!(cache.fill(key(1), at_version(4)), FillOutcome::Skipped);
+        assert_eq!(cache.get(&key(1)).unwrap().version, 5);
+    }
+
+    #[test]
+    fn a_fill_never_replaces_a_key_put_since_tracking_began() {
+        let cache = tracking_cache(1000);
+        cache.put(key(1), at_version(6));
+        cache.remove(&key(1));
+        assert_eq!(cache.fill(key(1), at_version(5)), FillOutcome::Skipped);
+        assert!(cache.get(&key(1)).is_none());
+    }
+
+    #[test]
+    fn a_death_document_keeps_older_records_of_its_person_out() {
+        let cache = tracking_cache(1000);
+        let death = CachedPerson {
+            is_deleted: true,
+            ..at_version(6)
+        };
+        assert_eq!(cache.fill(key(1), death), FillOutcome::Skipped);
+        assert_eq!(cache.fill(key(1), at_version(5)), FillOutcome::Skipped);
+        assert!(cache.get(&key(1)).is_none());
+    }
+
+    #[test]
+    fn tracking_stops_once_puts_or_fills_pass_its_bound() {
+        let by_puts = tracking_cache(2);
+        for person_id in 1..=3 {
+            by_puts.put(key(person_id), at_version(1));
+        }
+        assert_eq!(
+            by_puts.fill(key(4), at_version(1)),
+            FillOutcome::NotTracking
+        );
+
+        let by_fills = tracking_cache(1);
+        assert_eq!(by_fills.fill(key(1), at_version(1)), FillOutcome::Inserted);
+        assert_eq!(
+            by_fills.fill(key(2), at_version(1)),
+            FillOutcome::NotTracking
+        );
+        assert!(by_fills.get(&key(2)).is_none());
+    }
+
+    #[test]
+    fn a_fill_inserts_nothing_once_tracking_stops() {
+        let cache = tracking_cache(1000);
+        cache.stop_tracking_puts();
+        assert_eq!(cache.fill(key(1), at_version(5)), FillOutcome::NotTracking);
+        assert!(cache.get(&key(1)).is_none());
+    }
+
     fn test_person() -> CachedPerson {
         CachedPerson {
             id: 1,
@@ -219,7 +410,6 @@ mod tests {
             is_identified: false,
             is_deleted: false,
             last_seen_at: None,
-            approx_bytes: approx_person_bytes(64),
         }
     }
 
@@ -237,14 +427,13 @@ mod tests {
         // 64 KiB capacity → ~8 KiB per shard; ~2 KiB entries fit a
         // shard several times over, and 128 of them (~224 KiB) overrun
         // the total capacity by more than 3x.
-        let cache = PersonCache::new(64 * 1024);
+        let cache = PersonCache::new(64 * 1024, Arc::new(PropertiesCodec::disabled()));
         let blob = "x".repeat(1536);
         for person_id in 0..128 {
             let mut person = test_person();
             person.id = person_id;
             person.properties =
                 serde_json::to_vec(&serde_json::json!({ "blob": blob.clone() })).unwrap();
-            person.approx_bytes = approx_person_bytes(1536);
             cache.put(
                 PersonCacheKey {
                     team_id: 42,
@@ -276,7 +465,7 @@ mod tests {
 
     #[test]
     fn cache_put_get_roundtrip() {
-        let cache = PersonCache::new(1 << 20);
+        let cache = PersonCache::new(1 << 20, Arc::new(PropertiesCodec::disabled()));
         let key = PersonCacheKey {
             team_id: 42,
             person_id: 1,
@@ -297,8 +486,44 @@ mod tests {
     }
 
     #[test]
+    fn compressed_entries_read_back_whole_and_weigh_less() {
+        let key = PersonCacheKey {
+            team_id: 42,
+            person_id: 1,
+        };
+        let mut person = test_person();
+        person.properties = person_properties(10_001);
+        let raw = PersonCache::new(1 << 20, Arc::new(PropertiesCodec::disabled()));
+        let compressed = PersonCache::new(1 << 20, Arc::new(trained_codec()));
+
+        for cache in [&raw, &compressed] {
+            cache.put(key.clone(), person.clone());
+            assert_eq!(cache.get(&key).unwrap().properties, person.properties);
+        }
+        assert!(compressed.usage_bytes() < raw.usage_bytes());
+    }
+
+    #[test]
+    fn an_entry_that_fails_to_decode_reads_as_a_miss_and_leaves_the_cache() {
+        let cache = PersonCache::new(1 << 20, Arc::new(PropertiesCodec::disabled()));
+        let key = PersonCacheKey {
+            team_id: 42,
+            person_id: 1,
+        };
+        let mut person = test_person();
+        person.properties = person_properties(10_001);
+        // A codec without a dictionary cannot decode a compressed frame, which stands in for a corrupt entry.
+        cache
+            .inner
+            .insert(key.clone(), StoredPerson::new(person, &trained_codec()));
+
+        assert!(cache.get(&key).is_none());
+        assert!(cache.peek(&key).is_none());
+    }
+
+    #[test]
     fn cache_remove() {
-        let cache = PersonCache::new(1 << 20);
+        let cache = PersonCache::new(1 << 20, Arc::new(PropertiesCodec::disabled()));
         let key = PersonCacheKey {
             team_id: 42,
             person_id: 1,
@@ -313,7 +538,7 @@ mod tests {
 
     #[test]
     fn cache_overwrite() {
-        let cache = PersonCache::new(1 << 20);
+        let cache = PersonCache::new(1 << 20, Arc::new(PropertiesCodec::disabled()));
         let key = PersonCacheKey {
             team_id: 42,
             person_id: 1,

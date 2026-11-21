@@ -1,12 +1,24 @@
 """Temporal wiring re-exports: the only path core may use to register this product's workflows,
 activities and schedule."""
 
-from collections.abc import Callable
-from typing import Any
+from posthog.temporal.common.registration import ActivityDefinition, QueueBinding, TemporalRegistration
 
-from ..temporal.activities import mark_failed_activity, start_due_briefings_activity, write_briefing_activity
-from ..temporal.schedule import create_today_briefing_schedule as create_today_briefing_schedule
-from ..temporal.workflows import GenerateTodayBriefingWorkflow, TodayBriefingSchedulerWorkflow
+from ..temporal.activities import finalize_highlights_activity, resolve_pins_activity, run_highlight_source_activity
+from ..temporal.schedule import delete_today_briefing_schedule as delete_today_briefing_schedule
+from ..temporal.workflows import ComputeTodayHighlightsWorkflow
 
-WORKFLOWS = [GenerateTodayBriefingWorkflow, TodayBriefingSchedulerWorkflow]
-ACTIVITIES: list[Callable[..., Any]] = [write_briefing_activity, mark_failed_activity, start_due_briefings_activity]
+WORKFLOWS = [ComputeTodayHighlightsWorkflow]
+ACTIVITIES: list[ActivityDefinition] = [
+    run_highlight_source_activity,
+    resolve_pins_activity,
+    finalize_highlights_activity,
+]
+
+TEMPORAL = TemporalRegistration(
+    queues=(
+        QueueBinding(
+            queue_setting="GENERAL_PURPOSE_TASK_QUEUE", workflows=tuple(WORKFLOWS), activities=tuple(ACTIVITIES)
+        ),
+    ),
+    schedules=(delete_today_briefing_schedule,),
+)

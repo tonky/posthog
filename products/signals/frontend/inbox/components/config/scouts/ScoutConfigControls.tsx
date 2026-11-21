@@ -1,5 +1,5 @@
 import { useValues } from 'kea'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
 import { IconTrash } from '@posthog/icons'
 import { LemonButton, LemonDialog, LemonInput, LemonSelect, LemonSwitch, Tooltip } from '@posthog/lemon-ui'
@@ -14,8 +14,10 @@ import type {
     SignalScoutConfigApi as SignalScoutConfig,
 } from 'products/signals/frontend/generated/api.schemas'
 import { SignalScoutConfigNetworkAccessEnumApi } from 'products/signals/frontend/generated/api.schemas'
+import { SandboxCustomImagesListOriginProduct } from 'products/tasks/frontend/generated/api.schemas'
 import { MODELS } from 'products/tasks/frontend/modelCatalog.generated'
 
+import type { ScoutSurface } from '../../../inboxAnalytics'
 import {
     dailyCronToTime,
     dayTimeToWeeklyCron,
@@ -33,11 +35,14 @@ import {
     timeToDailyCron,
     weeklyCronToDayTime,
 } from '../../../utils/scoutRunsWindow'
+import { CustomImagePicker } from '../CustomImagePicker'
 import { ScoutMcpServersPicker } from './ScoutMcpServersPicker'
+import { ScoutPrecheckSection } from './ScoutPrecheckSection'
 import { ScoutRepositoriesPicker } from './ScoutRepositoriesPicker'
 import { ScoutSlackDestination } from './ScoutSlackDestination'
 import { ScoutStructuredOutputSection } from './ScoutStructuredOutputSection'
 import { ScoutTagsEditor } from './ScoutTagsEditor'
+import { ScoutToolsSection } from './ScoutToolsSection'
 import { ScoutWriteAccessSection } from './ScoutWriteAccessSection'
 
 interface ScoutConfigControlsProps {
@@ -53,7 +58,9 @@ const SCOUT_MODEL_IDS = [
     'claude-opus-5-5',
     'gpt-6-luna',
     'gpt-5.6-luna',
+    'gpt-6.1-terra',
     'gpt-5.6-terra',
+    'gpt-6.1-sol',
     'gpt-6-sol',
     'gpt-5.6-sol',
     'gpt-6-astra',
@@ -71,8 +78,9 @@ interface ScoutConfigFormProps extends ScoutConfigControlsProps {
     deleting?: boolean
     /** True while this scout's config update request is in flight. */
     updating?: boolean
-    /** Called when a staged edit (the record schema) gains or loses unsaved changes. */
+    /** Called when a staged edit (the pre-check query or the record schema) gains or loses unsaved changes. */
     onUnsavedChange?: (unsaved: boolean) => void
+    surface?: ScoutSurface
 }
 
 /** Enable/disable toggle for a scout. Lives on the row, not in the settings form. */
@@ -86,7 +94,7 @@ export function ScoutEnabledSwitch({ config, onUpdate, updating = false }: Scout
                     onChange={(checked) => onUpdate(config.id, { enabled: checked })}
                     loading={updating}
                     disabledReason={updating ? 'Saving scout settings' : undefined}
-                    aria-label={`${config.skill_name} enabled`}
+                    aria-label={`${scoutDisplayName(config)} enabled`}
                 />
             </span>
         </Tooltip>
@@ -104,6 +112,7 @@ export function ScoutConfigForm({
     deleting,
     updating = false,
     onUnsavedChange,
+    surface = 'scout_detail',
 }: ScoutConfigFormProps): JSX.Element {
     const { timezone: projectTimezone } = useValues(teamLogic)
     const { featureFlags } = useValues(featureFlagLogic)
@@ -116,6 +125,12 @@ export function ScoutConfigForm({
     // config stays the truth for them, including when a failed write rolls it back.
     const [customModePicked, setCustomModePicked] = useState(false)
     const scheduleMode = customModePicked ? SCOUT_CUSTOM_CRON_SCHEDULE_MODE : savedScheduleMode
+    // Two sections stage edits, and either one alone must keep the host modal guarded.
+    const [precheckUnsaved, setPrecheckUnsaved] = useState(false)
+    const [schemaUnsaved, setSchemaUnsaved] = useState(false)
+    useEffect(() => {
+        onUnsavedChange?.(precheckUnsaved || schemaUnsaved)
+    }, [precheckUnsaved, schemaUnsaved, onUnsavedChange])
     const controlsDisabledReason = updating
         ? 'Saving scout settings'
         : config.enabled
@@ -140,7 +155,7 @@ export function ScoutConfigForm({
                     // settable BEFORE the enable or the first run reaches the inbox anyway.
                     disabledReason={updating ? 'Saving scout settings' : undefined}
                     onChange={(checked) => onUpdate(config.id, { emit: checked })}
-                    aria-label={`${config.skill_name} write signals to the inbox`}
+                    aria-label={`${scoutDisplayName(config)} write signals to the inbox`}
                 />
             </div>
             <div className="flex items-center justify-between gap-4">
@@ -192,7 +207,7 @@ export function ScoutConfigForm({
                                 onUpdate(config.id, { run_cron_schedule: runCronSchedule })
                             }
                         }}
-                        aria-label={`${config.skill_name} run day`}
+                        aria-label={`${scoutDisplayName(config)} run day`}
                     />
                 </div>
             ) : null}
@@ -200,7 +215,9 @@ export function ScoutConfigForm({
                 <div className="flex items-center justify-between gap-4">
                     <div className="flex flex-col min-w-0">
                         <span className="text-xs text-default">Run time</span>
-                        <span className="text-[11.5px] text-muted">Uses the project timezone ({projectTimezone})</span>
+                        <span className="text-[11.5px] text-muted">
+                            Uses the project timezone ({projectTimezone}). Starts within 20 minutes of this time.
+                        </span>
                     </div>
                     <LemonInput
                         key={config.run_cron_schedule ?? 'unset'}
@@ -290,10 +307,20 @@ export function ScoutConfigForm({
                                 onUpdate(config.id, { model: value })
                             }
                         }}
-                        aria-label={`${config.skill_name} model`}
+                        aria-label={`${scoutDisplayName(config)} model`}
                     />
                 </div>
             ) : null}
+            <CustomImagePicker
+                origin={SandboxCustomImagesListOriginProduct.SignalsScout}
+                value={config.custom_image_id ?? null}
+                onChange={(imageId) => onUpdate(config.id, { custom_image_id: imageId })}
+                label="Image"
+                description="The image this scout's runs start from."
+                defaultLabel="Project default"
+                disabledReason={updating ? 'Saving scout settings' : undefined}
+                dataAttr="scout-custom-image"
+            />
             <div className="flex items-center justify-between gap-4">
                 <div className="flex flex-col min-w-0">
                     <span className="text-xs text-default">Opt out of auto-pause</span>
@@ -307,7 +334,26 @@ export function ScoutConfigForm({
                     checked={config.auto_pause_exempt}
                     disabledReason={controlsDisabledReason}
                     onChange={(checked) => onUpdate(config.id, { auto_pause_exempt: checked })}
-                    aria-label={`${config.skill_name} opt out of auto-pause`}
+                    aria-label={`${scoutDisplayName(config)} opt out of auto-pause`}
+                />
+            </div>
+            <div className="flex items-center justify-between gap-4">
+                <div className="flex flex-col min-w-0">
+                    <span className="text-xs text-default">Only the owner can pause or delete</span>
+                    <span className="text-[11.5px] text-muted">
+                        Turn this on for a scout people rely on. Anyone with scout access can still change its other
+                        settings, but only the person it runs as, or a project admin, can pause it, put it in dry run,
+                        or delete it.
+                    </span>
+                </div>
+                <LemonSwitch
+                    size="small"
+                    checked={config.lifecycle_locked}
+                    // Editable while the scout is disabled, because the lock decides who may resume
+                    // a paused scout.
+                    disabledReason={updating ? 'Saving scout settings' : undefined}
+                    onChange={(checked) => onUpdate(config.id, { lifecycle_locked: checked })}
+                    aria-label={`${scoutDisplayName(config)} only the owner can pause or delete`}
                 />
             </div>
             <div className="flex flex-col gap-1">
@@ -316,6 +362,25 @@ export function ScoutConfigForm({
                     <span className="text-[11.5px] text-muted">Use tags to group scouts and filter the list.</span>
                 </div>
                 <ScoutTagsEditor config={config} onUpdate={onUpdate} updating={updating} />
+            </div>
+            <div className="flex items-center justify-between gap-4">
+                <div className="flex flex-col min-w-0">
+                    <span className="text-xs text-default">Show in inbox</span>
+                    <span className="text-[11.5px] text-muted">
+                        Turn this off to keep this scout's reports out of the inbox, for example when you read them in
+                        Slack.
+                    </span>
+                </div>
+                <LemonSwitch
+                    size="small"
+                    checked={config.output_destinations?.inbox ?? true}
+                    disabledReason={updating ? 'Saving scout settings' : undefined}
+                    // The update replaces the stored destinations, so resend Slack and the webhook with the flag.
+                    onChange={(checked) =>
+                        onUpdate(config.id, { output_destinations: { ...config.output_destinations, inbox: checked } })
+                    }
+                    aria-label={`${scoutDisplayName(config)} show in inbox`}
+                />
             </div>
             <ScoutSlackDestination
                 destination={config.output_destinations?.slack}
@@ -338,14 +403,23 @@ export function ScoutConfigForm({
                 disabledReason={updating ? 'Saving scout settings' : undefined}
             />
             {/* Keyed by scout because the scout page keeps this form mounted when the URL moves to another
-                scout, and an unsaved schema draft must not become the next scout's save. */}
+                scout, and an unsaved draft must not become the next scout's save. */}
+            <ScoutPrecheckSection
+                key={`precheck-${config.id}`}
+                config={config}
+                onUpdate={onUpdate}
+                updating={updating}
+                surface={surface}
+                onUnsavedChange={setPrecheckUnsaved}
+            />
             <ScoutStructuredOutputSection
                 key={config.id}
                 config={config}
                 onUpdate={onUpdate}
                 updating={updating}
-                onUnsavedChange={onUnsavedChange}
+                onUnsavedChange={setSchemaUnsaved}
             />
+            <ScoutToolsSection config={config} onUpdate={onUpdate} updating={updating} surface={surface} />
             <ScoutWriteAccessSection config={config} onUpdate={onUpdate} updating={updating} />
             {/* Only custom scouts are deletable. A canonical scout would be re-seeded from disk after
                 deletion (and couldn't be re-added from the UI), so its terminal action stays disable. */}
@@ -422,7 +496,7 @@ function ScoutCustomCronField({
                     onChange={setDraft}
                     onBlur={save}
                     onPressEnter={save}
-                    aria-label={`${config.skill_name} cron expression`}
+                    aria-label={`${scoutDisplayName(config)} cron expression`}
                 />
                 {hint ? <span className={`text-[11.5px] ${error ? 'text-danger' : 'text-muted'}`}>{hint}</span> : null}
             </div>

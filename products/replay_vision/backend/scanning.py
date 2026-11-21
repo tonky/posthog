@@ -27,7 +27,7 @@ from products.replay_vision.backend.enqueue_claims import (
 from products.replay_vision.backend.inline_scan import create_inline_scanner, find_inline_scanner, inline_scan_key
 from products.replay_vision.backend.models.replay_observation import TERMINAL_STATUSES, ReplayObservation
 from products.replay_vision.backend.models.replay_scanner import ReplayScanner, ScannerType
-from products.replay_vision.backend.quota import compute_scanner_budget, quota_state
+from products.replay_vision.backend.quota import BillingSyncPending, compute_scanner_budget, quota_state
 from products.replay_vision.backend.scanner_config import scanner_config_error
 from products.replay_vision.backend.temporal.constants import (
     MAX_IN_FLIGHT_APPLIES_PER_SCANNER,
@@ -113,11 +113,15 @@ def scan_headroom(*, team: Team, model: str, scanner: ReplayScanner | None) -> S
         ),
     )
     snapshot = quota_state(team.organization_id)
+    if snapshot.awaiting_billing_sync:
+        raise BillingSyncPending()
     cost = observation_credits_for_model(model)
     # None means nothing binds: an uncapped org (or scanner), or a free model that spends nothing.
     affordable = snapshot.affordable_count(cost)
     quota_limit = in_flight_limit if affordable is None else affordable
-    scanner_affordable = compute_scanner_budget(scanner).affordable_count(cost) if scanner is not None else None
+    scanner_affordable = (
+        compute_scanner_budget(scanner, org_state=snapshot).affordable_count(cost) if scanner is not None else None
+    )
     scanner_limit = in_flight_limit if scanner_affordable is None else scanner_affordable
     # Report whichever limit is strictly tighter, so the user knows which one to raise.
     if scanner_limit < in_flight_limit and scanner_limit <= quota_limit:
@@ -161,7 +165,7 @@ def start_observations(
     *,
     scanner: ReplayScanner,
     session_ids: list[str],
-    user: User,
+    user: User | None,
     headroom: ScanHeadroom,
     finished: frozenset[str],
 ) -> tuple[int, list[dict[str, str]]]:
@@ -196,7 +200,7 @@ def start_observations(
         _, outcome = start_apply_scanner_workflow(
             scanner,
             session_id,
-            triggered_by_user_id=user.id,
+            triggered_by_user_id=user.id if user is not None else None,
             trigger=ObservationTrigger.ON_DEMAND,
             # Row counts are this request's snapshot; the atomic claim inside makes racing requests
             # visible to each other, which the snapshot alone cannot.
@@ -224,7 +228,7 @@ def start_observations(
 
 
 def scan_existing_scanner(
-    *, scanner: ReplayScanner, session_ids: list[str], user: User
+    *, scanner: ReplayScanner, session_ids: list[str], user: User | None
 ) -> tuple[int, list[dict[str, str]]]:
     """Point a saved scanner at named sessions."""
     return start_observations(
@@ -239,7 +243,7 @@ def scan_existing_scanner(
 def run_inline_scan(
     *,
     team: Team,
-    user: User,
+    user: User | None,
     session_ids: list[str],
     scanner_type: ScannerType,
     scanner_config: dict[str, Any],
@@ -331,8 +335,8 @@ def retry_observation(*, observation: ReplayObservation, user: User) -> tuple[Re
     # these two read enough to be worth keeping off a held row lock.
     # Raises QuotaLimitExceeded / Throttled, which callers already know how to render. Kept as
     # exceptions rather than outcomes so the API's existing 402 and 429 messages are unchanged.
-    check_observation_quota(scanner.team.organization_id, observation_credits_for_model(scanner.model))
-    check_scanner_quota(scanner)
+    org_state = check_observation_quota(scanner.team.organization_id, observation_credits_for_model(scanner.model))
+    check_scanner_quota(scanner, org_state)
     check_team_in_flight_capacity(scanner.team_id)
 
     # Locked so two concurrent retries can't both pass the status check and both delete the row.

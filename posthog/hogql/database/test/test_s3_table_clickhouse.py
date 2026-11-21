@@ -5,7 +5,10 @@ import uuid
 import datetime
 from urllib.parse import urlparse
 
-from posthog.test.base import BaseTest, ClickhouseTestMixin
+import pytest
+from posthog.test.base import ClickhouseTestMixin
+
+from django.test import SimpleTestCase
 
 from django.conf import settings
 
@@ -55,7 +58,8 @@ def _s3_query(url: str, schema: str, sql: str) -> list:
     return sync_execute(full_sql)
 
 
-class TestS3ParquetTimezoneConversion(ClickhouseTestMixin, BaseTest):
+@pytest.mark.usefixtures("clickhouse_database")
+class TestS3ParquetTimezoneConversion(ClickhouseTestMixin, SimpleTestCase):
     """Tests for toTimeZone() on Nullable(DateTime64) columns from S3/Parquet sources.
 
     Documents a ClickHouse 25.12 bug where toTimeZone() returns NULL in SELECT

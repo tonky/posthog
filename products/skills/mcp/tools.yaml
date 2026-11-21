@@ -1,50 +1,12 @@
-# MCP tool definition — tool entries are scaffolded from the OpenAPI schema.
-# The tool list and operation IDs are kept in sync automatically:
-#   pnpm --filter=@posthog/mcp run scaffold-yaml -- --sync-all
-#
-# To enable a tool, set enabled: true and add required scopes + annotations.
-# All other fields (title, description, enrich_url, etc.) are yours to configure.
+# MCP tool definitions. Tools are opt-in: an operation is exposed only when it has an entry here.
+# List operations without an entry: pnpm --filter=@posthog/mcp run scaffold-yaml -- --candidates --product skills
+# Add one: pnpm --filter=@posthog/mcp run scaffold-yaml -- --add <operationId> --product skills
+# To keep an operation off on purpose, set enabled: false and give a disabled_reason.
 category: Skills
 feature: skills
 url_prefix: /skills
 ui_apps: {}
 tools:
-    community-skills-install-create:
-        operation: community_skills_install_create
-        enabled: false
-    community-skills-list:
-        operation: community_skills_list
-        enabled: false
-    community-skills-render-create:
-        operation: community_skills_render_create
-        enabled: false
-    community-skills-retrieve:
-        operation: community_skills_retrieve
-        enabled: false
-    community-skills-vote-create:
-        operation: community_skills_vote_create
-        enabled: false
-    llm-skills-bundle-retrieve:
-        operation: llm_skills_bundle_retrieve
-        enabled: false
-    llm-skills-import-create:
-        operation: llm_skills_import_create
-        enabled: false
-    llm-skills-marketplace-install-command-retrieve:
-        operation: llm_skills_marketplace_install_command_retrieve
-        enabled: false
-    llm-skills-name-export-retrieve:
-        operation: llm_skills_name_export_retrieve
-        enabled: false
-    llm-skills-name-publish-community-create:
-        operation: llm_skills_name_publish_community_create
-        enabled: false
-    llm-skills-name-skill-md-retrieve:
-        operation: llm_skills_name_skill_md_retrieve
-        enabled: false
-    llm-skills-search-retrieve:
-        operation: llm_skills_search_retrieve
-        enabled: false
     skill-archive:
         operation: llm_skills_name_archive_create
         enabled: true
@@ -77,7 +39,9 @@ tools:
             Optionally include license, compatibility, allowed_tools, metadata, bundled files, and owners. Owners (a
             list of project-member user UUIDs) default to the creating user; set them to route reviews or questions
             about this skill to specific people. allowed_tools is a request, not a grant: a harness that loads the skill
-            over MCP ignores it until the user approves that grant.
+            over MCP ignores it until the user approves that grant. Pass version_description with a short note on where
+            the skill came from (written from scratch, ported from a repo, split out of another skill); it is shown on
+            version 1 in the version history.
         include_params:
             - name
             - description
@@ -88,6 +52,7 @@ tools:
             - metadata
             - files
             - owners
+            - version_description
     skill-duplicate:
         operation: llm_skills_name_duplicate_create
         enabled: true
@@ -230,9 +195,6 @@ tools:
         param_overrides:
             skill_name:
                 description: The current kebab-case name of the skill to rename.
-    skill-resolve:
-        operation: llm_skills_resolve_name_retrieve
-        enabled: false
     skill-store-install-command:
         operation: llm_skills_marketplace_install_command_create
         enabled: true

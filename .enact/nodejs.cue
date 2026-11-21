@@ -6,7 +6,7 @@ import (
 )
 
 // jest.config.shared.js names frontend/jest.quarantine.ts and .github/scripts/jest-retries.cjs.
-_nodejsCone: list.Concat([_djangoTree, ["nodejs", "rust", "proto", "frontend/public/services", "frontend/jest.quarantine.ts", ".github/scripts/jest-retries.cjs", "docker", "infra"]])
+_nodejsCone: list.Concat([_djangoTree, ["nodejs", "rust", "proto", "frontend/public/services", "frontend/jest.quarantine.ts", ".github/scripts/jest-retries.cjs", "docker", "infra", "tools/deploy-requirements"]])
 
 _nodejsServices: [
 	{protocol: schema.#Protocol.Sql, target: pipeline.services.postgres},
@@ -72,14 +72,17 @@ pipeline: components: {
 			"nodejs/src/cdp/{config,types}.ts",
 			"nodejs/src/cdp/outputs/producers.ts",
 			"nodejs/src/cdp/schema/{cyclotron,hogflow,pushNotification}.ts",
-			"nodejs/src/cdp/services/managers/integration-manager.service.ts",
-			"nodejs/src/cdp/utils/{encryption-utils,jwt-utils}.ts",
-			"nodejs/src/logs/config.ts",
+			"nodejs/src/cdp/services/hogflows/transactional-email.ts",
+			"nodejs/src/cdp/services/managers/{integration-manager.service,integration-source,postgres-integration-source}.ts",
+			"nodejs/src/cdp/services/messaging/{attachment-store,in-flight-registry,message-estimate}.ts",
+			"nodejs/src/cdp/utils/{encryption-utils,hog-error-classification,integration-reference,jwt-utils,rebuildable-inputs}.ts",
+			"nodejs/src/ingestion/common/outputs/producers.ts",
+			"nodejs/src/logs/{config,internal-logs,internal-logs-producer}.ts",
 			"nodejs/src/logs/outputs/producers.ts",
 			"nodejs/src/servers/base-server.ts",
 			"nodejs/tests/{config,utils}.test.ts",
 			"nodejs/tests/{assets,fixtures,utils}/**",
-			"nodejs/tests/helpers/{clickhouse,database-guard,database-guard.test,event-headers,expectations,hog-invocation-results,kafka-message,kafka,metrics,mock-ingestion-outputs,person,pipeline-event,plugin-event,promises,raw-event,redis,service-process,snapshots,snapshots.test,sql,team,tls,truth}.ts",
+			"nodejs/tests/helpers/{clickhouse,compression,database-guard,database-guard.test,event-headers,expectations,fake-ses,hog-invocation-results,kafka-message,kafka,metrics,mock-ingestion-outputs,person,pin-date,pipeline-event,plugin-event,promises,quota-limits,raw-event,recording-ingestion-outputs,redis,service-process,snapshots,snapshots.test,sql,team,tls,truth}.ts",
 			"nodejs/tests/helpers/mocks/{consumer.mock,date.mock,producer.mock,producer.spy,request.mock}.ts",
 		]
 		target_scope: {
@@ -133,6 +136,7 @@ pipeline: components: {
 			"nodejs/tests/ingestion/*.ts",
 			"nodejs/tests/ingestion/pipelines/{clientwarnings,heatmaps}/**",
 			"nodejs/tests/service-e2e/personhog-shadow-parity.serial.test.ts",
+			"nodejs/src/logs/services/unknown-token-recorder.ts",
 			"nodejs/tests/helpers/ingestion-outputs.ts",
 			".github/workflows/update-ai-costs.yml",
 		]
@@ -178,6 +182,7 @@ pipeline: components: {
 				"nodejs/tests/session-replay/**/*.test.ts",
 				"nodejs/tests/ingestion/pipelines/sessionreplay/**/*.test.ts",
 			]
+			handoff: [{to: "nodejs_servers", tests: ["nodejs/src/ingestion/pipelines/sessionreplay/ai-research/image-fetch-v4/v4-lane.test.ts"]}]
 			not_run: [{
 				tests:  ["nodejs/src/ingestion/pipelines/sessionreplay/ml-mirror-image-scrub-sidecar/**"]
 				reason: "a package of its own the plugin server's jest leaves out (modulePathIgnorePatterns), and no upstream workflow runs its jest"
@@ -201,14 +206,30 @@ pipeline: components: {
 		shards: 2
 		target_scope: {
 			tests:   ["nodejs/src/{cdp,ai-observability}/**/*.test.ts"]
-			handoff: [{to: "nodejs_servers", tests: ["nodejs/src/cdp/hog-transformations/hog-transformer.service.test.ts"]}]
-			not_run: [{tests: ["nodejs/src/cdp/dev/**"], reason: "dev-only scripts and benchmarks, never CI tests (jest.config.shared.js)"}]
+			handoff: [{to: "nodejs_servers", tests: [
+				"nodejs/src/cdp/cdp-api.serial.test.ts",
+				"nodejs/src/cdp/consumers/cdp-cyclotron-worker-email.consumer.serial.test.ts",
+				"nodejs/src/cdp/hog-transformations/hog-transformer.service.test.ts",
+				"nodejs/src/cdp/services/messaging/email.service.test.ts",
+			]}]
+			not_run: [
+				{tests: ["nodejs/src/cdp/dev/**"], reason: "dev-only scripts and benchmarks, never CI tests (jest.config.shared.js)"},
+				{
+					tests: [
+						"nodejs/src/cdp/intake/intake-batch.serial.test.ts",
+						"nodejs/src/cdp/services/cyclotron-v2/cyclotron-v2.test.ts",
+						"nodejs/src/cdp/services/invocation-results.service.test.ts",
+						"nodejs/src/cdp/services/job-queue/job-queue-postgres-v2.serial.test.ts",
+					]
+					reason: "O1 pin cb94c35517cf: Cyclotron Postgres v2 / invocation-results failure at pin; revisit on next pin bump (usecases/posthog/LEARNINGS.md)"
+				},
+			]
 		}
 	}
 	"nodejs_logs": _nodejsArea & {
 		name:        "nodejs_logs"
 		title:       "PostHog Node.js logs ingestion"
-		depends_on:  ["nodejs_cdp"]
+		depends_on:  ["nodejs_cdp", "nodejs_ingestion_core"]
 		watch_paths: ["nodejs/src/logs/**", "nodejs/tests/logs/**"]
 		target_scope: {
 			tests:          ["nodejs/{src,tests}/logs/**/*.test.ts"]
@@ -220,8 +241,31 @@ pipeline: components: {
 		title:       "PostHog Node.js servers & ingestion e2e"
 		cargo: workspace: "rust"
 		depends_on:  ["nodejs_cdp", "nodejs_logs", "nodejs_ingestion", "nodejs_replay"]
-		watch_paths: ["nodejs/src/servers/**", "nodejs/src/{index,server}.ts", "nodejs/tests/*.serial.test.ts"]
-		target_scope: tests: ["nodejs/src/servers/**/*.test.ts", "nodejs/tests/*.serial.test.ts"]
+		watch_paths: [
+			"nodejs/src/servers/**",
+			"nodejs/src/{index,server}.ts",
+			"nodejs/src/messaging/**",
+			"nodejs/src/schema-check/**",
+			"nodejs/tests/*.serial.test.ts",
+			"nodejs/tests/scenarios/**",
+		]
+		target_scope: {
+			tests: [
+				"nodejs/src/servers/**/*.test.ts",
+				"nodejs/src/messaging/**/*.test.ts",
+				"nodejs/src/schema-check/**/*.test.ts",
+				"nodejs/tests/*.serial.test.ts",
+				"nodejs/tests/scenarios/**/*.test.ts",
+			]
+			not_run: [{
+				tests: [
+					"nodejs/tests/scenarios/cloud/host-pooler.test.ts",
+					"nodejs/tests/scenarios/cloud/host-prepare.test.ts",
+					"nodejs/tests/scenarios/environment/environment.test.ts",
+				]
+				reason: "O1 pin cb94c35517cf: cloud/environment scenario harness assumes fixed Postgres/Docker setup; revisit on next pin bump (usecases/posthog/LEARNINGS.md)"
+			}]
+		}
 	}
 	"nodejs": {
 		name:            "nodejs"

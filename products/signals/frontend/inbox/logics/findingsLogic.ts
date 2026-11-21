@@ -19,12 +19,8 @@ import {
     SignalScoutEmissionReportLink,
     SignalScoutRunSummary,
 } from '../types'
-import {
-    isSettledRun,
-    mostRecentEmittedRuns,
-    prettifyScoutSkillName,
-    runTouchedReports,
-} from '../utils/scoutRunsWindow'
+import { isSettledRun, mostRecentEmittedRuns, scoutNameForSkill, runTouchedReports } from '../utils/scoutRunsWindow'
+import { isReportUnreachable, rememberUnreachableReport } from '../utils/unreachableReports'
 import { ScoutEmissionRow, ScoutReportAction } from './scoutDetailLogic'
 import { scoutFleetLogic } from './scoutFleetLogic'
 
@@ -67,6 +63,7 @@ export interface findingsLogicValues {
         runs: SignalScoutRunSummary[]
     } // scoutFleetLogic
     runsWindowLoadedOnce: boolean // scoutFleetLogic
+    scoutNamesBySkill: Record<string, string> // scoutFleetLogic
     authoredReportCount: number
     availableScouts: {
         count: number
@@ -214,7 +211,8 @@ export interface findingsLogicMeta {
             searchText: string,
             scoutFilter: string,
             severityFilter: string,
-            sortKey: FindingsSortKey
+            sortKey: FindingsSortKey,
+            scoutNamesBySkill: Record<string, string>
         ) => FleetScoutReportRow[]
         reportBySourceId: (emissionReports: SignalScoutEmissionReportLink[]) => Map<string, LinkedSignalReport>
         rows: (
@@ -231,7 +229,8 @@ export interface findingsLogicMeta {
                 runIds: string[]
                 skillName: string
                 skillNames: string[]
-            }[]
+            }[],
+            scoutNamesBySkill: Record<string, string>
         ) => {
             count: number
             label: string
@@ -242,7 +241,8 @@ export interface findingsLogicMeta {
             searchText: string,
             scoutFilter: string,
             severityFilter: string,
-            sortKey: FindingsSortKey
+            sortKey: FindingsSortKey,
+            scoutNamesBySkill: Record<string, string>
         ) => ScoutEmissionRow[]
         totalCount: (rows: ScoutEmissionRow[]) => number
         authoredReportCount: (
@@ -312,7 +312,7 @@ export const findingsLogic = kea<findingsLogicType>([
     path(['scenes', 'inbox', 'logics', 'findingsLogic']),
 
     connect(() => ({
-        values: [scoutFleetLogic, ['runsWindow', 'runsWindowLoadedOnce']],
+        values: [scoutFleetLogic, ['runsWindow', 'runsWindowLoadedOnce', 'scoutNamesBySkill']],
     })),
 
     actions({
@@ -391,22 +391,30 @@ export const findingsLogic = kea<findingsLogicType>([
                     }
                     const touchedIds = new Set(touched.map(({ id }) => id))
                     // Targeted refresh fetches only the named (still-touched) ids; a full load
-                    // fetches the whole capped set.
-                    const fetchIds = ids ? [...new Set(ids)].filter((id) => touchedIds.has(id)) : [...touchedIds]
+                    // fetches the whole capped set. Ids a previous round found unreachable are
+                    // dropped: a deleted report stays deleted, so re-asking only burns requests.
+                    const fetchIds = (
+                        ids ? [...new Set(ids)].filter((id) => touchedIds.has(id)) : [...touchedIds]
+                    ).filter((id) => !isReportUnreachable(id))
                     if (fetchIds.length === 0) {
                         return values.scoutReports
                     }
                     const settled = await Promise.allSettled(fetchIds.map((id) => api.signalReports.get(id)))
                     const byId = new Map<string, SignalReport>()
-                    for (const result of settled) {
+                    let transientFailure = false
+                    settled.forEach((result, index) => {
                         if (result.status === 'fulfilled') {
                             byId.set(result.value.id, result.value)
+                            return
                         }
-                    }
-                    // Every fetch rejected — throw BEFORE merging cached rows, so an outage flags
-                    // `scoutReportsLoadFailed` (warning banner over the stale set kea-loaders keeps)
-                    // instead of laundering the cache into a "successful" refresh.
-                    if (byId.size === 0) {
+                        transientFailure =
+                            !rememberUnreachableReport(fetchIds[index], result.reason) || transientFailure
+                    })
+                    // Every fetch rejected and at least one can recover — throw BEFORE merging cached
+                    // rows, so an outage flags `scoutReportsLoadFailed` (warning banner over the stale
+                    // set kea-loaders keeps) instead of laundering the cache into a "successful"
+                    // refresh. An all-404 round is not an outage: those reports are simply gone.
+                    if (byId.size === 0 && transientFailure) {
                         throw new Error('Failed to load the reports scouts touched')
                     }
                     // Keep prior resolved reports for still-touched ids that weren't (successfully)
@@ -604,13 +612,14 @@ export const findingsLogic = kea<findingsLogicType>([
         // (severity matches the report's priority): newest/oldest by report update time, severity by
         // priority.
         filteredReportRows: [
-            (s) => [s.reportRows, s.searchText, s.scoutFilter, s.severityFilter, s.sortKey],
+            (s) => [s.reportRows, s.searchText, s.scoutFilter, s.severityFilter, s.sortKey, s.scoutNamesBySkill],
             (
                 reportRows: FleetScoutReportRow[],
                 searchText: string,
                 scoutFilter: string,
                 severityFilter: string,
-                sortKey: FindingsSortKey
+                sortKey: FindingsSortKey,
+                scoutNamesBySkill: Record<string, string>
             ): FleetScoutReportRow[] => {
                 const needle = searchText.trim().toLowerCase()
                 const filtered = reportRows.filter((row) => {
@@ -625,7 +634,7 @@ export const findingsLogic = kea<findingsLogicType>([
                     if (needle) {
                         // Title + summary (matching the backend report search) + touching scout names.
                         const haystack = `${row.report.title ?? ''} ${row.report.summary ?? ''} ${row.skillNames
-                            .map(prettifyScoutSkillName)
+                            .map((skillName) => scoutNameForSkill(scoutNamesBySkill, skillName))
                             .join(' ')}`.toLowerCase()
                         if (!haystack.includes(needle)) {
                             return false
@@ -679,7 +688,7 @@ export const findingsLogic = kea<findingsLogicType>([
         // ("1 report authored · 0 scouts") or drop the scout from the filter; every touching scout
         // counts, not just the card's primary attribution.
         availableScouts: [
-            (s) => [s.rows, s.touchedReports],
+            (s) => [s.rows, s.touchedReports, s.scoutNamesBySkill],
             (
                 rows: ScoutEmissionRow[],
                 touchedReports: {
@@ -687,7 +696,8 @@ export const findingsLogic = kea<findingsLogicType>([
                     action: ScoutReportAction
                     skillName: string
                     skillNames: string[]
-                }[]
+                }[],
+                scoutNamesBySkill: Record<string, string>
             ): { skillName: string; label: string; count: number }[] => {
                 const counts = new Map<string, number>()
                 for (const row of rows) {
@@ -699,19 +709,24 @@ export const findingsLogic = kea<findingsLogicType>([
                     }
                 }
                 return [...counts.entries()]
-                    .map(([skillName, count]) => ({ skillName, label: prettifyScoutSkillName(skillName), count }))
+                    .map(([skillName, count]) => ({
+                        skillName,
+                        label: scoutNameForSkill(scoutNamesBySkill, skillName),
+                        count,
+                    }))
                     .sort((a, b) => a.label.localeCompare(b.label))
             },
         ],
         // Visible set: search (over finding text + prettified scout name) + scout + severity, then sort.
         filteredRows: [
-            (s) => [s.rows, s.searchText, s.scoutFilter, s.severityFilter, s.sortKey],
+            (s) => [s.rows, s.searchText, s.scoutFilter, s.severityFilter, s.sortKey, s.scoutNamesBySkill],
             (
                 rows: ScoutEmissionRow[],
                 searchText: string,
                 scoutFilter: string,
                 severityFilter: string,
-                sortKey: FindingsSortKey
+                sortKey: FindingsSortKey,
+                scoutNamesBySkill: Record<string, string>
             ): ScoutEmissionRow[] => {
                 const needle = searchText.trim().toLowerCase()
                 const filtered = rows.filter((row) => {
@@ -722,7 +737,8 @@ export const findingsLogic = kea<findingsLogicType>([
                         return false
                     }
                     if (needle) {
-                        const haystack = `${row.emission.description ?? ''} ${prettifyScoutSkillName(
+                        const haystack = `${row.emission.description ?? ''} ${scoutNameForSkill(
+                            scoutNamesBySkill,
                             row.run.skill_name
                         )}`.toLowerCase()
                         if (!haystack.includes(needle)) {

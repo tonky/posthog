@@ -15,7 +15,6 @@ _preflightStage: {
 			J.fmt, J.migrate, J.schema_check,
 			{component: "agent_proxy", job: J.typecheck},
 			{component: "oauth_proxy", job: J.typecheck},
-			{component: "integration_service", job: J.typecheck},
 		],
 		// Keep heavy Rust `cargo clippy` lints (`rust_services:lint`, `cli:lint`) in the matrix
 		// stage so `Stage: Preflight` stays lightweight and avoids pulling Rust caches.
@@ -157,7 +156,7 @@ pipeline: schema.#Pipeline & {
 		}
 		scheduler: max_matrix_size: 128
 		kept_workflows: [
-			".github/workflows/cd-sandbox-base-image.yml", ".github/workflows/ci-backend.yml",
+			".github/workflows/cd-sandbox-base-image.yml",
 			".github/workflows/ci-python.yml", ".github/workflows/ci-security.yaml",
 			".github/workflows/update-ai-costs.yml", ".github/workflows/update-sandbox-agent-version.yml",
 		]

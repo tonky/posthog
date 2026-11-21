@@ -1,11 +1,12 @@
 import { LemonCheckbox, LemonDialog, LemonDivider, LemonInput } from '@posthog/lemon-ui'
 
 import { LemonField } from 'lib/lemon-ui/LemonField'
-import { NewSurvey } from 'scenes/surveys/constants'
+import { useQuillSurface } from 'lib/ui/QuillSurface/quillSurfaceContext'
+import { BACK_BUTTON_DEFAULT_TEXT, NewSurvey } from 'scenes/surveys/constants'
 
 import { Survey, SurveyAppearance } from '~/types'
 
-type SurveyTranslations = NonNullable<Survey['translations']>
+import { QuillSurveyBehaviorOptions } from './QuillSurveyBehaviorOptions'
 
 interface SurveyBehaviorOptionsProps {
     survey: Survey | NewSurvey
@@ -13,8 +14,6 @@ interface SurveyBehaviorOptionsProps {
     disabledReason?: string
     hasBranchingLogic?: boolean
     deleteBranchingLogic?: () => void
-    /** When provided (i.e. inside the survey editor), enables inline per-language back button labels. */
-    onTranslationsChange?: (translations: SurveyTranslations) => void
 }
 
 // Shared by the classic editor and the guided wizard so both expose the same behavior toggles.
@@ -24,16 +23,54 @@ export function SurveyBehaviorOptions({
     disabledReason,
     hasBranchingLogic,
     deleteBranchingLogic,
-    onTranslationsChange,
 }: SurveyBehaviorOptionsProps): JSX.Element {
-    const translations: SurveyTranslations = survey.translations ?? {}
-    const translatedLanguages = onTranslationsChange ? Object.keys(translations) : []
+    const quillSurface = useQuillSurface()
 
-    const setBackButtonTranslation = (language: string, value: string): void => {
-        onTranslationsChange?.({
-            ...translations,
-            [language]: { ...translations[language], backButtonText: value || undefined },
+    const onShuffleQuestionsChange = (checked: boolean): void => {
+        if (checked && hasBranchingLogic) {
+            onAppearanceChange({ shuffleQuestions: false })
+
+            LemonDialog.open({
+                title: 'Your survey has active branching logic',
+                description: (
+                    <p className="py-2">
+                        Enabling this option will remove your branching logic. Are you sure you want to continue?
+                    </p>
+                ),
+                primaryButton: {
+                    children: 'Continue',
+                    status: 'danger',
+                    onClick: () => {
+                        deleteBranchingLogic?.()
+                        onAppearanceChange({ shuffleQuestions: true })
+                    },
+                },
+                secondaryButton: {
+                    children: 'Cancel',
+                },
+            })
+        } else {
+            onAppearanceChange({ shuffleQuestions: checked })
+        }
+    }
+
+    const onAllowGoBackChange = (checked: boolean): void => {
+        onAppearanceChange({
+            allowGoBack: checked,
+            backButtonText: checked ? survey.appearance?.backButtonText : undefined,
         })
+    }
+
+    if (quillSurface) {
+        return (
+            <QuillSurveyBehaviorOptions
+                survey={survey}
+                onAppearanceChange={onAppearanceChange}
+                disabledReason={disabledReason}
+                onShuffleQuestionsChange={onShuffleQuestionsChange}
+                onAllowGoBackChange={onAllowGoBackChange}
+            />
+        )
     }
 
     return (
@@ -41,72 +78,26 @@ export function SurveyBehaviorOptions({
             <LemonCheckbox
                 disabledReason={disabledReason}
                 label="Shuffle questions"
-                onChange={(checked) => {
-                    if (checked && hasBranchingLogic) {
-                        onAppearanceChange({ shuffleQuestions: false })
-
-                        LemonDialog.open({
-                            title: 'Your survey has active branching logic',
-                            description: (
-                                <p className="py-2">
-                                    Enabling this option will remove your branching logic. Are you sure you want to
-                                    continue?
-                                </p>
-                            ),
-                            primaryButton: {
-                                children: 'Continue',
-                                status: 'danger',
-                                onClick: () => {
-                                    deleteBranchingLogic?.()
-                                    onAppearanceChange({ shuffleQuestions: true })
-                                },
-                            },
-                            secondaryButton: {
-                                children: 'Cancel',
-                            },
-                        })
-                    } else {
-                        onAppearanceChange({ shuffleQuestions: checked })
-                    }
-                }}
+                onChange={onShuffleQuestionsChange}
                 checked={survey.appearance?.shuffleQuestions}
             />
             <LemonDivider className="my-0" />
             <LemonCheckbox
                 disabledReason={disabledReason}
                 label="Allow going back to previous questions"
-                onChange={(checked) =>
-                    onAppearanceChange({
-                        allowGoBack: checked,
-                        backButtonText: checked ? survey.appearance?.backButtonText : undefined,
-                    })
-                }
+                onChange={onAllowGoBackChange}
                 checked={survey.appearance?.allowGoBack}
             />
             {survey.appearance?.allowGoBack && (
                 <LemonField.Pure label="Back button text" className="ml-6">
-                    <div className="flex max-w-xs flex-col gap-1">
-                        <LemonInput
-                            size="small"
-                            placeholder="Back"
-                            value={survey.appearance?.backButtonText ?? ''}
-                            onChange={(backButtonText) => onAppearanceChange({ backButtonText })}
-                            className="ignore-error-border"
-                            disabledReason={disabledReason}
-                        />
-                        {translatedLanguages.map((language) => (
-                            <LemonInput
-                                key={language}
-                                size="small"
-                                prefix={<span className="text-xs font-medium uppercase text-muted">{language}</span>}
-                                placeholder={survey.appearance?.backButtonText || 'Back'}
-                                value={translations[language]?.backButtonText ?? ''}
-                                onChange={(value) => setBackButtonTranslation(language, value)}
-                                className="ignore-error-border"
-                                disabledReason={disabledReason}
-                            />
-                        ))}
-                    </div>
+                    <LemonInput
+                        size="small"
+                        placeholder={BACK_BUTTON_DEFAULT_TEXT}
+                        value={survey.appearance?.backButtonText ?? ''}
+                        onChange={(backButtonText) => onAppearanceChange({ backButtonText })}
+                        className="ignore-error-border max-w-xs"
+                        disabledReason={disabledReason}
+                    />
                 </LemonField.Pure>
             )}
         </div>

@@ -971,6 +971,7 @@ jobs:
           ee/hogai/sandbox/turn_event_contract.json
           products
           services/mcp/schema
+          nodejs/src/ingestion/pipelines/ai/costs/providers/llm-costs.json
           products/posthog_ai
           services/mcp/schema/exec-command-reference.md
           .depot/workflows
@@ -986,9 +987,9 @@ jobs:
           frontend/src/taxonomy/core-filter-definitions-by-group.json
           livestream/bot
           posthog
+          rust/capture-logs/src/metrics_avro_schema.rs
           rust/feature-flags/src/properties
           rust/feature-flags/tests/fixtures
-          services/hogql-language-service/internal/completion
           services/mcp/src/templates
           tools/hogli-commands
           .dagster_home
@@ -999,11 +1000,15 @@ jobs:
           docker-compose.base.yml
           docker-compose.dev.yml
           docker-compose.profiles.yml
+          frontend/public/admin-console/console.css
+          frontend/public/message-preferences.css
           frontend/src/lib/agentScopes.generated.ts
           frontend/src/lib/components/AgentObjectTags/objectKinds.generated.ts
           frontend/src/lib/components/DomainConnect/templates
           frontend/src/products.json
           infra
+          nodejs/src/logs/parity/fixtures/modules/internal_verify.json
+          tools/change-prover/issuer.yml
           packages/agent/packages/agent-contracts/src/model-catalog.generated.ts
           packages/agent/packages/agent-contracts/src/objectTagKinds.generated.ts
           packages/agent/packages/agent/src/utils/gateway-routing-cases.json
@@ -1016,6 +1021,8 @@ jobs:
           services/mcp/src/resources/ui-apps.generated.ts
           services/stripe-mock/tests/conftest.py
           frontend/src/scenes/settings/SettingsMap.tsx
+          nodejs/src
+          rust
           common/__init__.py
           common/hogql_parser
           common/migration_utils
@@ -1074,7 +1081,6 @@ jobs:
           packages/quill
           bin/hobby-installer
           showcase/scripts/run_go_tests.sh
-          services/integration-service
           livestream
           products/web_analytics
           .config
@@ -1093,10 +1099,10 @@ jobs:
           showcase/scripts/check_mcp_ui_apps.sh
           showcase/scripts/build_mcp_ui_apps.sh
           nodejs
-          rust
           proto
           frontend/public/services
           frontend/jest.quarantine.ts
+          tools/deploy-requirements
           .github/workflows/update-ai-costs.yml
           showcase/scripts
           services/oauth-proxy
@@ -1113,11 +1119,15 @@ jobs:
           products/isolation_baseline.txt
           products/model_crossing_uses_baseline.txt
           .importlinter
-          frontend/public/message-preferences.css
+          hoglint.toml
+          hoglint.exceptions.toml
+          hoglint.ledger
+          tools/hoglint
           services/stripe-app
           packages/agent/packages/harness
           products/ruff.toml
           products/stamphog/packages
+          products/knowledge_writer/merge_check
           packages/agent/agent-shadow
           bin/generate_personhog_proto.sh
           showcase/scripts/build_quill.sh
@@ -1224,21 +1234,28 @@ jobs:
           .agents/skills/triaging-merge-queue-failures/scripts/mq-triage-marker.sh
           .claude/settings.json
           common/AGENTS.md
+          ee/AGENTS.md
           ee/hogai/eval/AGENTS.md
           frontend/src/AGENTS.md
+          frontend/src/layout/navigation-3000/sidepanel/AGENTS.md
           frontend/src/layout/scenes/AGENTS.md
+          frontend/src/layout/today/AGENTS.md
           frontend/src/scenes/max/AGENTS.md
+          hog/AGENTS.md
           packages/quill/AGENTS.md
           packages/quill/packages/blocks/AGENTS.md
           packages/quill/packages/charts/AGENTS.md
           packages/quill/packages/components/AGENTS.md
           packages/quill/packages/primitives/AGENTS.md
           packages/quill/packages/tokens/AGENTS.md
+          posthog/admin/console/AGENTS.md
           posthog/clickhouse/client/AGENTS.md
           posthog/clickhouse/migrations/AGENTS.md
           posthog/egress/AGENTS.md
           posthog/hogql/database/schema/AGENTS.md
           posthog/ingress/AGENTS.md
+          posthog/integrations/AGENTS.md
+          posthog/tasks/alerts/detectors/AGENTS.md
           posthog/temporal/AGENTS.md
           posthog/temporal/data_modeling/AGENTS.md
           posthog/test/AGENTS.md
@@ -1258,12 +1275,15 @@ jobs:
           products/customer_analytics/backend/AGENTS.md
           products/customer_analytics/frontend/components/Accounts/AGENTS.md
           products/dashboards/AGENTS.md
+          products/data_modeling/backend/temporal/AGENTS.md
           products/desktop/AGENTS.md
           products/desktop/packages/ui/src/features/browser-tabs/AGENTS.md
           products/desktop/packages/ui/src/features/canvas/AGENTS.md
           products/desktop/packages/ui/src/features/inbox/AGENTS.md
           products/engineering_analytics/AGENTS.md
           products/engineering_analytics/frontend/AGENTS.md
+          products/knowledge_writer/AGENTS.md
+          products/mobile/AGENTS.md
           products/posthog_ai/eval_harness/harness/AGENTS.md
           products/posthog_ai/evals/AGENTS.md
           products/posthog_ai/frontend/AGENTS.md
@@ -1274,32 +1294,44 @@ jobs:
           products/signals/backend/scout_harness/AGENTS.md
           products/signals/dags/inbox_ranking/AGENTS.md
           products/signals/eval/AGENTS.md
+          products/signals/frontend/AGENTS.md
           products/signals/skills/AGENTS.md
           products/stamphog/AGENTS.md
           products/support/scripts/AGENTS.md
+          products/today/AGENTS.md
+          products/warehouse_sources/backend/temporal/data_imports/sources/AGENTS.md
+          products/warehouse_sources/sources/AGENTS.md
           proto/AGENTS.md
           rust/AGENTS.md
+          rust/cyclotron-node-migrations/AGENTS.md
           rust/personhog-replica/AGENTS.md
           rust/personhog-router/AGENTS.md
           services/mcp/AGENTS.md
           tools/hogli/AGENTS.md
           CLAUDE.md
           common/CLAUDE.md
+          ee/CLAUDE.md
           ee/hogai/eval/CLAUDE.md
           frontend/src/CLAUDE.md
+          frontend/src/layout/navigation-3000/sidepanel/CLAUDE.md
           frontend/src/layout/scenes/CLAUDE.md
+          frontend/src/layout/today/CLAUDE.md
           frontend/src/scenes/max/CLAUDE.md
+          hog/CLAUDE.md
           packages/quill/CLAUDE.md
           packages/quill/packages/blocks/CLAUDE.md
           packages/quill/packages/charts/CLAUDE.md
           packages/quill/packages/components/CLAUDE.md
           packages/quill/packages/primitives/CLAUDE.md
           packages/quill/packages/tokens/CLAUDE.md
+          posthog/admin/console/CLAUDE.md
           posthog/clickhouse/client/CLAUDE.md
           posthog/clickhouse/migrations/CLAUDE.md
           posthog/egress/CLAUDE.md
           posthog/hogql/database/schema/CLAUDE.md
           posthog/ingress/CLAUDE.md
+          posthog/integrations/CLAUDE.md
+          posthog/tasks/alerts/detectors/CLAUDE.md
           posthog/temporal/CLAUDE.md
           posthog/temporal/data_modeling/CLAUDE.md
           posthog/test/CLAUDE.md
@@ -1319,12 +1351,15 @@ jobs:
           products/customer_analytics/backend/CLAUDE.md
           products/customer_analytics/frontend/components/Accounts/CLAUDE.md
           products/dashboards/CLAUDE.md
+          products/data_modeling/backend/temporal/CLAUDE.md
           products/desktop/CLAUDE.md
           products/desktop/packages/ui/src/features/browser-tabs/CLAUDE.md
           products/desktop/packages/ui/src/features/canvas/CLAUDE.md
           products/desktop/packages/ui/src/features/inbox/CLAUDE.md
           products/engineering_analytics/CLAUDE.md
           products/engineering_analytics/frontend/CLAUDE.md
+          products/knowledge_writer/CLAUDE.md
+          products/mobile/CLAUDE.md
           products/posthog_ai/eval_harness/harness/CLAUDE.md
           products/posthog_ai/evals/CLAUDE.md
           products/posthog_ai/frontend/CLAUDE.md
@@ -1335,15 +1370,21 @@ jobs:
           products/signals/backend/scout_harness/CLAUDE.md
           products/signals/dags/inbox_ranking/CLAUDE.md
           products/signals/eval/CLAUDE.md
+          products/signals/frontend/CLAUDE.md
           products/signals/skills/CLAUDE.md
           products/stamphog/CLAUDE.md
           products/support/scripts/CLAUDE.md
+          products/today/CLAUDE.md
+          products/warehouse_sources/backend/temporal/data_imports/sources/CLAUDE.md
+          products/warehouse_sources/sources/CLAUDE.md
           proto/CLAUDE.md
           rust/CLAUDE.md
+          rust/cyclotron-node-migrations/CLAUDE.md
           rust/personhog-replica/CLAUDE.md
           rust/personhog-router/CLAUDE.md
           services/mcp/CLAUDE.md
           tools/hogli/CLAUDE.md
+          products/warehouse_sources/sources
           .depot
           tools/workflow-plan
           .github/scripts/flatten-parallel-steps-for-actionlint.awk
@@ -1481,6 +1522,7 @@ jobs:
           ee/hogai/sandbox/turn_event_contract.json
           products
           services/mcp/schema
+          nodejs/src/ingestion/pipelines/ai/costs/providers/llm-costs.json
           products/posthog_ai
           services/mcp/schema/exec-command-reference.md
           .depot/workflows
@@ -1496,9 +1538,9 @@ jobs:
           frontend/src/taxonomy/core-filter-definitions-by-group.json
           livestream/bot
           posthog
+          rust/capture-logs/src/metrics_avro_schema.rs
           rust/feature-flags/src/properties
           rust/feature-flags/tests/fixtures
-          services/hogql-language-service/internal/completion
           services/mcp/src/templates
           tools/hogli-commands
           .dagster_home
@@ -1509,11 +1551,15 @@ jobs:
           docker-compose.base.yml
           docker-compose.dev.yml
           docker-compose.profiles.yml
+          frontend/public/admin-console/console.css
+          frontend/public/message-preferences.css
           frontend/src/lib/agentScopes.generated.ts
           frontend/src/lib/components/AgentObjectTags/objectKinds.generated.ts
           frontend/src/lib/components/DomainConnect/templates
           frontend/src/products.json
           infra
+          nodejs/src/logs/parity/fixtures/modules/internal_verify.json
+          tools/change-prover/issuer.yml
           packages/agent/packages/agent-contracts/src/model-catalog.generated.ts
           packages/agent/packages/agent-contracts/src/objectTagKinds.generated.ts
           packages/agent/packages/agent/src/utils/gateway-routing-cases.json
@@ -1526,6 +1572,8 @@ jobs:
           services/mcp/src/resources/ui-apps.generated.ts
           services/stripe-mock/tests/conftest.py
           frontend/src/scenes/settings/SettingsMap.tsx
+          nodejs/src
+          rust
           common/__init__.py
           common/hogql_parser
           common/migration_utils
@@ -1584,7 +1632,6 @@ jobs:
           packages/quill
           bin/hobby-installer
           showcase/scripts/run_go_tests.sh
-          services/integration-service
           livestream
           products/web_analytics
           .config
@@ -1603,10 +1650,10 @@ jobs:
           showcase/scripts/check_mcp_ui_apps.sh
           showcase/scripts/build_mcp_ui_apps.sh
           nodejs
-          rust
           proto
           frontend/public/services
           frontend/jest.quarantine.ts
+          tools/deploy-requirements
           .github/workflows/update-ai-costs.yml
           showcase/scripts
           services/oauth-proxy
@@ -1623,11 +1670,15 @@ jobs:
           products/isolation_baseline.txt
           products/model_crossing_uses_baseline.txt
           .importlinter
-          frontend/public/message-preferences.css
+          hoglint.toml
+          hoglint.exceptions.toml
+          hoglint.ledger
+          tools/hoglint
           services/stripe-app
           packages/agent/packages/harness
           products/ruff.toml
           products/stamphog/packages
+          products/knowledge_writer/merge_check
           packages/agent/agent-shadow
           bin/generate_personhog_proto.sh
           showcase/scripts/build_quill.sh
@@ -1734,21 +1785,28 @@ jobs:
           .agents/skills/triaging-merge-queue-failures/scripts/mq-triage-marker.sh
           .claude/settings.json
           common/AGENTS.md
+          ee/AGENTS.md
           ee/hogai/eval/AGENTS.md
           frontend/src/AGENTS.md
+          frontend/src/layout/navigation-3000/sidepanel/AGENTS.md
           frontend/src/layout/scenes/AGENTS.md
+          frontend/src/layout/today/AGENTS.md
           frontend/src/scenes/max/AGENTS.md
+          hog/AGENTS.md
           packages/quill/AGENTS.md
           packages/quill/packages/blocks/AGENTS.md
           packages/quill/packages/charts/AGENTS.md
           packages/quill/packages/components/AGENTS.md
           packages/quill/packages/primitives/AGENTS.md
           packages/quill/packages/tokens/AGENTS.md
+          posthog/admin/console/AGENTS.md
           posthog/clickhouse/client/AGENTS.md
           posthog/clickhouse/migrations/AGENTS.md
           posthog/egress/AGENTS.md
           posthog/hogql/database/schema/AGENTS.md
           posthog/ingress/AGENTS.md
+          posthog/integrations/AGENTS.md
+          posthog/tasks/alerts/detectors/AGENTS.md
           posthog/temporal/AGENTS.md
           posthog/temporal/data_modeling/AGENTS.md
           posthog/test/AGENTS.md
@@ -1768,12 +1826,15 @@ jobs:
           products/customer_analytics/backend/AGENTS.md
           products/customer_analytics/frontend/components/Accounts/AGENTS.md
           products/dashboards/AGENTS.md
+          products/data_modeling/backend/temporal/AGENTS.md
           products/desktop/AGENTS.md
           products/desktop/packages/ui/src/features/browser-tabs/AGENTS.md
           products/desktop/packages/ui/src/features/canvas/AGENTS.md
           products/desktop/packages/ui/src/features/inbox/AGENTS.md
           products/engineering_analytics/AGENTS.md
           products/engineering_analytics/frontend/AGENTS.md
+          products/knowledge_writer/AGENTS.md
+          products/mobile/AGENTS.md
           products/posthog_ai/eval_harness/harness/AGENTS.md
           products/posthog_ai/evals/AGENTS.md
           products/posthog_ai/frontend/AGENTS.md
@@ -1784,32 +1845,44 @@ jobs:
           products/signals/backend/scout_harness/AGENTS.md
           products/signals/dags/inbox_ranking/AGENTS.md
           products/signals/eval/AGENTS.md
+          products/signals/frontend/AGENTS.md
           products/signals/skills/AGENTS.md
           products/stamphog/AGENTS.md
           products/support/scripts/AGENTS.md
+          products/today/AGENTS.md
+          products/warehouse_sources/backend/temporal/data_imports/sources/AGENTS.md
+          products/warehouse_sources/sources/AGENTS.md
           proto/AGENTS.md
           rust/AGENTS.md
+          rust/cyclotron-node-migrations/AGENTS.md
           rust/personhog-replica/AGENTS.md
           rust/personhog-router/AGENTS.md
           services/mcp/AGENTS.md
           tools/hogli/AGENTS.md
           CLAUDE.md
           common/CLAUDE.md
+          ee/CLAUDE.md
           ee/hogai/eval/CLAUDE.md
           frontend/src/CLAUDE.md
+          frontend/src/layout/navigation-3000/sidepanel/CLAUDE.md
           frontend/src/layout/scenes/CLAUDE.md
+          frontend/src/layout/today/CLAUDE.md
           frontend/src/scenes/max/CLAUDE.md
+          hog/CLAUDE.md
           packages/quill/CLAUDE.md
           packages/quill/packages/blocks/CLAUDE.md
           packages/quill/packages/charts/CLAUDE.md
           packages/quill/packages/components/CLAUDE.md
           packages/quill/packages/primitives/CLAUDE.md
           packages/quill/packages/tokens/CLAUDE.md
+          posthog/admin/console/CLAUDE.md
           posthog/clickhouse/client/CLAUDE.md
           posthog/clickhouse/migrations/CLAUDE.md
           posthog/egress/CLAUDE.md
           posthog/hogql/database/schema/CLAUDE.md
           posthog/ingress/CLAUDE.md
+          posthog/integrations/CLAUDE.md
+          posthog/tasks/alerts/detectors/CLAUDE.md
           posthog/temporal/CLAUDE.md
           posthog/temporal/data_modeling/CLAUDE.md
           posthog/test/CLAUDE.md
@@ -1829,12 +1902,15 @@ jobs:
           products/customer_analytics/backend/CLAUDE.md
           products/customer_analytics/frontend/components/Accounts/CLAUDE.md
           products/dashboards/CLAUDE.md
+          products/data_modeling/backend/temporal/CLAUDE.md
           products/desktop/CLAUDE.md
           products/desktop/packages/ui/src/features/browser-tabs/CLAUDE.md
           products/desktop/packages/ui/src/features/canvas/CLAUDE.md
           products/desktop/packages/ui/src/features/inbox/CLAUDE.md
           products/engineering_analytics/CLAUDE.md
           products/engineering_analytics/frontend/CLAUDE.md
+          products/knowledge_writer/CLAUDE.md
+          products/mobile/CLAUDE.md
           products/posthog_ai/eval_harness/harness/CLAUDE.md
           products/posthog_ai/evals/CLAUDE.md
           products/posthog_ai/frontend/CLAUDE.md
@@ -1845,15 +1921,21 @@ jobs:
           products/signals/backend/scout_harness/CLAUDE.md
           products/signals/dags/inbox_ranking/CLAUDE.md
           products/signals/eval/CLAUDE.md
+          products/signals/frontend/CLAUDE.md
           products/signals/skills/CLAUDE.md
           products/stamphog/CLAUDE.md
           products/support/scripts/CLAUDE.md
+          products/today/CLAUDE.md
+          products/warehouse_sources/backend/temporal/data_imports/sources/CLAUDE.md
+          products/warehouse_sources/sources/CLAUDE.md
           proto/CLAUDE.md
           rust/CLAUDE.md
+          rust/cyclotron-node-migrations/CLAUDE.md
           rust/personhog-replica/CLAUDE.md
           rust/personhog-router/CLAUDE.md
           services/mcp/CLAUDE.md
           tools/hogli/CLAUDE.md
+          products/warehouse_sources/sources
           .depot
           tools/workflow-plan
           .github/scripts/flatten-parallel-steps-for-actionlint.awk
@@ -2082,7 +2164,7 @@ jobs:
         AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID || env.R2_ACCESS_KEY_ID }}
         AWS_REGION: auto
         AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY || env.R2_SECRET_ACCESS_KEY }}
-        ENACT_ENVIRONMENT_DIRS: "[\".\",\"bin/hobby-installer\",\"cli\",\"livestream\",\"nodejs\",\"products/desktop\",\"proto\",\"rust\",\"services/agent-proxy\",\"services/integration-service\",\"services/mcp\",\"services/oauth-proxy\",\"tools/openapi-codegen\",\"tools/phrocs\"]"
+        ENACT_ENVIRONMENT_DIRS: "[\".\",\"bin/hobby-installer\",\"cli\",\"livestream\",\"nodejs\",\"products/desktop\",\"proto\",\"rust\",\"services/agent-proxy\",\"services/mcp\",\"services/oauth-proxy\",\"tools/openapi-codegen\",\"tools/phrocs\"]"
         ENACT_ENVIRONMENT_FILES: "[]"
         ENACT_JOB_SERVICES: ""
         ENACT_PREPARE_ENVIRONMENT_FILES: "[\"enve.cue\"]"
@@ -2946,6 +3028,8 @@ jobs:
           docker-compose.base.yml
           docker-compose.dev.yml
           docker-compose.profiles.yml
+          frontend/public/admin-console/console.css
+          frontend/public/message-preferences.css
           frontend/src/lib/agentScopes.generated.ts
           frontend/src/lib/components/AgentObjectTags/objectKinds.generated.ts
           frontend/src/lib/components/DomainConnect/templates
@@ -2954,14 +3038,17 @@ jobs:
           frontend/src/taxonomy/core-filter-definitions-by-group.json
           infra
           livestream/bot
+          nodejs/src/ingestion/pipelines/ai/costs/providers/llm-costs.json
+          nodejs/src/logs/parity/fixtures/modules/internal_verify.json
+          tools/change-prover/issuer.yml
           packages/agent/packages/agent-contracts/src/model-catalog.generated.ts
           packages/agent/packages/agent-contracts/src/objectTagKinds.generated.ts
           packages/agent/packages/agent/src/utils/gateway-routing-cases.json
+          rust/capture-logs/src/metrics_avro_schema.rs
           rust/common/ingestion_warnings/warning_types.generated.json
           rust/feature-flags/src/properties
           rust/feature-flags/tests/fixtures
           rust/persons_migrations
-          services/hogql-language-service/internal/completion
           services/mcp/schema
           services/mcp/scripts/build-cli-agent-scopes.ts
           services/mcp/scripts/generate-ui-apps.ts
@@ -2970,12 +3057,12 @@ jobs:
           services/mcp/src/resources/ui-apps.generated.ts
           services/mcp/src/templates
           services/stripe-mock/tests/conftest.py
-          frontend/public/message-preferences.css
           services/stripe-app
           frontend/public/services
           packages/agent/packages/harness
           products/ruff.toml
           products/stamphog/packages
+          products/knowledge_writer/merge_check
           packages/agent/agent-shadow
     - name: Checkout Repository (sparse)
       id: sparse_checkout
@@ -3123,6 +3210,8 @@ jobs:
           docker-compose.base.yml
           docker-compose.dev.yml
           docker-compose.profiles.yml
+          frontend/public/admin-console/console.css
+          frontend/public/message-preferences.css
           frontend/src/lib/agentScopes.generated.ts
           frontend/src/lib/components/AgentObjectTags/objectKinds.generated.ts
           frontend/src/lib/components/DomainConnect/templates
@@ -3131,14 +3220,17 @@ jobs:
           frontend/src/taxonomy/core-filter-definitions-by-group.json
           infra
           livestream/bot
+          nodejs/src/ingestion/pipelines/ai/costs/providers/llm-costs.json
+          nodejs/src/logs/parity/fixtures/modules/internal_verify.json
+          tools/change-prover/issuer.yml
           packages/agent/packages/agent-contracts/src/model-catalog.generated.ts
           packages/agent/packages/agent-contracts/src/objectTagKinds.generated.ts
           packages/agent/packages/agent/src/utils/gateway-routing-cases.json
+          rust/capture-logs/src/metrics_avro_schema.rs
           rust/common/ingestion_warnings/warning_types.generated.json
           rust/feature-flags/src/properties
           rust/feature-flags/tests/fixtures
           rust/persons_migrations
-          services/hogql-language-service/internal/completion
           services/mcp/schema
           services/mcp/scripts/build-cli-agent-scopes.ts
           services/mcp/scripts/generate-ui-apps.ts
@@ -3147,12 +3239,12 @@ jobs:
           services/mcp/src/resources/ui-apps.generated.ts
           services/mcp/src/templates
           services/stripe-mock/tests/conftest.py
-          frontend/public/message-preferences.css
           services/stripe-app
           frontend/public/services
           packages/agent/packages/harness
           products/ruff.toml
           products/stamphog/packages
+          products/knowledge_writer/merge_check
           packages/agent/agent-shadow
     - name: Install committed enact & enve builds
       run: |
@@ -3894,6 +3986,7 @@ jobs:
           ee/hogai/sandbox/turn_event_contract.json
           products
           services/mcp/schema
+          nodejs/src/ingestion/pipelines/ai/costs/providers/llm-costs.json
           products/posthog_ai
           services/mcp/schema/exec-command-reference.md
           .depot/workflows
@@ -3909,9 +4002,9 @@ jobs:
           frontend/src/taxonomy/core-filter-definitions-by-group.json
           livestream/bot
           posthog
+          rust/capture-logs/src/metrics_avro_schema.rs
           rust/feature-flags/src/properties
           rust/feature-flags/tests/fixtures
-          services/hogql-language-service/internal/completion
           services/mcp/src/templates
           tools/hogli-commands
           .dagster_home
@@ -3922,11 +4015,15 @@ jobs:
           docker-compose.base.yml
           docker-compose.dev.yml
           docker-compose.profiles.yml
+          frontend/public/admin-console/console.css
+          frontend/public/message-preferences.css
           frontend/src/lib/agentScopes.generated.ts
           frontend/src/lib/components/AgentObjectTags/objectKinds.generated.ts
           frontend/src/lib/components/DomainConnect/templates
           frontend/src/products.json
           infra
+          nodejs/src/logs/parity/fixtures/modules/internal_verify.json
+          tools/change-prover/issuer.yml
           packages/agent/packages/agent-contracts/src/model-catalog.generated.ts
           packages/agent/packages/agent-contracts/src/objectTagKinds.generated.ts
           packages/agent/packages/agent/src/utils/gateway-routing-cases.json
@@ -3939,6 +4036,8 @@ jobs:
           services/mcp/src/resources/ui-apps.generated.ts
           services/stripe-mock/tests/conftest.py
           frontend/src/scenes/settings/SettingsMap.tsx
+          nodejs/src
+          rust
           common/__init__.py
           common/hogql_parser
           common/migration_utils
@@ -3967,7 +4066,6 @@ jobs:
           clickhouse-udfs
           posthog/dags
           rust/deltalite/python
-          rust
           products/desktop
           services/llm-gateway/src/llm_gateway/rate_limiting/model_cost_overrides.py
           products/tasks/backend/models.py
@@ -3993,7 +4091,6 @@ jobs:
           common/esbuilder
           common/plugin_transpiler
           docs/onboarding
-          frontend/public/message-preferences.css
           frontend/public/services
           infra/clickhouse/config.xml
           packages/agent/packages/harness
@@ -4108,6 +4205,8 @@ jobs:
           .depot/actions
           docs/onboarding/package.json
           frontend/@posthog/lemon-ui/package.json
+          frontend/src/toolbar/extension/release/package.json
+          hog/package.json
           packages/quill/package.json
           packages/quill/apps/storybook/package.json
           packages/quill/packages/blocks/package.json
@@ -4118,7 +4217,7 @@ jobs:
           packages/quill/packages/tokens/package.json
           playwright/package.json
           services/agent-proxy/package.json
-          services/integration-service/package.json
+          services/credentials-service/package.json
           services/oauth-proxy/package.json
           services/stripe-app/package.json
           tools/dagster_test_selection.py
@@ -4136,9 +4235,7 @@ jobs:
           .github/workflows/ci.yml
           bin/hobby-installer
           showcase/scripts/run_go_tests.sh
-          services/hogql-language-service
           common/hogvm
-          services/integration-service
           products/web_analytics
           services/llm-gateway
           .config
@@ -4159,6 +4256,7 @@ jobs:
           services/mcp/tests
           frontend/src/queries
           frontend/jest.quarantine.ts
+          tools/deploy-requirements
           .github/workflows/update-ai-costs.yml
           services/oauth-proxy
           frontend/package.json
@@ -4173,8 +4271,13 @@ jobs:
           products/isolation_baseline.txt
           products/model_crossing_uses_baseline.txt
           .importlinter
+          hoglint.toml
+          hoglint.exceptions.toml
+          hoglint.ledger
+          tools/hoglint
           products/ruff.toml
           products/stamphog/packages
+          products/knowledge_writer/merge_check
           packages/agent/agent-shadow
           bin/generate_personhog_proto.sh
           tools/query-performance-ai
@@ -4196,21 +4299,28 @@ jobs:
           .agents/skills/triaging-merge-queue-failures/scripts/mq-triage-marker.sh
           .claude/settings.json
           common/AGENTS.md
+          ee/AGENTS.md
           ee/hogai/eval/AGENTS.md
           frontend/src/AGENTS.md
+          frontend/src/layout/navigation-3000/sidepanel/AGENTS.md
           frontend/src/layout/scenes/AGENTS.md
+          frontend/src/layout/today/AGENTS.md
           frontend/src/scenes/max/AGENTS.md
+          hog/AGENTS.md
           packages/quill/AGENTS.md
           packages/quill/packages/blocks/AGENTS.md
           packages/quill/packages/charts/AGENTS.md
           packages/quill/packages/components/AGENTS.md
           packages/quill/packages/primitives/AGENTS.md
           packages/quill/packages/tokens/AGENTS.md
+          posthog/admin/console/AGENTS.md
           posthog/clickhouse/client/AGENTS.md
           posthog/clickhouse/migrations/AGENTS.md
           posthog/egress/AGENTS.md
           posthog/hogql/database/schema/AGENTS.md
           posthog/ingress/AGENTS.md
+          posthog/integrations/AGENTS.md
+          posthog/tasks/alerts/detectors/AGENTS.md
           posthog/temporal/AGENTS.md
           posthog/temporal/data_modeling/AGENTS.md
           posthog/test/AGENTS.md
@@ -4230,12 +4340,15 @@ jobs:
           products/customer_analytics/backend/AGENTS.md
           products/customer_analytics/frontend/components/Accounts/AGENTS.md
           products/dashboards/AGENTS.md
+          products/data_modeling/backend/temporal/AGENTS.md
           products/desktop/AGENTS.md
           products/desktop/packages/ui/src/features/browser-tabs/AGENTS.md
           products/desktop/packages/ui/src/features/canvas/AGENTS.md
           products/desktop/packages/ui/src/features/inbox/AGENTS.md
           products/engineering_analytics/AGENTS.md
           products/engineering_analytics/frontend/AGENTS.md
+          products/knowledge_writer/AGENTS.md
+          products/mobile/AGENTS.md
           products/posthog_ai/eval_harness/harness/AGENTS.md
           products/posthog_ai/evals/AGENTS.md
           products/posthog_ai/frontend/AGENTS.md
@@ -4246,32 +4359,44 @@ jobs:
           products/signals/backend/scout_harness/AGENTS.md
           products/signals/dags/inbox_ranking/AGENTS.md
           products/signals/eval/AGENTS.md
+          products/signals/frontend/AGENTS.md
           products/signals/skills/AGENTS.md
           products/stamphog/AGENTS.md
           products/support/scripts/AGENTS.md
+          products/today/AGENTS.md
+          products/warehouse_sources/backend/temporal/data_imports/sources/AGENTS.md
+          products/warehouse_sources/sources/AGENTS.md
           proto/AGENTS.md
           rust/AGENTS.md
+          rust/cyclotron-node-migrations/AGENTS.md
           rust/personhog-replica/AGENTS.md
           rust/personhog-router/AGENTS.md
           services/mcp/AGENTS.md
           tools/hogli/AGENTS.md
           CLAUDE.md
           common/CLAUDE.md
+          ee/CLAUDE.md
           ee/hogai/eval/CLAUDE.md
           frontend/src/CLAUDE.md
+          frontend/src/layout/navigation-3000/sidepanel/CLAUDE.md
           frontend/src/layout/scenes/CLAUDE.md
+          frontend/src/layout/today/CLAUDE.md
           frontend/src/scenes/max/CLAUDE.md
+          hog/CLAUDE.md
           packages/quill/CLAUDE.md
           packages/quill/packages/blocks/CLAUDE.md
           packages/quill/packages/charts/CLAUDE.md
           packages/quill/packages/components/CLAUDE.md
           packages/quill/packages/primitives/CLAUDE.md
           packages/quill/packages/tokens/CLAUDE.md
+          posthog/admin/console/CLAUDE.md
           posthog/clickhouse/client/CLAUDE.md
           posthog/clickhouse/migrations/CLAUDE.md
           posthog/egress/CLAUDE.md
           posthog/hogql/database/schema/CLAUDE.md
           posthog/ingress/CLAUDE.md
+          posthog/integrations/CLAUDE.md
+          posthog/tasks/alerts/detectors/CLAUDE.md
           posthog/temporal/CLAUDE.md
           posthog/temporal/data_modeling/CLAUDE.md
           posthog/test/CLAUDE.md
@@ -4291,12 +4416,15 @@ jobs:
           products/customer_analytics/backend/CLAUDE.md
           products/customer_analytics/frontend/components/Accounts/CLAUDE.md
           products/dashboards/CLAUDE.md
+          products/data_modeling/backend/temporal/CLAUDE.md
           products/desktop/CLAUDE.md
           products/desktop/packages/ui/src/features/browser-tabs/CLAUDE.md
           products/desktop/packages/ui/src/features/canvas/CLAUDE.md
           products/desktop/packages/ui/src/features/inbox/CLAUDE.md
           products/engineering_analytics/CLAUDE.md
           products/engineering_analytics/frontend/CLAUDE.md
+          products/knowledge_writer/CLAUDE.md
+          products/mobile/CLAUDE.md
           products/posthog_ai/eval_harness/harness/CLAUDE.md
           products/posthog_ai/evals/CLAUDE.md
           products/posthog_ai/frontend/CLAUDE.md
@@ -4307,11 +4435,16 @@ jobs:
           products/signals/backend/scout_harness/CLAUDE.md
           products/signals/dags/inbox_ranking/CLAUDE.md
           products/signals/eval/CLAUDE.md
+          products/signals/frontend/CLAUDE.md
           products/signals/skills/CLAUDE.md
           products/stamphog/CLAUDE.md
           products/support/scripts/CLAUDE.md
+          products/today/CLAUDE.md
+          products/warehouse_sources/backend/temporal/data_imports/sources/CLAUDE.md
+          products/warehouse_sources/sources/CLAUDE.md
           proto/CLAUDE.md
           rust/CLAUDE.md
+          rust/cyclotron-node-migrations/CLAUDE.md
           rust/personhog-replica/CLAUDE.md
           rust/personhog-router/CLAUDE.md
           services/mcp/CLAUDE.md
@@ -4348,6 +4481,7 @@ jobs:
           nodejs/package.json
           nodejs/tests/cdp/cdp-api.test.ts
           playwright/e2e
+          products/warehouse_sources/sources
           .depot
           tools/workflow-plan
           .github/scripts/flatten-parallel-steps-for-actionlint.awk
@@ -4486,6 +4620,7 @@ jobs:
           ee/hogai/sandbox/turn_event_contract.json
           products
           services/mcp/schema
+          nodejs/src/ingestion/pipelines/ai/costs/providers/llm-costs.json
           products/posthog_ai
           services/mcp/schema/exec-command-reference.md
           .depot/workflows
@@ -4501,9 +4636,9 @@ jobs:
           frontend/src/taxonomy/core-filter-definitions-by-group.json
           livestream/bot
           posthog
+          rust/capture-logs/src/metrics_avro_schema.rs
           rust/feature-flags/src/properties
           rust/feature-flags/tests/fixtures
-          services/hogql-language-service/internal/completion
           services/mcp/src/templates
           tools/hogli-commands
           .dagster_home
@@ -4514,11 +4649,15 @@ jobs:
           docker-compose.base.yml
           docker-compose.dev.yml
           docker-compose.profiles.yml
+          frontend/public/admin-console/console.css
+          frontend/public/message-preferences.css
           frontend/src/lib/agentScopes.generated.ts
           frontend/src/lib/components/AgentObjectTags/objectKinds.generated.ts
           frontend/src/lib/components/DomainConnect/templates
           frontend/src/products.json
           infra
+          nodejs/src/logs/parity/fixtures/modules/internal_verify.json
+          tools/change-prover/issuer.yml
           packages/agent/packages/agent-contracts/src/model-catalog.generated.ts
           packages/agent/packages/agent-contracts/src/objectTagKinds.generated.ts
           packages/agent/packages/agent/src/utils/gateway-routing-cases.json
@@ -4531,6 +4670,8 @@ jobs:
           services/mcp/src/resources/ui-apps.generated.ts
           services/stripe-mock/tests/conftest.py
           frontend/src/scenes/settings/SettingsMap.tsx
+          nodejs/src
+          rust
           common/__init__.py
           common/hogql_parser
           common/migration_utils
@@ -4559,7 +4700,6 @@ jobs:
           clickhouse-udfs
           posthog/dags
           rust/deltalite/python
-          rust
           products/desktop
           services/llm-gateway/src/llm_gateway/rate_limiting/model_cost_overrides.py
           products/tasks/backend/models.py
@@ -4585,7 +4725,6 @@ jobs:
           common/esbuilder
           common/plugin_transpiler
           docs/onboarding
-          frontend/public/message-preferences.css
           frontend/public/services
           infra/clickhouse/config.xml
           packages/agent/packages/harness
@@ -4700,6 +4839,8 @@ jobs:
           .depot/actions
           docs/onboarding/package.json
           frontend/@posthog/lemon-ui/package.json
+          frontend/src/toolbar/extension/release/package.json
+          hog/package.json
           packages/quill/package.json
           packages/quill/apps/storybook/package.json
           packages/quill/packages/blocks/package.json
@@ -4710,7 +4851,7 @@ jobs:
           packages/quill/packages/tokens/package.json
           playwright/package.json
           services/agent-proxy/package.json
-          services/integration-service/package.json
+          services/credentials-service/package.json
           services/oauth-proxy/package.json
           services/stripe-app/package.json
           tools/dagster_test_selection.py
@@ -4728,9 +4869,7 @@ jobs:
           .github/workflows/ci.yml
           bin/hobby-installer
           showcase/scripts/run_go_tests.sh
-          services/hogql-language-service
           common/hogvm
-          services/integration-service
           products/web_analytics
           services/llm-gateway
           .config
@@ -4751,6 +4890,7 @@ jobs:
           services/mcp/tests
           frontend/src/queries
           frontend/jest.quarantine.ts
+          tools/deploy-requirements
           .github/workflows/update-ai-costs.yml
           services/oauth-proxy
           frontend/package.json
@@ -4765,8 +4905,13 @@ jobs:
           products/isolation_baseline.txt
           products/model_crossing_uses_baseline.txt
           .importlinter
+          hoglint.toml
+          hoglint.exceptions.toml
+          hoglint.ledger
+          tools/hoglint
           products/ruff.toml
           products/stamphog/packages
+          products/knowledge_writer/merge_check
           packages/agent/agent-shadow
           bin/generate_personhog_proto.sh
           tools/query-performance-ai
@@ -4788,21 +4933,28 @@ jobs:
           .agents/skills/triaging-merge-queue-failures/scripts/mq-triage-marker.sh
           .claude/settings.json
           common/AGENTS.md
+          ee/AGENTS.md
           ee/hogai/eval/AGENTS.md
           frontend/src/AGENTS.md
+          frontend/src/layout/navigation-3000/sidepanel/AGENTS.md
           frontend/src/layout/scenes/AGENTS.md
+          frontend/src/layout/today/AGENTS.md
           frontend/src/scenes/max/AGENTS.md
+          hog/AGENTS.md
           packages/quill/AGENTS.md
           packages/quill/packages/blocks/AGENTS.md
           packages/quill/packages/charts/AGENTS.md
           packages/quill/packages/components/AGENTS.md
           packages/quill/packages/primitives/AGENTS.md
           packages/quill/packages/tokens/AGENTS.md
+          posthog/admin/console/AGENTS.md
           posthog/clickhouse/client/AGENTS.md
           posthog/clickhouse/migrations/AGENTS.md
           posthog/egress/AGENTS.md
           posthog/hogql/database/schema/AGENTS.md
           posthog/ingress/AGENTS.md
+          posthog/integrations/AGENTS.md
+          posthog/tasks/alerts/detectors/AGENTS.md
           posthog/temporal/AGENTS.md
           posthog/temporal/data_modeling/AGENTS.md
           posthog/test/AGENTS.md
@@ -4822,12 +4974,15 @@ jobs:
           products/customer_analytics/backend/AGENTS.md
           products/customer_analytics/frontend/components/Accounts/AGENTS.md
           products/dashboards/AGENTS.md
+          products/data_modeling/backend/temporal/AGENTS.md
           products/desktop/AGENTS.md
           products/desktop/packages/ui/src/features/browser-tabs/AGENTS.md
           products/desktop/packages/ui/src/features/canvas/AGENTS.md
           products/desktop/packages/ui/src/features/inbox/AGENTS.md
           products/engineering_analytics/AGENTS.md
           products/engineering_analytics/frontend/AGENTS.md
+          products/knowledge_writer/AGENTS.md
+          products/mobile/AGENTS.md
           products/posthog_ai/eval_harness/harness/AGENTS.md
           products/posthog_ai/evals/AGENTS.md
           products/posthog_ai/frontend/AGENTS.md
@@ -4838,32 +4993,44 @@ jobs:
           products/signals/backend/scout_harness/AGENTS.md
           products/signals/dags/inbox_ranking/AGENTS.md
           products/signals/eval/AGENTS.md
+          products/signals/frontend/AGENTS.md
           products/signals/skills/AGENTS.md
           products/stamphog/AGENTS.md
           products/support/scripts/AGENTS.md
+          products/today/AGENTS.md
+          products/warehouse_sources/backend/temporal/data_imports/sources/AGENTS.md
+          products/warehouse_sources/sources/AGENTS.md
           proto/AGENTS.md
           rust/AGENTS.md
+          rust/cyclotron-node-migrations/AGENTS.md
           rust/personhog-replica/AGENTS.md
           rust/personhog-router/AGENTS.md
           services/mcp/AGENTS.md
           tools/hogli/AGENTS.md
           CLAUDE.md
           common/CLAUDE.md
+          ee/CLAUDE.md
           ee/hogai/eval/CLAUDE.md
           frontend/src/CLAUDE.md
+          frontend/src/layout/navigation-3000/sidepanel/CLAUDE.md
           frontend/src/layout/scenes/CLAUDE.md
+          frontend/src/layout/today/CLAUDE.md
           frontend/src/scenes/max/CLAUDE.md
+          hog/CLAUDE.md
           packages/quill/CLAUDE.md
           packages/quill/packages/blocks/CLAUDE.md
           packages/quill/packages/charts/CLAUDE.md
           packages/quill/packages/components/CLAUDE.md
           packages/quill/packages/primitives/CLAUDE.md
           packages/quill/packages/tokens/CLAUDE.md
+          posthog/admin/console/CLAUDE.md
           posthog/clickhouse/client/CLAUDE.md
           posthog/clickhouse/migrations/CLAUDE.md
           posthog/egress/CLAUDE.md
           posthog/hogql/database/schema/CLAUDE.md
           posthog/ingress/CLAUDE.md
+          posthog/integrations/CLAUDE.md
+          posthog/tasks/alerts/detectors/CLAUDE.md
           posthog/temporal/CLAUDE.md
           posthog/temporal/data_modeling/CLAUDE.md
           posthog/test/CLAUDE.md
@@ -4883,12 +5050,15 @@ jobs:
           products/customer_analytics/backend/CLAUDE.md
           products/customer_analytics/frontend/components/Accounts/CLAUDE.md
           products/dashboards/CLAUDE.md
+          products/data_modeling/backend/temporal/CLAUDE.md
           products/desktop/CLAUDE.md
           products/desktop/packages/ui/src/features/browser-tabs/CLAUDE.md
           products/desktop/packages/ui/src/features/canvas/CLAUDE.md
           products/desktop/packages/ui/src/features/inbox/CLAUDE.md
           products/engineering_analytics/CLAUDE.md
           products/engineering_analytics/frontend/CLAUDE.md
+          products/knowledge_writer/CLAUDE.md
+          products/mobile/CLAUDE.md
           products/posthog_ai/eval_harness/harness/CLAUDE.md
           products/posthog_ai/evals/CLAUDE.md
           products/posthog_ai/frontend/CLAUDE.md
@@ -4899,11 +5069,16 @@ jobs:
           products/signals/backend/scout_harness/CLAUDE.md
           products/signals/dags/inbox_ranking/CLAUDE.md
           products/signals/eval/CLAUDE.md
+          products/signals/frontend/CLAUDE.md
           products/signals/skills/CLAUDE.md
           products/stamphog/CLAUDE.md
           products/support/scripts/CLAUDE.md
+          products/today/CLAUDE.md
+          products/warehouse_sources/backend/temporal/data_imports/sources/CLAUDE.md
+          products/warehouse_sources/sources/CLAUDE.md
           proto/CLAUDE.md
           rust/CLAUDE.md
+          rust/cyclotron-node-migrations/CLAUDE.md
           rust/personhog-replica/CLAUDE.md
           rust/personhog-router/CLAUDE.md
           services/mcp/CLAUDE.md
@@ -4940,6 +5115,7 @@ jobs:
           nodejs/package.json
           nodejs/tests/cdp/cdp-api.test.ts
           playwright/e2e
+          products/warehouse_sources/sources
           .depot
           tools/workflow-plan
           .github/scripts/flatten-parallel-steps-for-actionlint.awk
@@ -4999,7 +5175,7 @@ jobs:
         AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID || env.R2_ACCESS_KEY_ID }}
         AWS_REGION: auto
         AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY || env.R2_SECRET_ACCESS_KEY }}
-        ENACT_ENVIRONMENT_DIRS: "[\".\",\"bin/hobby-installer\",\"cli\",\"clickhouse-udfs\",\"common/hogvm\",\"funnel-udf\",\"livestream\",\"nodejs\",\"packages/agent\",\"packages/quill\",\"posthog/api/test/rust_integration\",\"products/desktop\",\"proto\",\"rust\",\"rust/deltalite/python\",\"rust/personhog-test-harness\",\"services/agent-proxy\",\"services/hogql-language-service\",\"services/integration-service\",\"services/llm-gateway\",\"services/mcp\",\"services/mcp/tests\",\"services/oauth-proxy\",\"tools/openapi-codegen\",\"tools/phrocs\"]"
+        ENACT_ENVIRONMENT_DIRS: "[\".\",\"bin/hobby-installer\",\"cli\",\"clickhouse-udfs\",\"common/hogvm\",\"funnel-udf\",\"livestream\",\"nodejs\",\"packages/agent\",\"packages/quill\",\"posthog/api/test/rust_integration\",\"products/desktop\",\"proto\",\"rust\",\"rust/deltalite/python\",\"rust/personhog-test-harness\",\"services/agent-proxy\",\"services/llm-gateway\",\"services/mcp\",\"services/mcp/tests\",\"services/oauth-proxy\",\"tools/openapi-codegen\",\"tools/phrocs\"]"
         ENACT_ENVIRONMENT_FILES: "[]"
         ENACT_JOB_SERVICES: azurite,clickhouse,etcd,kafka,postgres,redis,seaweedfs,seaweedfs-open,temporal,valkey-cluster
         ENACT_PREPARE_ENVIRONMENT_FILES: "[\"enve.cue\"]"
@@ -5205,6 +5381,7 @@ jobs:
           ee/hogai/sandbox/turn_event_contract.json
           products
           services/mcp/schema
+          nodejs/src/ingestion/pipelines/ai/costs/providers/llm-costs.json
           products/posthog_ai
           services/mcp/schema/exec-command-reference.md
           .depot/workflows
@@ -5220,9 +5397,9 @@ jobs:
           frontend/src/taxonomy/core-filter-definitions-by-group.json
           livestream/bot
           posthog
+          rust/capture-logs/src/metrics_avro_schema.rs
           rust/feature-flags/src/properties
           rust/feature-flags/tests/fixtures
-          services/hogql-language-service/internal/completion
           services/mcp/src/templates
           tools/hogli-commands
           .dagster_home
@@ -5233,11 +5410,15 @@ jobs:
           docker-compose.base.yml
           docker-compose.dev.yml
           docker-compose.profiles.yml
+          frontend/public/admin-console/console.css
+          frontend/public/message-preferences.css
           frontend/src/lib/agentScopes.generated.ts
           frontend/src/lib/components/AgentObjectTags/objectKinds.generated.ts
           frontend/src/lib/components/DomainConnect/templates
           frontend/src/products.json
           infra
+          nodejs/src/logs/parity/fixtures/modules/internal_verify.json
+          tools/change-prover/issuer.yml
           packages/agent/packages/agent-contracts/src/model-catalog.generated.ts
           packages/agent/packages/agent-contracts/src/objectTagKinds.generated.ts
           packages/agent/packages/agent/src/utils/gateway-routing-cases.json
@@ -5250,6 +5431,8 @@ jobs:
           services/mcp/src/resources/ui-apps.generated.ts
           services/stripe-mock/tests/conftest.py
           frontend/src/scenes/settings/SettingsMap.tsx
+          nodejs/src
+          rust
           common/__init__.py
           common/hogql_parser
           common/migration_utils
@@ -5278,7 +5461,6 @@ jobs:
           clickhouse-udfs
           posthog/dags
           rust/deltalite/python
-          rust
           products/desktop
           services/llm-gateway/src/llm_gateway/rate_limiting/model_cost_overrides.py
           products/tasks/backend/models.py
@@ -5304,7 +5486,6 @@ jobs:
           common/esbuilder
           common/plugin_transpiler
           docs/onboarding
-          frontend/public/message-preferences.css
           frontend/public/services
           infra/clickhouse/config.xml
           packages/agent/packages/harness
@@ -5419,6 +5600,8 @@ jobs:
           .depot/actions
           docs/onboarding/package.json
           frontend/@posthog/lemon-ui/package.json
+          frontend/src/toolbar/extension/release/package.json
+          hog/package.json
           packages/quill/package.json
           packages/quill/apps/storybook/package.json
           packages/quill/packages/blocks/package.json
@@ -5429,7 +5612,7 @@ jobs:
           packages/quill/packages/tokens/package.json
           playwright/package.json
           services/agent-proxy/package.json
-          services/integration-service/package.json
+          services/credentials-service/package.json
           services/oauth-proxy/package.json
           services/stripe-app/package.json
           tools/dagster_test_selection.py
@@ -5447,9 +5630,7 @@ jobs:
           .github/workflows/ci.yml
           bin/hobby-installer
           showcase/scripts/run_go_tests.sh
-          services/hogql-language-service
           common/hogvm
-          services/integration-service
           products/web_analytics
           services/llm-gateway
           .config
@@ -5470,6 +5651,7 @@ jobs:
           services/mcp/tests
           frontend/src/queries
           frontend/jest.quarantine.ts
+          tools/deploy-requirements
           .github/workflows/update-ai-costs.yml
           services/oauth-proxy
           frontend/package.json
@@ -5484,8 +5666,13 @@ jobs:
           products/isolation_baseline.txt
           products/model_crossing_uses_baseline.txt
           .importlinter
+          hoglint.toml
+          hoglint.exceptions.toml
+          hoglint.ledger
+          tools/hoglint
           products/ruff.toml
           products/stamphog/packages
+          products/knowledge_writer/merge_check
           packages/agent/agent-shadow
           bin/generate_personhog_proto.sh
           tools/query-performance-ai
@@ -5507,21 +5694,28 @@ jobs:
           .agents/skills/triaging-merge-queue-failures/scripts/mq-triage-marker.sh
           .claude/settings.json
           common/AGENTS.md
+          ee/AGENTS.md
           ee/hogai/eval/AGENTS.md
           frontend/src/AGENTS.md
+          frontend/src/layout/navigation-3000/sidepanel/AGENTS.md
           frontend/src/layout/scenes/AGENTS.md
+          frontend/src/layout/today/AGENTS.md
           frontend/src/scenes/max/AGENTS.md
+          hog/AGENTS.md
           packages/quill/AGENTS.md
           packages/quill/packages/blocks/AGENTS.md
           packages/quill/packages/charts/AGENTS.md
           packages/quill/packages/components/AGENTS.md
           packages/quill/packages/primitives/AGENTS.md
           packages/quill/packages/tokens/AGENTS.md
+          posthog/admin/console/AGENTS.md
           posthog/clickhouse/client/AGENTS.md
           posthog/clickhouse/migrations/AGENTS.md
           posthog/egress/AGENTS.md
           posthog/hogql/database/schema/AGENTS.md
           posthog/ingress/AGENTS.md
+          posthog/integrations/AGENTS.md
+          posthog/tasks/alerts/detectors/AGENTS.md
           posthog/temporal/AGENTS.md
           posthog/temporal/data_modeling/AGENTS.md
           posthog/test/AGENTS.md
@@ -5541,12 +5735,15 @@ jobs:
           products/customer_analytics/backend/AGENTS.md
           products/customer_analytics/frontend/components/Accounts/AGENTS.md
           products/dashboards/AGENTS.md
+          products/data_modeling/backend/temporal/AGENTS.md
           products/desktop/AGENTS.md
           products/desktop/packages/ui/src/features/browser-tabs/AGENTS.md
           products/desktop/packages/ui/src/features/canvas/AGENTS.md
           products/desktop/packages/ui/src/features/inbox/AGENTS.md
           products/engineering_analytics/AGENTS.md
           products/engineering_analytics/frontend/AGENTS.md
+          products/knowledge_writer/AGENTS.md
+          products/mobile/AGENTS.md
           products/posthog_ai/eval_harness/harness/AGENTS.md
           products/posthog_ai/evals/AGENTS.md
           products/posthog_ai/frontend/AGENTS.md
@@ -5557,32 +5754,44 @@ jobs:
           products/signals/backend/scout_harness/AGENTS.md
           products/signals/dags/inbox_ranking/AGENTS.md
           products/signals/eval/AGENTS.md
+          products/signals/frontend/AGENTS.md
           products/signals/skills/AGENTS.md
           products/stamphog/AGENTS.md
           products/support/scripts/AGENTS.md
+          products/today/AGENTS.md
+          products/warehouse_sources/backend/temporal/data_imports/sources/AGENTS.md
+          products/warehouse_sources/sources/AGENTS.md
           proto/AGENTS.md
           rust/AGENTS.md
+          rust/cyclotron-node-migrations/AGENTS.md
           rust/personhog-replica/AGENTS.md
           rust/personhog-router/AGENTS.md
           services/mcp/AGENTS.md
           tools/hogli/AGENTS.md
           CLAUDE.md
           common/CLAUDE.md
+          ee/CLAUDE.md
           ee/hogai/eval/CLAUDE.md
           frontend/src/CLAUDE.md
+          frontend/src/layout/navigation-3000/sidepanel/CLAUDE.md
           frontend/src/layout/scenes/CLAUDE.md
+          frontend/src/layout/today/CLAUDE.md
           frontend/src/scenes/max/CLAUDE.md
+          hog/CLAUDE.md
           packages/quill/CLAUDE.md
           packages/quill/packages/blocks/CLAUDE.md
           packages/quill/packages/charts/CLAUDE.md
           packages/quill/packages/components/CLAUDE.md
           packages/quill/packages/primitives/CLAUDE.md
           packages/quill/packages/tokens/CLAUDE.md
+          posthog/admin/console/CLAUDE.md
           posthog/clickhouse/client/CLAUDE.md
           posthog/clickhouse/migrations/CLAUDE.md
           posthog/egress/CLAUDE.md
           posthog/hogql/database/schema/CLAUDE.md
           posthog/ingress/CLAUDE.md
+          posthog/integrations/CLAUDE.md
+          posthog/tasks/alerts/detectors/CLAUDE.md
           posthog/temporal/CLAUDE.md
           posthog/temporal/data_modeling/CLAUDE.md
           posthog/test/CLAUDE.md
@@ -5602,12 +5811,15 @@ jobs:
           products/customer_analytics/backend/CLAUDE.md
           products/customer_analytics/frontend/components/Accounts/CLAUDE.md
           products/dashboards/CLAUDE.md
+          products/data_modeling/backend/temporal/CLAUDE.md
           products/desktop/CLAUDE.md
           products/desktop/packages/ui/src/features/browser-tabs/CLAUDE.md
           products/desktop/packages/ui/src/features/canvas/CLAUDE.md
           products/desktop/packages/ui/src/features/inbox/CLAUDE.md
           products/engineering_analytics/CLAUDE.md
           products/engineering_analytics/frontend/CLAUDE.md
+          products/knowledge_writer/CLAUDE.md
+          products/mobile/CLAUDE.md
           products/posthog_ai/eval_harness/harness/CLAUDE.md
           products/posthog_ai/evals/CLAUDE.md
           products/posthog_ai/frontend/CLAUDE.md
@@ -5618,11 +5830,16 @@ jobs:
           products/signals/backend/scout_harness/CLAUDE.md
           products/signals/dags/inbox_ranking/CLAUDE.md
           products/signals/eval/CLAUDE.md
+          products/signals/frontend/CLAUDE.md
           products/signals/skills/CLAUDE.md
           products/stamphog/CLAUDE.md
           products/support/scripts/CLAUDE.md
+          products/today/CLAUDE.md
+          products/warehouse_sources/backend/temporal/data_imports/sources/CLAUDE.md
+          products/warehouse_sources/sources/CLAUDE.md
           proto/CLAUDE.md
           rust/CLAUDE.md
+          rust/cyclotron-node-migrations/CLAUDE.md
           rust/personhog-replica/CLAUDE.md
           rust/personhog-router/CLAUDE.md
           services/mcp/CLAUDE.md
@@ -5659,6 +5876,7 @@ jobs:
           nodejs/package.json
           nodejs/tests/cdp/cdp-api.test.ts
           playwright/e2e
+          products/warehouse_sources/sources
           .depot
           tools/workflow-plan
           .github/scripts/flatten-parallel-steps-for-actionlint.awk
@@ -5797,6 +6015,7 @@ jobs:
           ee/hogai/sandbox/turn_event_contract.json
           products
           services/mcp/schema
+          nodejs/src/ingestion/pipelines/ai/costs/providers/llm-costs.json
           products/posthog_ai
           services/mcp/schema/exec-command-reference.md
           .depot/workflows
@@ -5812,9 +6031,9 @@ jobs:
           frontend/src/taxonomy/core-filter-definitions-by-group.json
           livestream/bot
           posthog
+          rust/capture-logs/src/metrics_avro_schema.rs
           rust/feature-flags/src/properties
           rust/feature-flags/tests/fixtures
-          services/hogql-language-service/internal/completion
           services/mcp/src/templates
           tools/hogli-commands
           .dagster_home
@@ -5825,11 +6044,15 @@ jobs:
           docker-compose.base.yml
           docker-compose.dev.yml
           docker-compose.profiles.yml
+          frontend/public/admin-console/console.css
+          frontend/public/message-preferences.css
           frontend/src/lib/agentScopes.generated.ts
           frontend/src/lib/components/AgentObjectTags/objectKinds.generated.ts
           frontend/src/lib/components/DomainConnect/templates
           frontend/src/products.json
           infra
+          nodejs/src/logs/parity/fixtures/modules/internal_verify.json
+          tools/change-prover/issuer.yml
           packages/agent/packages/agent-contracts/src/model-catalog.generated.ts
           packages/agent/packages/agent-contracts/src/objectTagKinds.generated.ts
           packages/agent/packages/agent/src/utils/gateway-routing-cases.json
@@ -5842,6 +6065,8 @@ jobs:
           services/mcp/src/resources/ui-apps.generated.ts
           services/stripe-mock/tests/conftest.py
           frontend/src/scenes/settings/SettingsMap.tsx
+          nodejs/src
+          rust
           common/__init__.py
           common/hogql_parser
           common/migration_utils
@@ -5870,7 +6095,6 @@ jobs:
           clickhouse-udfs
           posthog/dags
           rust/deltalite/python
-          rust
           products/desktop
           services/llm-gateway/src/llm_gateway/rate_limiting/model_cost_overrides.py
           products/tasks/backend/models.py
@@ -5896,7 +6120,6 @@ jobs:
           common/esbuilder
           common/plugin_transpiler
           docs/onboarding
-          frontend/public/message-preferences.css
           frontend/public/services
           infra/clickhouse/config.xml
           packages/agent/packages/harness
@@ -6011,6 +6234,8 @@ jobs:
           .depot/actions
           docs/onboarding/package.json
           frontend/@posthog/lemon-ui/package.json
+          frontend/src/toolbar/extension/release/package.json
+          hog/package.json
           packages/quill/package.json
           packages/quill/apps/storybook/package.json
           packages/quill/packages/blocks/package.json
@@ -6021,7 +6246,7 @@ jobs:
           packages/quill/packages/tokens/package.json
           playwright/package.json
           services/agent-proxy/package.json
-          services/integration-service/package.json
+          services/credentials-service/package.json
           services/oauth-proxy/package.json
           services/stripe-app/package.json
           tools/dagster_test_selection.py
@@ -6039,9 +6264,7 @@ jobs:
           .github/workflows/ci.yml
           bin/hobby-installer
           showcase/scripts/run_go_tests.sh
-          services/hogql-language-service
           common/hogvm
-          services/integration-service
           products/web_analytics
           services/llm-gateway
           .config
@@ -6062,6 +6285,7 @@ jobs:
           services/mcp/tests
           frontend/src/queries
           frontend/jest.quarantine.ts
+          tools/deploy-requirements
           .github/workflows/update-ai-costs.yml
           services/oauth-proxy
           frontend/package.json
@@ -6076,8 +6300,13 @@ jobs:
           products/isolation_baseline.txt
           products/model_crossing_uses_baseline.txt
           .importlinter
+          hoglint.toml
+          hoglint.exceptions.toml
+          hoglint.ledger
+          tools/hoglint
           products/ruff.toml
           products/stamphog/packages
+          products/knowledge_writer/merge_check
           packages/agent/agent-shadow
           bin/generate_personhog_proto.sh
           tools/query-performance-ai
@@ -6099,21 +6328,28 @@ jobs:
           .agents/skills/triaging-merge-queue-failures/scripts/mq-triage-marker.sh
           .claude/settings.json
           common/AGENTS.md
+          ee/AGENTS.md
           ee/hogai/eval/AGENTS.md
           frontend/src/AGENTS.md
+          frontend/src/layout/navigation-3000/sidepanel/AGENTS.md
           frontend/src/layout/scenes/AGENTS.md
+          frontend/src/layout/today/AGENTS.md
           frontend/src/scenes/max/AGENTS.md
+          hog/AGENTS.md
           packages/quill/AGENTS.md
           packages/quill/packages/blocks/AGENTS.md
           packages/quill/packages/charts/AGENTS.md
           packages/quill/packages/components/AGENTS.md
           packages/quill/packages/primitives/AGENTS.md
           packages/quill/packages/tokens/AGENTS.md
+          posthog/admin/console/AGENTS.md
           posthog/clickhouse/client/AGENTS.md
           posthog/clickhouse/migrations/AGENTS.md
           posthog/egress/AGENTS.md
           posthog/hogql/database/schema/AGENTS.md
           posthog/ingress/AGENTS.md
+          posthog/integrations/AGENTS.md
+          posthog/tasks/alerts/detectors/AGENTS.md
           posthog/temporal/AGENTS.md
           posthog/temporal/data_modeling/AGENTS.md
           posthog/test/AGENTS.md
@@ -6133,12 +6369,15 @@ jobs:
           products/customer_analytics/backend/AGENTS.md
           products/customer_analytics/frontend/components/Accounts/AGENTS.md
           products/dashboards/AGENTS.md
+          products/data_modeling/backend/temporal/AGENTS.md
           products/desktop/AGENTS.md
           products/desktop/packages/ui/src/features/browser-tabs/AGENTS.md
           products/desktop/packages/ui/src/features/canvas/AGENTS.md
           products/desktop/packages/ui/src/features/inbox/AGENTS.md
           products/engineering_analytics/AGENTS.md
           products/engineering_analytics/frontend/AGENTS.md
+          products/knowledge_writer/AGENTS.md
+          products/mobile/AGENTS.md
           products/posthog_ai/eval_harness/harness/AGENTS.md
           products/posthog_ai/evals/AGENTS.md
           products/posthog_ai/frontend/AGENTS.md
@@ -6149,32 +6388,44 @@ jobs:
           products/signals/backend/scout_harness/AGENTS.md
           products/signals/dags/inbox_ranking/AGENTS.md
           products/signals/eval/AGENTS.md
+          products/signals/frontend/AGENTS.md
           products/signals/skills/AGENTS.md
           products/stamphog/AGENTS.md
           products/support/scripts/AGENTS.md
+          products/today/AGENTS.md
+          products/warehouse_sources/backend/temporal/data_imports/sources/AGENTS.md
+          products/warehouse_sources/sources/AGENTS.md
           proto/AGENTS.md
           rust/AGENTS.md
+          rust/cyclotron-node-migrations/AGENTS.md
           rust/personhog-replica/AGENTS.md
           rust/personhog-router/AGENTS.md
           services/mcp/AGENTS.md
           tools/hogli/AGENTS.md
           CLAUDE.md
           common/CLAUDE.md
+          ee/CLAUDE.md
           ee/hogai/eval/CLAUDE.md
           frontend/src/CLAUDE.md
+          frontend/src/layout/navigation-3000/sidepanel/CLAUDE.md
           frontend/src/layout/scenes/CLAUDE.md
+          frontend/src/layout/today/CLAUDE.md
           frontend/src/scenes/max/CLAUDE.md
+          hog/CLAUDE.md
           packages/quill/CLAUDE.md
           packages/quill/packages/blocks/CLAUDE.md
           packages/quill/packages/charts/CLAUDE.md
           packages/quill/packages/components/CLAUDE.md
           packages/quill/packages/primitives/CLAUDE.md
           packages/quill/packages/tokens/CLAUDE.md
+          posthog/admin/console/CLAUDE.md
           posthog/clickhouse/client/CLAUDE.md
           posthog/clickhouse/migrations/CLAUDE.md
           posthog/egress/CLAUDE.md
           posthog/hogql/database/schema/CLAUDE.md
           posthog/ingress/CLAUDE.md
+          posthog/integrations/CLAUDE.md
+          posthog/tasks/alerts/detectors/CLAUDE.md
           posthog/temporal/CLAUDE.md
           posthog/temporal/data_modeling/CLAUDE.md
           posthog/test/CLAUDE.md
@@ -6194,12 +6445,15 @@ jobs:
           products/customer_analytics/backend/CLAUDE.md
           products/customer_analytics/frontend/components/Accounts/CLAUDE.md
           products/dashboards/CLAUDE.md
+          products/data_modeling/backend/temporal/CLAUDE.md
           products/desktop/CLAUDE.md
           products/desktop/packages/ui/src/features/browser-tabs/CLAUDE.md
           products/desktop/packages/ui/src/features/canvas/CLAUDE.md
           products/desktop/packages/ui/src/features/inbox/CLAUDE.md
           products/engineering_analytics/CLAUDE.md
           products/engineering_analytics/frontend/CLAUDE.md
+          products/knowledge_writer/CLAUDE.md
+          products/mobile/CLAUDE.md
           products/posthog_ai/eval_harness/harness/CLAUDE.md
           products/posthog_ai/evals/CLAUDE.md
           products/posthog_ai/frontend/CLAUDE.md
@@ -6210,11 +6464,16 @@ jobs:
           products/signals/backend/scout_harness/CLAUDE.md
           products/signals/dags/inbox_ranking/CLAUDE.md
           products/signals/eval/CLAUDE.md
+          products/signals/frontend/CLAUDE.md
           products/signals/skills/CLAUDE.md
           products/stamphog/CLAUDE.md
           products/support/scripts/CLAUDE.md
+          products/today/CLAUDE.md
+          products/warehouse_sources/backend/temporal/data_imports/sources/CLAUDE.md
+          products/warehouse_sources/sources/CLAUDE.md
           proto/CLAUDE.md
           rust/CLAUDE.md
+          rust/cyclotron-node-migrations/CLAUDE.md
           rust/personhog-replica/CLAUDE.md
           rust/personhog-router/CLAUDE.md
           services/mcp/CLAUDE.md
@@ -6251,6 +6510,7 @@ jobs:
           nodejs/package.json
           nodejs/tests/cdp/cdp-api.test.ts
           playwright/e2e
+          products/warehouse_sources/sources
           .depot
           tools/workflow-plan
           .github/scripts/flatten-parallel-steps-for-actionlint.awk
@@ -6310,7 +6570,7 @@ jobs:
         AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID || env.R2_ACCESS_KEY_ID }}
         AWS_REGION: auto
         AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY || env.R2_SECRET_ACCESS_KEY }}
-        ENACT_ENVIRONMENT_DIRS: "[\".\",\"bin/hobby-installer\",\"cli\",\"clickhouse-udfs\",\"common/hogvm\",\"funnel-udf\",\"livestream\",\"nodejs\",\"packages/agent\",\"packages/quill\",\"posthog/api/test/rust_integration\",\"products/desktop\",\"proto\",\"rust\",\"rust/deltalite/python\",\"rust/personhog-test-harness\",\"services/agent-proxy\",\"services/hogql-language-service\",\"services/integration-service\",\"services/llm-gateway\",\"services/mcp\",\"services/mcp/tests\",\"services/oauth-proxy\",\"tools/openapi-codegen\",\"tools/phrocs\"]"
+        ENACT_ENVIRONMENT_DIRS: "[\".\",\"bin/hobby-installer\",\"cli\",\"clickhouse-udfs\",\"common/hogvm\",\"funnel-udf\",\"livestream\",\"nodejs\",\"packages/agent\",\"packages/quill\",\"posthog/api/test/rust_integration\",\"products/desktop\",\"proto\",\"rust\",\"rust/deltalite/python\",\"rust/personhog-test-harness\",\"services/agent-proxy\",\"services/llm-gateway\",\"services/mcp\",\"services/mcp/tests\",\"services/oauth-proxy\",\"tools/openapi-codegen\",\"tools/phrocs\"]"
         ENACT_ENVIRONMENT_FILES: "[]"
         ENACT_JOB_SERVICES: azurite,clickhouse,etcd,kafka,postgres,redis,seaweedfs,seaweedfs-open,temporal,valkey-cluster
         ENACT_PREPARE_ENVIRONMENT_FILES: "[\"enve.cue\"]"

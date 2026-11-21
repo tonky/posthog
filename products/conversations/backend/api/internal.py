@@ -3,7 +3,7 @@ Internal ticket endpoints for the Conversations product.
 
 The service-to-service surface the CDP worker's ticket workflow actions call. Callers
 authenticate with a short-lived scoped service JWT pinned to one team and one ticket
-(#82564 tracks retiring the legacy secret_api_token route in api/external.py). Mounted
+(#82564 tracks retiring the external route in api/external.py). Mounted
 under /api/projects/<team_id>/internal/ in posthog/urls.py, a namespace Contour ingress
 does not expose, so the route is unreachable from the public internet.
 """
@@ -24,6 +24,7 @@ from posthog.models import Team
 from posthog.scoped_service_jwt import ScopedServiceJwtPurpose
 
 from products.conversations.backend.api.ticket_actions import (
+    TicketActionGetQuerySerializer,
     TicketActionMessageResponseSerializer,
     TicketActionMessageSerializer,
     handle_ticket_get,
@@ -49,22 +50,32 @@ class InternalTicketView(APIView):
     PATCH /api/projects/<team_id>/internal/conversations/tickets/<ticket_id> — Update ticket fields
     POST /api/projects/<team_id>/internal/conversations/tickets/<ticket_id> — Post a reply or private note
 
-    JWT-only from birth: there is no legacy-token fallback here, so this route never
-    accepts secret_api_token. The auth class binds the request to the token's team and
+    JWT-only: the auth class binds the request to the token's team and
     rejects tokens whose team differs from the URL's.
     """
 
     authentication_classes = [ConversationsTicketJWTAuthentication]
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(parameters=[TicketActionGetQuerySerializer])
     def get(self, request: Request, team_id: str, ticket_id: uuid.UUID) -> Response:
         team, error = _check_ticket_access(request, ticket_id)
         if error:
             return error
         assert team is not None
         TICKET_ACTION_AUTH_COUNTER.labels(auth_method="scoped_jwt", http_method="get").inc()
+        include_first_message = wants_first_customer_message_text(request)
+        max_bytes = None
+        if include_first_message:
+            query = TicketActionGetQuerySerializer(data=request.query_params)
+            if not query.is_valid():
+                return Response({"error": query.errors}, status=status.HTTP_400_BAD_REQUEST)
+            max_bytes = query.validated_data.get("first_customer_message_max_bytes")
         return handle_ticket_get(
-            team, ticket_id, include_first_customer_message_text=wants_first_customer_message_text(request)
+            team,
+            ticket_id,
+            include_first_customer_message_text=include_first_message,
+            first_customer_message_max_bytes=max_bytes,
         )
 
     def patch(self, request: Request, team_id: str, ticket_id: uuid.UUID) -> Response:

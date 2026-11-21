@@ -9,13 +9,10 @@ from decimal import Decimal
 from time import monotonic
 from uuid import UUID
 
-from django.conf import settings
 from django.core.cache import cache
 from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
-
-import posthoganalytics
 
 from posthog.dataclasses import frozen
 from posthog.models import Team, User
@@ -29,7 +26,14 @@ from products.notebooks.backend.models import (
     NotebookNodeRun,
     NotebookWidgetInstance,
 )
-from products.notebooks.backend.sql_v2 import SQLV2KernelNotRunning, SQLV2PageError, fetch_sql_v2_page
+from products.notebooks.backend.sql_v2 import (
+    DELIVERY_DIRECT,
+    RESULT_CACHE_ROWS,
+    SQLV2KernelNotRunning,
+    SQLV2PageError,
+    fetch_sql_v2_page,
+)
+from products.notebooks.backend.sql_v2_direct import sync_direct_run
 from products.notebooks.backend.sql_v2_state import extract_cells, get_dataframe_owners
 from products.notebooks.backend.temporal.client import start_widget_generation_workflow
 from products.notebooks.backend.util import (
@@ -57,7 +61,6 @@ JOB_STALE_AFTER = timedelta(minutes=10)
 GENERATION_CANCELLATION_TTL_SECONDS = 60 * 15
 MAX_SCHEMA_CONTEXT_BYTES = 64 * 1_024
 MAX_INPUT_CONTRACT_BYTES = 512 * 1_024
-NOTEBOOK_GENERATED_WIDGETS_FLAG = "notebook-generated-widgets"
 
 _INPUT_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
@@ -451,34 +454,6 @@ def _is_ai_usage_limited(team_api_token: str) -> bool:
     )
 
     return is_team_over_ai_credit_budget(team_api_token)
-
-
-def is_notebook_widget_enabled(user: User | None) -> bool:
-    if settings.DEBUG or settings.TEST:
-        return True
-    if user is None or not user.distinct_id:
-        return False
-    organization = getattr(user, "organization", None)
-    if organization is None:
-        return bool(
-            posthoganalytics.feature_enabled(
-                NOTEBOOK_GENERATED_WIDGETS_FLAG,
-                user.distinct_id,
-                only_evaluate_locally=False,
-                send_feature_flag_events=False,
-            )
-        )
-    organization_id = str(organization.id)
-    return bool(
-        posthoganalytics.feature_enabled(
-            NOTEBOOK_GENERATED_WIDGETS_FLAG,
-            user.distinct_id,
-            groups={"organization": organization_id},
-            group_properties={"organization": {"id": organization_id}},
-            only_evaluate_locally=False,
-            send_feature_flag_events=False,
-        )
-    )
 
 
 def _display_name(prompt: str) -> str:
@@ -1893,6 +1868,24 @@ def read_widget_frame(
             "frame_row_limit",
         )
     page_limit = min(max(limit, 1), MAX_FRAME_PAGE_ROWS, MAX_FRAME_TOTAL_ROWS - offset)
+    if envelope.get("delivery") == DELIVERY_DIRECT and envelope.get("has_more"):
+        rows = sync_direct_run(run)
+        if rows is None:
+            raise WidgetConflictError(
+                f'Re-run the cell that creates "{source_name}" to reload its SQL results.',
+                "frame_page_unavailable",
+            )
+        frame = _bounded_rows(
+            name=frame_name,
+            run_id=run.id,
+            columns=columns,
+            candidates=rows[offset : offset + page_limit],
+            total_row_count=len(rows),
+            offset=offset,
+        )
+        # The cached SQL row ceiling cannot prove that the query result is complete.
+        frame["truncated"] = frame["truncated"] or len(rows) >= RESULT_CACHE_ROWS
+        return WidgetFrameRead(frame=frame)
     first_page = envelope.get("first_page")
     candidates: object
     requested_end = min(offset + page_limit, total_row_count)

@@ -17,6 +17,8 @@ from posthog.schema import (
     HogQLQuery,
     InsightActorsQuery,
     LifecycleDataWarehouseNode,
+    MarketingAnalyticsRecommendationsQuery,
+    MarketingAnalyticsSearchQuery,
     RetentionEntity,
     RetentionFilter,
     RetentionQuery,
@@ -32,6 +34,7 @@ from posthog.hogql_queries.access_controlled_resources import (
     _TRANSITIVE_SYSTEM_TABLE_SCOPES,
     _references_data_warehouse,
     queried_access_controlled_resources,
+    shared_warehouse_lookups,
 )
 
 from products.access_control.backend.facade.user_access_control import RESOURCE_FALLBACK_MAP
@@ -96,6 +99,7 @@ class TestQueriedAccessControlledResources(BaseTest):
             ("ticket_assignments", "select * from system._ticket_assignments", {"ticket"}),
             ("ticket_assignee_roles", "select * from system._ticket_assignee_roles", {"ticket"}),
             ("task_public_channels", "select * from system._task_public_channels", {"task"}),
+            ("task_public_slack_tasks", "select * from system._task_public_slack_tasks", {"task"}),
             ("customer_tasks", "select * from system.customer_tasks", {"customer_task", "account"}),
             ("no_access_controlled_table", "select 1", set()),
             ("events_table", "select * from events", set()),
@@ -220,6 +224,18 @@ class TestQueriedAccessControlledResources(BaseTest):
         )
         assert queried_access_controlled_resources(query, self.team) == set()
 
+    @parameterized.expand(
+        [
+            ("recommendations_without_sources", MarketingAnalyticsRecommendationsQuery(), True),
+            ("recommendations_with_empty_sources", MarketingAnalyticsRecommendationsQuery(sources=[]), False),
+            ("search_with_empty_sources", MarketingAnalyticsSearchQuery(sources=[]), False),
+        ]
+    )
+    def test_marketing_queries_partition_on_warehouse_scopes(self, _name, query, reads_warehouse):
+        scopes = queried_access_controlled_resources(query, self.team)
+        assert scopes is not None
+        assert ({"warehouse_table", "warehouse_view"} <= scopes) is reads_warehouse
+
     def test_references_data_warehouse_covers_all_variants_and_nesting(self):
         variants = [
             DataWarehouseNode(id="t", id_field="id", distinct_id_field="d", table_name="t", timestamp_field="ts"),
@@ -297,6 +313,21 @@ class TestQueriedAccessControlledResources(BaseTest):
                 "select * from view_a",
                 {"warehouse_view", "warehouse_table", "external_data_source"},
             ),
+            (
+                # A model is queryable as `models.<stored name>` too. That read must carry the same
+                # scopes, or a denied user is served an allowed user's cached rows on a hit.
+                "model read through the models root",
+                {"notebook_view": "select * from system.notebooks"},
+                "select * from models.notebook_view",
+                {"warehouse_view", "warehouse_table", "external_data_source", "notebook"},
+            ),
+            (
+                # A stored `models.x` row keeps the name, so the derived slot of `x` must not answer for it.
+                "stored models name wins over the derived one",
+                {"revenue": "select * from system.notebooks", "models.revenue": "select 1 as a"},
+                "select * from models.revenue",
+                {"warehouse_view", "warehouse_table", "external_data_source"},
+            ),
         ]
     )
     def test_view_definitions_are_walked(self, _name, views, sql, expected):
@@ -305,6 +336,25 @@ class TestQueriedAccessControlledResources(BaseTest):
                 team=self.team, name=name, query={"kind": "HogQLQuery", "query": definition}
             )
         assert queried_access_controlled_resources(HogQLQuery(query=sql), self.team) == expected
+
+    @parameterized.expand(
+        [
+            ("endpoint", DataWarehouseSavedQuery.Origin.ENDPOINT),
+            ("managed_viewset", DataWarehouseSavedQuery.Origin.MANAGED_VIEWSET),
+        ]
+    )
+    def test_machine_origin_view_gets_no_models_root_read(self, _name, origin):
+        DataWarehouseSavedQuery.objects.create(
+            team=self.team,
+            name="machine_view",
+            origin=origin,
+            query={"kind": "HogQLQuery", "query": "select * from system.notebooks"},
+        )
+        # These rows get no `models.` slot in the schema, so the name reads nothing and partitions on nothing.
+        assert (
+            queried_access_controlled_resources(HogQLQuery(query="select * from models.machine_view"), self.team)
+            == set()
+        )
 
     def test_view_fan_out_does_not_scale_queries(self) -> None:
         # Views that share a base view must each be walked once, so six of them cost the same queries as two.
@@ -339,6 +389,25 @@ class TestQueriedAccessControlledResources(BaseTest):
         # Each added view costs one parse. A base view walked again for each parent would cost two.
         assert parses_6 - parses_2 == 4
 
+    def test_shared_lookups_reuse_names_but_walk_each_querys_views(self) -> None:
+        DataWarehouseSavedQuery.objects.create(
+            team=self.team,
+            name="notebook_view",
+            query={"kind": "HogQLQuery", "query": "select * from system.notebooks"},
+        )
+        expected = {"warehouse_view", "warehouse_table", "external_data_source", "notebook"}
+
+        with shared_warehouse_lookups():
+            first = queried_access_controlled_resources(HogQLQuery(query="select * from notebook_view"), self.team)
+            with CaptureQueriesContext(connection) as ctx:
+                second = queried_access_controlled_resources(
+                    HogQLQuery(query="select count() from notebook_view"), self.team
+                )
+
+        assert first == expected
+        assert second == expected
+        assert len(ctx.captured_queries) == 0
+
     def test_warehouse_and_system_scopes_combined(self):
         self._create_warehouse_table("my_warehouse_table")
         result = queried_access_controlled_resources(
@@ -355,7 +424,7 @@ class TestQueriedAccessControlledResources(BaseTest):
             result = queried_access_controlled_resources(
                 query, self.team, bypassed_scopes=frozenset({"warehouse_table"})
             )
-        assert result == {"warehouse_table", "notebook", "dashboard"}
+        assert result == {"notebook", "dashboard"}
 
     def test_catalog_fetch_loads_only_name_fields(self):
         source = ExternalDataSource.objects.create(

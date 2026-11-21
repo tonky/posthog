@@ -28,6 +28,13 @@ export const personDatabaseOperationsPerBatchHistogram = new Histogram({
     buckets: [0, 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, Infinity],
 })
 
+export const personResolveKeysPerCallHistogram = new Histogram({
+    name: 'person_resolve_keys_per_call',
+    help: 'Distinct ids sent in one distinct-id-to-person resolve call, by persons backend and call site, before transport retries',
+    labelNames: ['backend', 'site'],
+    buckets: [1, 2, 5, 10, 25, 50, 100, 250, 500, 1000, Infinity],
+})
+
 export const totalPersonUpdateLatencyPerBatchHistogram = new Histogram({
     name: 'total_person_update_latency_per_batch_seconds',
     help: 'Total latency of person update per distinct ID per batch',
@@ -190,6 +197,18 @@ export const personhogStoreShadowFoldRedriveCounter = new Counter({
     labelNames: ['outcome'],
 })
 
+export const personhogStoreShadowMergeRedriveCounter = new Counter({
+    name: 'personhog_store_shadow_merge_redrive_total',
+    help: 'Shadow merges re-driven at a flush after their retries ended unsettled: settled, deferred to a later flush, or dropped; abandoned counts a re-queue at the ceiling before the final outcome',
+    labelNames: ['outcome'],
+})
+
+export const personhogStoreShadowCreateRetriesCounter = new Counter({
+    name: 'personhog_store_shadow_create_retries_total',
+    help: 'Shadow create attempts past the first (retried) and creates that landed after a retry (recovered); one that misses its deadline counts under personhog_store_shadow_errors_total',
+    labelNames: ['outcome'],
+})
+
 export const personhogStoreShadowCompareFailedCounter = new Counter({
     name: 'personhog_store_shadow_compare_failed_total',
     help: 'Shadow comparisons that threw, which is a fault in the comparison rather than in either backend',
@@ -227,15 +246,6 @@ export const personProfileBatchIgnoredPropertiesCounter = new Counter({
     labelNames: ['property'],
 })
 
-export const personCreateStrandedClaimCounter = new Counter({
-    name: 'person_create_stranded_claim_total',
-    help: 'Person creations routed through the stranded-row claim statement, by outcome',
-    // claimed: adopted an unreachable row holding this (team_id, uuid)
-    // inserted: no row held the uuid, fresh insert
-    // inserted_duplicate: a reachable person already held the uuid, so the insert created a duplicate key
-    labelNames: ['outcome'],
-})
-
 export const personCreateConflictResolvedCounter = new Counter({
     name: 'person_create_conflict_resolved_total',
     help: 'Person creations that lost the (team_id, uuid) key, by how the conflict was resolved',
@@ -244,9 +254,15 @@ export const personCreateConflictResolvedCounter = new Counter({
     labelNames: ['resolved_by'],
 })
 
+export const personStrayDistinctIdTombstonedCounter = new Counter({
+    name: 'person_stray_distinct_id_tombstoned_total',
+    help: 'Live distinct id mappings on a tombstoned person that a write tombstoned so it could reuse the distinct id',
+    labelNames: ['operation'],
+})
+
 export const personJsonFieldSizeHistogram = new Histogram({
     name: 'person_json_field_size_bytes',
     help: 'Approximate size in bytes of serialized JSON fields (using string length as proxy for performance)',
-    labelNames: ['operation', 'field'], // operation: createPerson, updatePerson; field: properties, properties_last_updated_at, properties_last_operation
+    labelNames: ['operation', 'field'], // operation: createPerson, updatePerson; field: properties
     buckets: [100, 500, 1024, 4096, 8192, 16384, 32768, 65536, 131072, 262144, 524288, 1048576], // 100B, 500B, 1KB, 4KB, 8KB, 16KB, 32KB, 64KB, 128KB, 256KB, 512KB, 1MB
 })

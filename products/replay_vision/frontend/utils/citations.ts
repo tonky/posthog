@@ -1,8 +1,7 @@
 import { TIMESTAMP_REF_PREFIX } from 'lib/lemon-ui/LemonMarkdown'
 import { colonDelimitedDuration } from 'lib/utils/durations'
 
-// `uuid` is legacy (only old event-uuid citations carry it). Timestamp citations use `timestamp_ms` alone.
-export type Segment = { kind: 'text'; value: string } | { kind: 'chip'; timestamp_ms: number; uuid?: string }
+export type Segment = { kind: 'text'; value: string } | { kind: 'chip'; timestamp_ms: number }
 
 export function isSegment(value: unknown): value is Segment {
     if (!value || typeof value !== 'object') {
@@ -78,10 +77,14 @@ export function citedMarkdown(text: string, segments: unknown): string {
         // Glued to the preceding word, except after a `!`, where that would make the pair an image.
         // Whole non-negative digits only: LemonMarkdown reads nothing else, and would leave a dead label.
         const timestampMs = Math.max(0, Math.round(segment.timestamp_ms))
-        const label = colonDelimitedDuration(Math.floor(timestampMs / 1000), null)
+        const label = msToTimestamp(timestampMs)
         out += `${out.endsWith('!') ? ' ' : ''}[${label}](${TIMESTAMP_REF_PREFIX}${timestampMs})`
     }
     return out
+}
+
+export function msToTimestamp(ms: number): string {
+    return colonDelimitedDuration(Math.max(0, Math.floor(ms / 1000)), null)
 }
 
 /** Plain-text rendering of a cited field for the clipboard: citation chips become readable `(mm:ss)` timestamps. */
@@ -96,20 +99,9 @@ export function citedTextToPlainText(text: string, segments: unknown): string {
             out += segment.value
             continue
         }
-        const label = colonDelimitedDuration(Math.max(0, Math.floor(segment.timestamp_ms / 1000)), null)
-        out += `${out && !/\s$/.test(out) ? ' ' : ''}(${label})`
+        out += `${out && !/\s$/.test(out) ? ' ' : ''}(${msToTimestamp(segment.timestamp_ms)})`
     }
     return out
-}
-
-/** The moment span a cited field points at: min to max cited timestamp, or null when nothing is cited. */
-export function citedTimestampRange(text: string, segments: unknown): { startMs: number; endMs: number } | null {
-    const chips = parseCitedSegments(text, segments).filter((segment) => segment.kind === 'chip')
-    if (chips.length === 0) {
-        return null
-    }
-    const timestamps = chips.map((chip) => Math.max(0, chip.timestamp_ms))
-    return { startMs: Math.min(...timestamps), endMs: Math.max(...timestamps) }
 }
 
 export function stripCitations(text: string, segments?: unknown): string {

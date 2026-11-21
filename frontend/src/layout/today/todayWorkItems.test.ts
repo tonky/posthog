@@ -2,7 +2,7 @@ import { dayjs } from 'lib/dayjs'
 
 import { ConversationDetail } from '~/types'
 
-import { TaskActivityDTOApi, TaskListItemApi } from 'products/tasks/frontend/generated/api.schemas'
+import { TaskListItemApi } from 'products/tasks/frontend/generated/api.schemas'
 
 import { TodayListItemField } from './todayListAppearance'
 import {
@@ -15,15 +15,16 @@ import { TodayRecentGrouping, TodayRecentSort, groupRecentItems, sortRecentItems
 import {
     activeCloudRunId,
     analysisRunId,
+    appendRecentTasks,
     buildRecentItems,
     canHandOff,
     chatItem,
     groupByDay,
+    refreshRecentTasks,
     sessionBadges,
     sessionDetails,
     sessionItem,
     shortTimeAgo,
-    unreadSessionCountsBySpace,
 } from './todayWorkItems'
 
 const session = (id: string, lastActivityAt: string, archived = false): TaskListItemApi =>
@@ -31,19 +32,6 @@ const session = (id: string, lastActivityAt: string, archived = false): TaskList
 
 const chat = (id: string, updatedAt: string): ConversationDetail =>
     ({ id, title: `Chat ${id}`, updated_at: updatedAt, created_at: updatedAt }) as ConversationDetail
-
-const activity = (
-    taskId: string | null,
-    channelId: string | null,
-    overrides: Partial<TaskActivityDTOApi> = {}
-): TaskActivityDTOApi =>
-    ({
-        id: `${taskId}-${overrides.latest_comment_id ?? 'run'}`,
-        task_id: taskId,
-        channel_id: channelId,
-        is_unread: true,
-        ...overrides,
-    }) as TaskActivityDTOApi
 
 const ME = 7
 
@@ -105,6 +93,41 @@ describe('todayWorkItems', () => {
         )
 
         expect(items.map((item) => `${item.kind}:${item.id}`)).toEqual(['chat:c-new', 'session:s-old'])
+    })
+
+    it.each<[string, string[], boolean, string[], number, string[], boolean]>([
+        ['drops a session archived out of the loaded range', ['x', 'b'], true, ['a', 'b'], 2, ['x', 'b'], true],
+        [
+            'keeps every row when a page loaded while the refresh ran',
+            ['x', 'a'],
+            true,
+            ['a', 'b', 'c'],
+            2,
+            ['x', 'a', 'b', 'c'],
+            false,
+        ],
+        ['replaces the list once the fetch holds everything', ['x', 'a'], false, ['a', 'b', 'c'], 2, ['x', 'a'], false],
+    ])(
+        'a refresh of Recent %s',
+        (_, fetchedIds, fetchedHasMore, currentIds, requested, expectedIds, expectedHasMore) => {
+            const tasks = (ids: string[]): TaskListItemApi[] => ids.map((id) => session(id, '2026-03-10T12:00:00'))
+
+            const refreshed = refreshRecentTasks(tasks(fetchedIds), fetchedHasMore, tasks(currentIds), false, requested)
+
+            expect(refreshed.tasks.map((task) => task.id)).toEqual(expectedIds)
+            expect(refreshed.hasMore).toBe(expectedHasMore)
+        }
+    )
+
+    it('appends a page of older sessions without repeating a row', () => {
+        const loaded = [session('a', '2026-03-10T11:00:00'), session('b', '2026-03-10T10:00:00')]
+        const page = [
+            session('b', '2026-03-10T10:00:00'),
+            session('c', '2026-03-09T10:00:00'),
+            session('c', '2026-03-09T10:00:00'),
+        ]
+
+        expect(appendRecentTasks(loaded, page).map((task) => task.id)).toEqual(['a', 'b', 'c'])
     })
 
     it.each([
@@ -314,31 +337,6 @@ describe('todayWorkItems', () => {
         expect(item.finalMessage).toBe(message)
     })
 
-    it.each<[string, TaskActivityDTOApi[], Record<string, number>]>([
-        [
-            'counts each unread session once per space',
-            [
-                activity('s1', 'space-a'),
-                activity('s1', 'space-a'),
-                activity('s2', 'space-a'),
-                activity('s3', 'space-b'),
-            ],
-            { 'space-a': 2, 'space-b': 1 },
-        ],
-        [
-            'skips read sessions, comment notifications and sessions outside a space',
-            [
-                activity('s1', 'space-a', { is_unread: false }),
-                activity('s2', 'space-a', { latest_comment_id: 'comment-1' }),
-                activity('s3', null),
-                activity(null, 'space-a'),
-            ],
-            {},
-        ],
-    ])('unread session counts %s', (_name, rows, expected) => {
-        expect(unreadSessionCountsBySpace(rows)).toEqual(expected)
-    })
-
     it.each<[string, Partial<TaskListItemApi>, TodayListItemField[], string[]]>([
         [
             'the chosen details in the chosen order',
@@ -377,5 +375,23 @@ describe('todayWorkItems', () => {
                 (detail) => detail.text
             )
         ).toEqual(expected)
+    })
+
+    it('shows the creator and activity under a chat row, like a session row', () => {
+        const item = chatItem({
+            id: 'chat',
+            title: 'Login funnel',
+            updated_at: '2026-03-10T10:00:00',
+            user: { id: 1, first_name: 'Ada', last_name: 'Lovelace', email: 'ada@example.com' },
+        } as ConversationDetail)
+
+        expect(
+            sessionDetails(
+                item,
+                ['space', 'repository', 'branch', 'creator', 'activity'],
+                {},
+                dayjs('2026-03-10T12:00:59')
+            ).map((detail) => detail.text)
+        ).toEqual(['Ada Lovelace', '2h ago'])
     })
 })

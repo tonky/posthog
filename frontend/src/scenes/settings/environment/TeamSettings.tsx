@@ -1,8 +1,8 @@
 import { useActions, useValues } from 'kea'
-import { useState } from 'react'
 
 import { IconRefresh } from '@posthog/icons'
 import { LemonButton, LemonDialog, LemonInput, LemonLabel, LemonSkeleton } from '@posthog/lemon-ui'
+import { Field, FieldLabel } from '@posthog/quill'
 
 import { AuthorizedUrlList } from 'lib/components/AuthorizedUrlList/AuthorizedUrlList'
 import { AuthorizedUrlListType } from 'lib/components/AuthorizedUrlList/authorizedUrlListLogic'
@@ -10,66 +10,20 @@ import { CodeSnippet } from 'lib/components/CodeSnippet'
 import { JSSnippet } from 'lib/components/JSSnippet'
 import { RestrictionScope, useRestrictedArea } from 'lib/components/RestrictedArea'
 import { TeamMembershipLevel } from 'lib/constants'
+import { useFeatureFlag } from 'lib/hooks/useFeatureFlag'
 import { LemonField } from 'lib/lemon-ui/LemonField'
 import { Link } from 'lib/lemon-ui/Link'
+import { preflightLogic } from 'lib/logic/preflightLogic'
 import { userHasAccess } from 'lib/utils/accessControlUtils'
-import { inStorybook, inStorybookTestRunner } from 'lib/utils/dom'
-import { organizationLogic } from 'scenes/organizationLogic'
-import { preflightLogic } from 'scenes/PreflightCheck/preflightLogic'
-import { isProjectNameTaken } from 'scenes/project/isProjectNameTaken'
-import { projectLogic } from 'scenes/projectLogic'
+import { inStorybook } from 'lib/utils/dom'
 import { teamLogic } from 'scenes/teamLogic'
 
 import { AccessControlLevel, AccessControlResourceType } from '~/types'
 
 import { BusinessModelConfig } from './BusinessModelConfig'
+import { QuillTeamVariables } from './QuillTeamVariables'
 import { TimezoneConfig } from './TimezoneConfig'
 import { WeekStartConfig } from './WeekStartConfig'
-
-const NAME_TAKEN_REASON = 'There is already a project with this name in this organization. Choose a different name.'
-
-export function TeamDisplayName(): JSX.Element {
-    const { currentTeamLoading } = useValues(teamLogic)
-    const { updateCurrentTeam } = useActions(teamLogic)
-    const { currentProject } = useValues(projectLogic)
-    const { currentOrganization } = useValues(organizationLogic)
-    const [name, setName] = useState(currentProject?.name || '')
-    const restrictedReason = useRestrictedArea({
-        scope: RestrictionScope.Project,
-        minimumAccessLevel: TeamMembershipLevel.Admin,
-    })
-
-    // A rename patches the project, so the uniqueness rule applies to the project's name. That can
-    // differ from the environment's name, which is what `teamLogic` holds.
-    const trimmedName = name.trim()
-    const nameTaken = isProjectNameTaken(trimmedName, currentOrganization?.projects, {
-        excludeProjectId: currentProject?.id,
-        currentName: currentProject?.name,
-    })
-    const renameDisabledReason =
-        restrictedReason ||
-        (!trimmedName && 'Enter a name') ||
-        (!currentProject && 'Loading the project') ||
-        (trimmedName === currentProject?.name && "This is already the project's name") ||
-        (nameTaken && NAME_TAKEN_REASON) ||
-        null
-
-    return (
-        <div className="deprecated-space-y-4 max-w-160">
-            <LemonField.Pure error={nameTaken ? NAME_TAKEN_REASON : undefined}>
-                <LemonInput value={name} onChange={setName} disabledReason={restrictedReason} />
-            </LemonField.Pure>
-            <LemonButton
-                type="primary"
-                onClick={() => updateCurrentTeam({ name: trimmedName })}
-                disabledReason={renameDisabledReason}
-                loading={currentTeamLoading}
-            >
-                Rename project
-            </LemonButton>
-        </div>
-    )
-}
 
 export function WebSnippet(): JSX.Element {
     const { currentTeam, currentTeamLoading } = useValues(teamLogic)
@@ -92,6 +46,7 @@ export function TeamVariables(): JSX.Element {
         minimumAccessLevel: TeamMembershipLevel.Admin,
     })
     const { preflight } = useValues(preflightLogic)
+    const todayRailNav = useFeatureFlag('TODAY_RAIL_NAV')
 
     const region = preflight?.region
 
@@ -127,6 +82,19 @@ export function TeamVariables(): JSX.Element {
                 resetToken()
             },
         })
+    }
+
+    if (todayRailNav) {
+        return (
+            <QuillTeamVariables
+                apiToken={currentTeam?.api_token || ''}
+                projectId={String(currentTeam?.id || '')}
+                region={region}
+                isTokenResetAvailable={!!isTeamTokenResetAvailable}
+                restrictedReason={restrictedReason}
+                onResetToken={openDialog}
+            />
+        )
     }
 
     return (
@@ -181,6 +149,23 @@ export function TeamVariables(): JSX.Element {
 }
 
 export function TeamTimezone({ displayWarning = true }: { displayWarning?: boolean }): JSX.Element {
+    const todayRailNav = useFeatureFlag('TODAY_RAIL_NAV')
+
+    if (todayRailNav) {
+        return (
+            <div className="flex flex-wrap gap-x-8 gap-y-4">
+                <Field className="min-w-60 max-w-120 flex-1">
+                    <FieldLabel htmlFor="team-timezone">Time zone</FieldLabel>
+                    <TimezoneConfig displayWarning={displayWarning} id="team-timezone" />
+                </Field>
+                <Field className="w-fit">
+                    <FieldLabel htmlFor="team-week-start">Week starts on</FieldLabel>
+                    <WeekStartConfig displayWarning={displayWarning} id="team-week-start" />
+                </Field>
+            </div>
+        )
+    }
+
     return (
         <div className="flex flex-col sm:flex-row gap-8">
             <div className="flex flex-col gap-2 flex-1 max-w-120">
@@ -196,6 +181,17 @@ export function TeamTimezone({ displayWarning = true }: { displayWarning?: boole
 }
 
 export function TeamBusinessModel(): JSX.Element {
+    const todayRailNav = useFeatureFlag('TODAY_RAIL_NAV')
+
+    if (todayRailNav) {
+        return (
+            <Field>
+                <FieldLabel htmlFor="team-business-model">Business model</FieldLabel>
+                <BusinessModelConfig id="team-business-model" />
+            </Field>
+        )
+    }
+
     return (
         <div className="deprecated-space-y-2">
             <LemonLabel id="business-model">Business model</LemonLabel>
@@ -206,10 +202,9 @@ export function TeamBusinessModel(): JSX.Element {
 
 export function TeamAuthorizedURLs(): JSX.Element {
     // In Storybook, allow editing by default since we don't have full app context
-    const canEdit =
-        inStorybook() || inStorybookTestRunner()
-            ? true
-            : userHasAccess(AccessControlResourceType.WebAnalytics, AccessControlLevel.Editor)
+    const canEdit = inStorybook()
+        ? true
+        : userHasAccess(AccessControlResourceType.WebAnalytics, AccessControlLevel.Editor)
 
     return (
         <AuthorizedUrlList
@@ -218,6 +213,7 @@ export function TeamAuthorizedURLs(): JSX.Element {
             allowAdd={canEdit}
             allowDelete={canEdit}
             displaySuggestions={canEdit}
+            showLaunch={false}
         />
     )
 }

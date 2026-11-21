@@ -176,8 +176,7 @@ class ScoutTrialInspection:
             if (
                 not isinstance(marker.get("launch_id"), str)
                 or run.task_run.task.origin_product != "signals_scout"
-                or run.task_run.task.origin_key != f"scout-trial:{marker['launch_id']}"
-                or (run.task_run.state or {}).get("scout_trial") != marker
+                or run.task_run.task.stored_idempotency_key != f"scout-trial:{marker['launch_id']}"
             ):
                 continue
             try:

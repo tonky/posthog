@@ -60,7 +60,7 @@ live_start_personhog
 
 # "Seed test data" and "Create API key and extract test IDs".
 live_py manage.py generate_demo_data --n-clusters 10 --days-past 7 --days-future 0 \
-    --skip-materialization --skip-flag-sync --skip-user-product-list
+    --skip-materialization --skip-flag-sync
 ids="$(live_py - <<'PY'
 import os
 
@@ -68,7 +68,8 @@ import django
 
 os.environ["DJANGO_SETTINGS_MODULE"] = "posthog.settings"
 django.setup()
-from posthog.models import EventDefinition, Organization, PropertyDefinition, Team, User
+from posthog.models import Organization, Team, User
+from products.event_definitions.backend.models import EventDefinition, PropertyDefinition
 from posthog.models.personal_api_key import PersonalAPIKey
 from posthog.models.utils import hash_key_value
 

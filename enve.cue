@@ -108,25 +108,48 @@ profiles: dev: schema.#Profile & {
 	name:        "posthog-platform-dev"
 	description: "PostHog Polyglot Monorepo (Django + ClickHouse + Kafka + Temporal + SeaweedFS)"
 
-	// Upstream's pins: python 3.14.7, node 24, pnpm 10, postgres 15, go 1.26, ClickHouse 26.6.2.158,
+	// Upstream's pins: python 3.14.7, node 26.13.1, pnpm 11.28.5, postgres 15, go 1.26, ClickHouse 26.9.5.2,
 	// redis 8.10, ruff 0.16, git 2.48+.
 	tools: [
 		{pname: "python3", version: "3.14.7"},
-		pkgs.uv,
-		pkgs.postgresql_15,
-		// Compose's ClickHouse 26.6.2.158 release binaries (26.8 changes JSON float/uint overflow).
+		// PostHog pyproject.toml requires uv >= 0.13.4 (locked nixpkgs snapshot ships 0.12.22).
 		schema.#ArchiveBuildSpec & {
-			pname:   "clickhouse"
-			version: "26.6.2.158"
+			pname:   "uv"
+			version: "0.13.9"
 			src: {
-				"aarch64-darwin": "https://github.com/ClickHouse/ClickHouse/releases/download/v26.6.2.158-stable/clickhouse-macos-aarch64"
-				"aarch64-linux":  "https://github.com/ClickHouse/ClickHouse/releases/download/v26.6.2.158-stable/clickhouse-common-static-26.6.2.158-arm64.tgz"
-				"x86_64-linux":   "https://github.com/ClickHouse/ClickHouse/releases/download/v26.6.2.158-stable/clickhouse-common-static-26.6.2.158-amd64.tgz"
+				"aarch64-darwin": "https://github.com/astral-sh/uv/releases/download/0.13.9/uv-aarch64-apple-darwin.tar.gz"
+				"aarch64-linux":  "https://github.com/astral-sh/uv/releases/download/0.13.9/uv-aarch64-unknown-linux-musl.tar.gz"
+				"x86_64-linux":   "https://github.com/astral-sh/uv/releases/download/0.13.9/uv-x86_64-unknown-linux-musl.tar.gz"
 			}
 			sha256: {
-				"aarch64-darwin": "0be693bf5d2f3a82c18e2047b96d09aed01188758da2c9223fb3e9a07462e7ac"
-				"aarch64-linux":  "ed312f77219abd152afaaa8bdaacc2f03a4a0cbc9d7fb11f16f8245159efe150"
-				"x86_64-linux":   "43340e96a000cc76b66ba7bca013b5fd567379c5a67d7ea9c95b3ab92ddbed2d"
+				"aarch64-darwin": "5aeca67f2283f75235de40d0bd9c0a5bbc5fce23b6d48b3bf9fa1b2db08382ca"
+				"aarch64-linux":  "37fbb7c5bc66cf99c12aa881949d216181e201dec449772c4329e56487d61179"
+				"x86_64-linux":   "58ccf5f1792b8a5a88d01bc910ea131a8b3db4a319a17ad5fad75e0845a3e271"
+			}
+			buildInputs: [{pname: "findutils"}]
+			installPhase: """
+				set -eu
+				mkdir -p "$out/bin"
+				cp "$(find "$src" -type f -name uv | head -n 1)" "$out/bin/uv"
+				cp "$(find "$src" -type f -name uvx | head -n 1)" "$out/bin/uvx"
+				chmod 0755 "$out/bin/uv" "$out/bin/uvx"
+				"$out/bin/uv" --version
+				"""
+		},
+		pkgs.postgresql_15,
+		// Compose's ClickHouse 26.9.5.2 release binaries (docker-compose.base.yml: 26.9.5.2-posthog).
+		schema.#ArchiveBuildSpec & {
+			pname:   "clickhouse"
+			version: "26.9.5.2"
+			src: {
+				"aarch64-darwin": "https://github.com/ClickHouse/ClickHouse/releases/download/v26.9.5.2-stable/clickhouse-macos-aarch64"
+				"aarch64-linux":  "https://github.com/ClickHouse/ClickHouse/releases/download/v26.9.5.2-stable/clickhouse-common-static-26.9.5.2-arm64.tgz"
+				"x86_64-linux":   "https://github.com/ClickHouse/ClickHouse/releases/download/v26.9.5.2-stable/clickhouse-common-static-26.9.5.2-amd64.tgz"
+			}
+			sha256: {
+				"aarch64-darwin": "3ce96b2f4a946ed8210dd354aafee95d6158edc118c3a4d5cfd598b0f9593ffa"
+				"aarch64-linux":  "fbee6f3e5578c3863850bde127a2e9803757f027af2fbe10449f73d1859925f0"
+				"x86_64-linux":   "873c7a13d4421c89a625abd9ee28f5ef1c6388cfba907269206594a02f8e4ffc"
 			}
 			buildInputs: [{pname: "findutils"}]
 			installPhase: """
@@ -139,8 +162,23 @@ profiles: dev: schema.#Profile & {
 				"""
 		},
 		pkgs.redis,
-		pkgs.nodejs & {version: "24"},
-		pkgs.pnpm & {version: "10"},
+		// Upstream .nvmrc is 26.13.1; locked nixpkgs snapshot serves 26.10.0 (satisfies package.json engines ">=26 <27").
+		pkgs.nodejs & {version: "26"},
+		// package.json's `packageManager` pnpm, exactly (checked by posthog-usecase-tests).
+		schema.#ArchiveBuildSpec & {
+			pname:   "pnpm"
+			version: "11.28.5"
+			src:     "https://registry.npmjs.org/pnpm/-/pnpm-11.28.5.tgz"
+			sha256:  "1ef4e447a68713656064f3f174c0f44719960a043a3fe2299169d08cf1dbf8ee"
+			installPhase: """
+				set -eu
+				mkdir -p "$out/lib/pnpm" "$out/bin"
+				cp -R "$src"/. "$out/lib/pnpm/"
+				chmod 0755 "$out/lib/pnpm/bin/pnpm.cjs" "$out/lib/pnpm/bin/pnpx.cjs"
+				ln -s ../lib/pnpm/bin/pnpm.cjs "$out/bin/pnpm"
+				ln -s ../lib/pnpm/bin/pnpx.cjs "$out/bin/pnpx"
+				"""
+		},
 		pkgs.go & {version: "1.26"},
 		_rust,
 		{pname: "golangci-lint"},
@@ -214,6 +252,7 @@ profiles: dev: schema.#Profile & {
 				"""
 		},
 		{pname: "etcd"},
+		{pname: "pgbouncer"},
 		{pname: "ripgrep"},
 		{pname: "bash"},
 		{pname: "coreutils"},

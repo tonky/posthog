@@ -31,6 +31,7 @@ import {
     accountsList,
     accountsRetrieve,
     customerTasksArchiveCreate,
+    customerTasksBulkUpdateCreate,
     customerTasksCreate,
     customerTasksList,
     customerTasksRetrieve,
@@ -41,6 +42,7 @@ import type {
     AccountApi,
     CustomerTaskApi,
     CustomerTaskCreateApi,
+    CustomerTaskBulkPatchApi,
     CustomerTaskPageApi,
     CustomerTaskUserApi,
     PaginatedAccountListApi,
@@ -49,17 +51,21 @@ import type {
 
 import { getTileRecord, getTileString, type AccountViewTileLogicProps } from '../Accounts/accountViewTileConfig'
 import {
+    areTagListsEqual,
     CUSTOMER_TASK_FILTER_URL_KEYS,
     CUSTOMER_TASK_ORDERINGS,
     CUSTOMER_TASK_URL_KEYS,
+    customerTaskAssigneeMode,
     customerTaskSearchParams,
     CustomerTaskEvents,
+    isRoleAssigneeFilter,
     customerTasksQuery,
     DEFAULT_CUSTOMER_TASK_ORDERING,
     defaultCustomerTaskFilters,
     hasCustomerTaskFilters,
     parseCustomerTaskSearchParams,
     type CustomerTaskAccountFilter,
+    type CustomerTaskAssigneeFilter,
     type CustomerTaskFilters,
     type CustomerTaskOrdering,
     type CustomerTasksContext,
@@ -83,6 +89,7 @@ export interface customerTasksLogicValues {
     accountOptionsResponse: PaginatedAccountListApi | null
     accountOptionsResponseLoading: boolean
     accountFilterOpen: boolean
+    bulkAccountOpen: boolean
     currentTeamId: number | null
     filters: CustomerTaskFilters
     hasActiveFilters: boolean
@@ -104,14 +111,21 @@ export interface customerTasksLogicValues {
     draftAccount: CustomerTaskAccountFilter | null
     draftAssignedTo: CustomerTaskUserApi | null
     draftDueAt: string | null
+    draftTags: string[]
     user: UserType | null
 }
 export interface customerTasksLogicActions {
+    bulkUpdateTasks: (
+        taskIds: string[],
+        patch: CustomerTaskBulkPatchApi,
+        onComplete: (failedIds: string[]) => void
+    ) => { taskIds: string[]; patch: CustomerTaskBulkPatchApi; onComplete: (failedIds: string[]) => void }
     openTaskFromUrl: (taskId: string) => { taskId: string }
     closeModal: () => void
     createTask: (task: CustomerTaskCreateApi) => { task: CustomerTaskCreateApi }
     loadAccountOptions: (payload: { query: string }) => { query: string }
     loadTaskPage: () => { value: true }
+    loadTaskPageFailure: (error: string, errorObject?: any) => { error: string; errorObject?: any }
     mutationFinished: (key: string) => { key: string }
     mutationStarted: (key: string) => { key: string }
     openCreateModal: () => void
@@ -121,7 +135,10 @@ export interface customerTasksLogicActions {
     archiveTask: (taskId: string) => { taskId: string }
     setAccountFilter: (account: CustomerTaskAccountFilter | null) => { account: CustomerTaskAccountFilter | null }
     setAccountFilterOpen: (open: boolean) => { open: boolean }
+    setBulkAccountOpen: (open: boolean) => { open: boolean }
+    setAssignee: (assignee: CustomerTaskAssigneeFilter) => { assignee: CustomerTaskAssigneeFilter }
     setFilters: (filters: Partial<CustomerTaskFilters>) => { filters: Partial<CustomerTaskFilters> }
+    addTagToFilter: (tag: string) => { tag: string }
     setFiltersFromUrl: (state: CustomerTaskUrlState) => { state: CustomerTaskUrlState }
     setAccountFilterName: (name: string) => { name: string }
     setTaskOrdering: (ordering: CustomerTaskOrdering) => { ordering: CustomerTaskOrdering }
@@ -133,6 +150,7 @@ export interface customerTasksLogicActions {
     setDraftDescription: (description: string) => { description: string }
     setDraftDueAt: (dueAt: string | null) => { dueAt: string | null }
     setDraftName: (name: string) => { name: string }
+    setDraftTags: (tags: string[]) => { tags: string[] }
     submitModal: () => void
     updateTask: (
         taskId: string,
@@ -195,7 +213,9 @@ export const customerTasksLogic: LogicWrapper<customerTasksLogicType> = kea<cust
         openTaskFromUrl: (taskId: string) => ({ taskId }),
         loadTaskPage: true,
         loadAccountOptions: (payload: { query: string }) => payload,
+        setAssignee: (assignee: CustomerTaskAssigneeFilter) => ({ assignee }),
         setFilters: (filters: Partial<CustomerTaskFilters>) => ({ filters }),
+        addTagToFilter: (tag: string) => ({ tag }),
         setFiltersFromUrl: (state: CustomerTaskUrlState) => ({ state }),
         setAccountFilterName: (name: string) => ({ name }),
         setTaskOrdering: (ordering: CustomerTaskOrdering) => ({ ordering }),
@@ -203,6 +223,7 @@ export const customerTasksLogic: LogicWrapper<customerTasksLogicType> = kea<cust
         setSearch: (search: string) => ({ search }),
         setAccountFilter: (account: CustomerTaskAccountFilter | null) => ({ account }),
         setAccountFilterOpen: (open: boolean) => ({ open }),
+        setBulkAccountOpen: (open: boolean) => ({ open }),
         setPage: (page: number) => ({ page }),
         resetFilters: () => ({}),
         openCreateModal: () => ({}),
@@ -213,9 +234,15 @@ export const customerTasksLogic: LogicWrapper<customerTasksLogicType> = kea<cust
         setDraftAccount: (account: CustomerTaskAccountFilter | null) => ({ account }),
         setDraftAssignedTo: (assignedTo: CustomerTaskUserApi | null) => ({ assignedTo }),
         setDraftDueAt: (dueAt: string | null) => ({ dueAt }),
+        setDraftTags: (tags: string[]) => ({ tags }),
         submitModal: () => ({}),
         createTask: (task: CustomerTaskCreateApi) => ({ task }),
         updateTask: (taskId: string, patch: PatchedCustomerTaskUpdateApi) => ({ taskId, patch }),
+        bulkUpdateTasks: (
+            taskIds: string[],
+            patch: CustomerTaskBulkPatchApi,
+            onComplete: (failedIds: string[]) => void
+        ) => ({ taskIds, patch, onComplete }),
         archiveTask: (taskId: string) => ({ taskId }),
         restoreTask: (taskId: string) => ({ taskId }),
         mutationStarted: (key: string) => ({ key }),
@@ -230,21 +257,27 @@ export const customerTasksLogic: LogicWrapper<customerTasksLogicType> = kea<cust
                     if (values.currentTeamId === null) {
                         return null
                     }
-                    const result = await customerTasksList(
-                        String(values.currentTeamId),
-                        customerTasksQuery(
-                            values.filters,
-                            props.context,
-                            props.accountId,
-                            values.page,
-                            values.pageSize,
-                            values.timezone,
-                            props.canViewAll,
-                            values.ordering
+                    try {
+                        const result = await customerTasksList(
+                            String(values.currentTeamId),
+                            customerTasksQuery(
+                                values.filters,
+                                props.context,
+                                props.accountId,
+                                values.page,
+                                values.pageSize,
+                                values.timezone,
+                                props.canViewAll,
+                                values.ordering
+                            )
                         )
-                    )
-                    breakpoint()
-                    return result
+                        breakpoint()
+                        return result
+                    } catch (error) {
+                        // A superseded request must not reach loadTaskPageFailure, which would act on newer filters.
+                        breakpoint()
+                        throw error
+                    }
                 },
             },
         ],
@@ -310,6 +343,7 @@ export const customerTasksLogic: LogicWrapper<customerTasksLogicType> = kea<cust
                 },
             ],
             accountFilterOpen: [false, { setAccountFilterOpen: (_, { open }) => open }],
+            bulkAccountOpen: [false, { setBulkAccountOpen: (_, { open }) => open, bulkUpdateTasks: () => false }],
             mutationKeys: [
                 {} as Record<string, boolean>,
                 {
@@ -389,6 +423,15 @@ export const customerTasksLogic: LogicWrapper<customerTasksLogicType> = kea<cust
                     closeModal: () => null,
                 },
             ],
+            draftTags: [
+                [] as string[],
+                {
+                    openCreateModal: () => [],
+                    openEditModal: (_: string[], a: { task: CustomerTaskApi }) => [...a.task.tags],
+                    setDraftTags: (_: string[], a: { tags: string[] }) => a.tags,
+                    closeModal: () => [],
+                },
+            ],
         }
     }),
     selectors(({ actions, props }) => ({
@@ -419,6 +462,33 @@ export const customerTasksLogic: LogicWrapper<customerTasksLogicType> = kea<cust
         ],
     })),
     listeners(({ actions, props, values }) => ({
+        bulkUpdateTasks: async ({ taskIds, patch, onComplete }) => {
+            if (values.currentTeamId === null || values.mutationKeys.bulk || values.taskPageLoading) {
+                return
+            }
+            const projectId = String(values.currentTeamId)
+            const selectionScope = JSON.stringify(taskUrlState(values))
+            const tasks = values.tasks.filter((task) => taskIds.includes(task.id))
+            if (tasks.length === 0 || tasks.some((task) => values.mutationKeys[task.id])) {
+                return
+            }
+            actions.mutationStarted('bulk')
+            tasks.forEach((task) => actions.mutationStarted(task.id))
+            try {
+                await customerTasksBulkUpdateCreate(projectId, {
+                    task_ids: tasks.map((task) => task.id),
+                    updates: patch,
+                })
+                onComplete([])
+                actions.loadTaskPage()
+            } catch (error) {
+                onComplete(JSON.stringify(taskUrlState(values)) === selectionScope ? tasks.map((task) => task.id) : [])
+                lemonToast.error(taskWriteFailureMessage(error, 'Could not update the tasks. Try again.'))
+            } finally {
+                tasks.forEach((task) => actions.mutationFinished(task.id))
+                actions.mutationFinished('bulk')
+            }
+        },
         openTaskFromUrl: async ({ taskId }, breakpoint) => {
             if (values.currentTeamId === null) {
                 return
@@ -434,9 +504,21 @@ export const customerTasksLogic: LogicWrapper<customerTasksLogicType> = kea<cust
                 )
             }
         },
+        setAssignee: ({ assignee }) => {
+            posthog.capture(CustomerTaskEvents.AssigneeFilterChanged, { mode: customerTaskAssigneeMode(assignee) })
+            actions.setFilters({ assignee })
+        },
         setFilters: () => {
             props.onConfigChange?.(taskConfig(values))
             actions.loadTaskPage()
+        },
+        loadTaskPageFailure: ({ errorObject }) => {
+            // A role deleted after someone saved or shared the filter makes every request fail,
+            // so fall back to the default view instead of an error that never clears.
+            const body = errorObject instanceof ApiError ? (errorObject.data as Record<string, unknown> | null) : null
+            if (body?.assigned_to && isRoleAssigneeFilter(values.filters.assignee)) {
+                actions.setFilters({ assignee: defaultCustomerTaskFilters(props.context).assignee })
+            }
         },
         setFiltersFromUrl: async () => {
             actions.loadTaskPage()
@@ -468,6 +550,12 @@ export const customerTasksLogic: LogicWrapper<customerTasksLogicType> = kea<cust
             const ordering = customerTaskSortingToOrdering(sorting)
             if (ordering) {
                 actions.setTaskOrdering(ordering)
+            }
+        },
+        addTagToFilter: ({ tag }: { tag: string }) => {
+            const tags = values.filters.tags ?? []
+            if (!tags.includes(tag)) {
+                actions.setFilters({ tags: [...tags, tag] })
             }
         },
         resetFilters: () => {
@@ -509,6 +597,9 @@ export const customerTasksLogic: LogicWrapper<customerTasksLogicType> = kea<cust
                 if (values.draftDueAt !== values.modalTask.due_at) {
                     patch.due_at = values.draftDueAt
                 }
+                if (!areTagListsEqual(values.draftTags, values.modalTask.tags)) {
+                    patch.tags = values.draftTags
+                }
                 if (Object.keys(patch).length === 0) {
                     actions.closeModal()
                     return
@@ -521,6 +612,7 @@ export const customerTasksLogic: LogicWrapper<customerTasksLogicType> = kea<cust
                     description,
                     assigned_to_id: assignedToId,
                     due_at: values.draftDueAt,
+                    tags: values.draftTags,
                 })
             }
         },
@@ -545,13 +637,14 @@ export const customerTasksLogic: LogicWrapper<customerTasksLogicType> = kea<cust
                 return
             }
             const changed = current
-                ? Object.entries(patch).some(
-                      ([key, value]) =>
-                          (key === 'assigned_to_id'
-                              ? (current.assigned_to?.id ?? null)
-                              : key === 'account_id'
-                                ? (current.account?.id ?? null)
-                                : current[key as keyof CustomerTaskApi]) !== value
+                ? Object.entries(patch).some(([key, value]) =>
+                      key === 'tags'
+                          ? !areTagListsEqual(value as string[], current.tags)
+                          : (key === 'assigned_to_id'
+                                ? (current.assigned_to?.id ?? null)
+                                : key === 'account_id'
+                                  ? (current.account?.id ?? null)
+                                  : current[key as keyof CustomerTaskApi]) !== value
                   )
                 : true
             if (!changed || values.mutationKeys[taskId] || values.currentTeamId === null) {

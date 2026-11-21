@@ -1,12 +1,23 @@
 from rest_framework.request import Request
 
 from posthog.oauth_provenance import (
-    is_interactive_desktop_grant,
+    get_oauth_access_token as get_oauth_access_token,
+    get_oauth_client_id,
+    is_interactive_desktop_grant as is_interactive_desktop_grant,
     is_sandbox_oauth_request as is_sandbox_oauth_request,
     is_sandbox_origin_request as is_sandbox_origin_request,
 )
+from posthog.temporal.oauth import POSTHOG_DESKTOP_MOBILE_APP_CLIENT_ID_EU, POSTHOG_DESKTOP_MOBILE_APP_CLIENT_ID_US
 
 from products.tasks.backend.models import TaskClientProvenance
+
+TASK_CLIENT_PROVENANCE_HEADER = "X-PostHog-Client-Provenance"
+_MOBILE_OAUTH_CLIENT_IDS = frozenset(
+    {
+        POSTHOG_DESKTOP_MOBILE_APP_CLIENT_ID_US,
+        POSTHOG_DESKTOP_MOBILE_APP_CLIENT_ID_EU,
+    }
+)
 
 
 def is_api_key_request(authenticator: object) -> bool:
@@ -15,9 +26,8 @@ def is_api_key_request(authenticator: object) -> bool:
 
     "As a user" is the load-bearing half. Callers use this to decide things that are
     charged or attributed to a person, so a key that resolves to a team or a project
-    rather than a user — ``TeamSecretTokenAuthentication`` hands back a synthetic
-    ``TeamSecretTokenUser``, ``ProjectSecretAPIKeyAuthentication`` is project-scoped —
-    must not qualify, however server-to-server it looks.
+    rather than a user — ``ProjectSecretAPIKeyAuthentication`` is project-scoped and
+    hands back a synthetic user — must not qualify, however server-to-server it looks.
 
     Takes the authenticator rather than the request itself: the facade boundary must not
     put a DRF type on its signature (products/architecture.md § Facades: The Public
@@ -37,6 +47,10 @@ def is_api_key_request(authenticator: object) -> bool:
 
 
 def get_task_client_provenance(request: Request) -> TaskClientProvenance | None:
-    if is_interactive_desktop_grant(request):
-        return TaskClientProvenance.POSTHOG_DESKTOP
-    return None
+    if not is_interactive_desktop_grant(request):
+        return None
+    if get_oauth_client_id(request) in _MOBILE_OAUTH_CLIENT_IDS:
+        return TaskClientProvenance.POSTHOG_MOBILE
+    if request.headers.get(TASK_CLIENT_PROVENANCE_HEADER) == TaskClientProvenance.POSTHOG_WEB:
+        return TaskClientProvenance.POSTHOG_WEB
+    return TaskClientProvenance.POSTHOG_DESKTOP

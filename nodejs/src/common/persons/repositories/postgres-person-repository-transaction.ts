@@ -1,10 +1,11 @@
 import { DateTime } from 'luxon'
 
 import { PersonMessage } from '~/common/persons/person-message'
+import { PersonUpdate } from '~/common/persons/person-update-batch'
 import { CreatePersonResult, MoveDistinctIdsResult } from '~/common/utils/db/db'
 import { TransactionClient } from '~/common/utils/db/postgres'
 import { Properties } from '~/plugin-scaffold'
-import { InternalPerson, PersonUpdateFields, PropertiesLastOperation, PropertiesLastUpdatedAt, Team } from '~/types'
+import { InternalPerson, PersonUpdateFields, Team } from '~/types'
 
 import { LifecycleMarkPerson } from './person-repository'
 import { PersonRepositoryTransaction } from './person-repository-transaction'
@@ -19,8 +20,6 @@ export class PostgresPersonRepositoryTransaction implements PersonRepositoryTran
     async createPerson(
         createdAt: DateTime,
         properties: Properties,
-        propertiesLastUpdatedAt: PropertiesLastUpdatedAt,
-        propertiesLastOperation: PropertiesLastOperation,
         teamId: Team['id'],
         isUserId: number | null,
         isIdentified: boolean,
@@ -31,8 +30,6 @@ export class PostgresPersonRepositoryTransaction implements PersonRepositoryTran
         return await this.repository.createPerson(
             createdAt,
             properties,
-            propertiesLastUpdatedAt,
-            propertiesLastOperation,
             teamId,
             isUserId,
             isIdentified,
@@ -69,6 +66,29 @@ export class PostgresPersonRepositoryTransaction implements PersonRepositoryTran
 
     async isPersonLive(person: InternalPerson): Promise<boolean> {
         return await this.repository.isPersonLive(person, this.transaction)
+    }
+
+    async readMergeRows(teamId: number, targetId: string, sourceIds: string[]): Promise<InternalPerson[]> {
+        return await this.repository.readMergeRows(teamId, targetId, sourceIds, this.transaction)
+    }
+
+    async readPerson(teamId: Team['id'], distinctId: string): Promise<InternalPerson | undefined> {
+        return await this.repository.readPerson(teamId, distinctId, this.transaction)
+    }
+
+    async updatePersonsBatch(personUpdates: PersonUpdate[]): Promise<
+        Map<
+            string,
+            {
+                success: boolean
+                version?: number
+                kafkaMessage?: PersonMessage
+                person?: InternalPerson
+                error?: Error
+            }
+        >
+    > {
+        return await this.repository.updatePersonsBatch(personUpdates, this.transaction)
     }
 
     async addDistinctId(person: InternalPerson, distinctId: string, version: number): Promise<PersonMessage[]> {

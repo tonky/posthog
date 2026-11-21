@@ -23,7 +23,8 @@ describe('navFilesTabLogic', () => {
         const folder = { id: 'reports', path: 'Unfiled/Reports', type: 'folder', ref: 'Unfiled/Reports' }
         const note = { id: 'note', path: 'Unfiled/Reports/Notes', type: 'notebook', ref: 'note' }
         let resolveRoot!: (response: { count: number; results: (typeof folder)[]; users: [] }) => void
-        jest.spyOn(api.fileSystem, 'list').mockImplementation(({ parent } = {}) => {
+        jest.spyOn(api.fileSystem, 'list').mockImplementation((options) => {
+            const parent = options?.parent
             if (parent === '') {
                 return new Promise((resolve) => {
                     resolveRoot = resolve
@@ -123,7 +124,7 @@ describe('navFilesTabLogic', () => {
         const files = projectTreeLogic({ key: FILES_TREE_KEY, root: 'project://' })
         panelLayoutLogic.actions.setNavExperimentTab('home')
         panelLayoutLogic.actions.toggleLayoutNavCollapsed(true)
-        panelLayoutLogic.actions.setActivePanelIdentifier('DataAndPeople')
+        panelLayoutLogic.actions.setActivePanelIdentifier('Notifications')
         panelLayoutLogic.actions.showLayoutPanel(true)
         files.actions.setSearchTerm('unrelated')
         files.actions.setSortMethod('recent')

@@ -119,8 +119,15 @@ if [ -n "${NODEJS_SHARD_INSTANCE:-}" ]; then
     # The CDP's Valkey cluster (CI's valkey-cluster on :6390), the instance's. Without one its
     # shadow client's reconnects end in killGracefully(): a SIGTERM to the jest process.
     export CDP_VALKEY_HOST=127.0.0.1 CDP_VALKEY_PORT="${ENVE_SERVICE_VALKEY_CLUSTER_PORT:?the instance valkey-cluster port}"
+    export CDP_FREQUENCY_CAP_VALKEY_HOST=127.0.0.1 CDP_FREQUENCY_CAP_VALKEY_PORT="$CDP_VALKEY_PORT"
+    export CDP_EMAIL_ATTACHMENTS_VALKEY_HOST=127.0.0.1 CDP_EMAIL_ATTACHMENTS_VALKEY_PORT="$CDP_VALKEY_PORT"
+    export SES_RATE_LIMITER_VALKEY_HOST=127.0.0.1 SES_RATE_LIMITER_VALKEY_PORT="$CDP_VALKEY_PORT"
     # Session replay's (and the AI blob store's) S3, CI's seaweedfs on :8333: the instance's.
     export SESSION_RECORDING_V2_S3_ENDPOINT="http://127.0.0.1:${ENVE_SERVICE_SEAWEEDFS_OPEN_PORT:?the instance open seaweedfs port}"
+    if [ -n "${ENVE_SERVICE_SEAWEEDFS_PORT:-}" ]; then
+        export CDP_EMAIL_ATTACHMENTS_S3_ENDPOINT="http://127.0.0.1:${ENVE_SERVICE_SEAWEEDFS_PORT}"
+        export CDP_EMAIL_ATTACHMENTS_S3_PUBLIC_ENDPOINT="$CDP_EMAIL_ATTACHMENTS_S3_ENDPOINT"
+    fi
     # CI's dynamodb on :18010 (the recording API's and the crawl history's integration tests,
     # patches/0001) and maildev on :1025 (SMTP) and :1080 (its /email API; the CDP's email
     # tests, which read these names themselves): the instance's.
@@ -307,7 +314,7 @@ if [[ ! "${ENACT_PREPARED:-}" =~ (^|,)[[:space:]]*node[[:space:]]*(,|$) ]]; then
 fi
 showcase/scripts/build_hogvm.sh
 case "${ENACT_COMPONENT:-}" in
-    nodejs_base | nodejs_ingestion_core | nodejs_ingestion | nodejs_cdp | nodejs_logs)
+    nodejs_base | nodejs_ingestion_core | nodejs_ingestion | nodejs_logs)
         # Pure JS/TS lanes don't provision a Cargo cache or build native Rust napi addons.
         showcase/scripts/exclusive.sh nodejs-build env -u SHARD_INDEX -u SHARD_COUNT bin/turbo --filter=@posthog/replay-headless build
         ;;

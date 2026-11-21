@@ -1,5 +1,8 @@
-import { IconLaptop, IconServer } from '@posthog/icons'
+import { IconInfo, IconLaptop, IconServer } from '@posthog/icons'
 import { Tooltip } from '@posthog/lemon-ui'
+import { Badge, Tooltip as QuillTooltip, TooltipContent, TooltipTrigger } from '@posthog/quill'
+
+import { useQuillSurface } from 'lib/ui/QuillSurface/quillSurfaceContext'
 
 import { FilterLogicalOperator, UniversalFiltersGroup, UniversalFiltersGroupValue } from '~/types'
 
@@ -34,6 +37,10 @@ function isFilterClientSafe(f: UniversalFiltersGroupValue): boolean {
 
 export type EvalMode = 'client' | 'partial' | 'server'
 
+// The backend publishes client rules at 100% sampling in the public SDK configuration (`get_client_safe_suppression_rules`).
+export const CLIENT_RULE_PUBLIC_NOTE =
+    "This rule is part of your project's public SDK configuration, so anyone with your project token can read its filters. Keep personal data and secrets out of it."
+
 export function getEvalMode(filters: UniversalFiltersGroup): EvalMode {
     const values = filters.values ?? []
     if (values.length === 0) {
@@ -53,15 +60,31 @@ export function getEvalMode(filters: UniversalFiltersGroup): EvalMode {
 
 function Pill({
     activeClasses,
+    quillVariant,
     icon: Icon,
     label,
     tooltip,
 }: {
     activeClasses: string
+    quillVariant: 'success' | 'warning'
     icon: typeof IconLaptop
     label: string
     tooltip: string
 }): JSX.Element {
+    const todayRailNav = useQuillSurface()
+
+    if (todayRailNav) {
+        return (
+            <QuillTooltip>
+                <TooltipTrigger render={<Badge variant={quillVariant} />}>
+                    <Icon />
+                    {label}
+                </TooltipTrigger>
+                <TooltipContent className="max-w-80">{tooltip}</TooltipContent>
+            </QuillTooltip>
+        )
+    }
+
     return (
         <Tooltip title={tooltip}>
             <div className={`inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-medium ${activeClasses}`}>
@@ -130,11 +153,31 @@ function DonutChart({
 }
 
 export function SamplingRateIndicator({ samplingRate }: { samplingRate: number }): JSX.Element {
+    const todayRailNav = useQuillSurface()
     const percentage = Math.round(samplingRate * 100)
+    const tooltip = `${percentage}% of matching exceptions will be suppressed. The remaining ${100 - percentage}% will be captured normally.`
+
+    if (todayRailNav) {
+        return (
+            <QuillTooltip>
+                <TooltipTrigger
+                    render={
+                        <span
+                            className="inline-flex items-center gap-1.5 text-xs text-muted-foreground"
+                            translate="no"
+                        />
+                    }
+                >
+                    <DonutChart percentage={percentage} className="text-destructive-foreground" />
+                    {percentage}% suppressed
+                </TooltipTrigger>
+                <TooltipContent className="max-w-80">{tooltip}</TooltipContent>
+            </QuillTooltip>
+        )
+    }
+
     return (
-        <Tooltip
-            title={`${percentage}% of matching exceptions will be suppressed. The remaining ${100 - percentage}% will be captured normally.`}
-        >
+        <Tooltip title={tooltip}>
             <div className="inline-flex items-center gap-1.5 text-xs text-secondary">
                 <DonutChart percentage={percentage} className="text-danger" />
                 {percentage}% suppressed
@@ -143,21 +186,81 @@ export function SamplingRateIndicator({ samplingRate }: { samplingRate: number }
     )
 }
 
-export function EvaluationIndicator({ mode }: { mode: EvalMode }): JSX.Element {
+export function EvaluationIndicator({
+    mode,
+    samplingRate = 1,
+}: {
+    mode: EvalMode
+    samplingRate?: number
+}): JSX.Element {
+    const todayRailNav = useQuillSurface()
     const clientActive = mode === 'client' || mode === 'partial'
+
+    if (todayRailNav) {
+        return (
+            <div className="inline-flex flex-wrap items-center gap-1">
+                {clientActive && (
+                    <Pill
+                        activeClasses="bg-success-highlight text-success"
+                        quillVariant="success"
+                        icon={IconLaptop}
+                        label="Client"
+                        tooltip={CLIENT_TOOLTIPS[mode]}
+                    />
+                )}
+                {clientActive && samplingRate === 1 && (
+                    <QuillTooltip>
+                        <TooltipTrigger
+                            render={
+                                <span
+                                    className="inline-flex shrink-0 text-base text-muted-foreground"
+                                    aria-label={CLIENT_RULE_PUBLIC_NOTE}
+                                    data-attr="error-tracking-suppression-rule-public-note"
+                                />
+                            }
+                        >
+                            <IconInfo />
+                        </TooltipTrigger>
+                        <TooltipContent className="max-w-80">{CLIENT_RULE_PUBLIC_NOTE}</TooltipContent>
+                    </QuillTooltip>
+                )}
+                {mode !== 'client' && (
+                    <Pill
+                        activeClasses="bg-warning-highlight text-warning"
+                        quillVariant="warning"
+                        icon={IconServer}
+                        label="Server"
+                        tooltip={SERVER_TOOLTIPS[mode]}
+                    />
+                )}
+            </div>
+        )
+    }
+
     return (
         <div className="inline-flex items-center gap-1">
             {clientActive && (
                 <Pill
                     activeClasses="bg-success-highlight text-success"
+                    quillVariant="success"
                     icon={IconLaptop}
                     label="Client"
                     tooltip={CLIENT_TOOLTIPS[mode]}
                 />
             )}
+            {clientActive && samplingRate === 1 && (
+                <Tooltip title={CLIENT_RULE_PUBLIC_NOTE}>
+                    <IconInfo
+                        className="shrink-0 text-base text-secondary"
+                        aria-label={CLIENT_RULE_PUBLIC_NOTE}
+                        data-attr="error-tracking-suppression-rule-public-note"
+                    />
+                </Tooltip>
+            )}
             {mode !== 'client' && (
                 <Pill
                     activeClasses="bg-warning-highlight text-warning"
+                    quillVariant="warning"
                     icon={IconServer}
                     label="Server"
                     tooltip={SERVER_TOOLTIPS[mode]}

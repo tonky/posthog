@@ -1,4 +1,5 @@
 import re
+from collections.abc import Iterable
 from datetime import datetime, timedelta
 from functools import cached_property
 from itertools import batched
@@ -17,7 +18,8 @@ from posthog.schema import (
     EventPropertyFilter,
     EventsQuery,
     EventsQueryResponse,
-    HogQLQueryModifiers,
+    FilterLogicalOperator,
+    PersonsOnEventsMode,
     PropertyGroupFilter,
     PropertyGroupFilterValue,
     PropertyOperator,
@@ -26,10 +28,8 @@ from posthog.schema import (
 from posthog.hogql import ast
 from posthog.hogql.ast import Alias
 from posthog.hogql.context import HogQLContext
-from posthog.hogql.database.schema.flag_evaluations import (
-    EVENTS_LIST_JOINED_FIELDS,
-    add_events_list_fields_to_flag_evaluations,
-)
+from posthog.hogql.database.schema.flag_evaluations import EVENTS_LIST_JOINED_FIELDS, join_persons_to_flag_evaluations
+from posthog.hogql.database.schema.util.null_sentinels import MAT_COL_NULL_SENTINELS
 from posthog.hogql.parser import parse_expr, parse_order_expr
 from posthog.hogql.property import (
     action_to_expr,
@@ -39,27 +39,31 @@ from posthog.hogql.property import (
     steps_to_expr,
 )
 from posthog.hogql.query import execute_hogql_query
+from posthog.hogql.restricted_properties import PERSON_PROPERTY_CONTAINERS
 from posthog.hogql.visitor import TraversingVisitor
 
 from posthog.api.element import ElementSerializer
 from posthog.api.person import PERSON_DEFAULT_DISPLAY_NAME_PROPERTIES
 from posthog.clickhouse.query_tagging import tag_contains_user_hogql
+from posthog.constants import GROUP_TYPES_LIMIT
 from posthog.dataclasses import frozen
+from posthog.date_util import start_of_day
 from posthog.hogql_queries.insight_actors_query_runner import InsightActorsQueryRunner
 from posthog.hogql_queries.paginators import HogQLHasMorePaginator
-from posthog.hogql_queries.query_runner import AnalyticsQueryRunner, get_query_runner
+from posthog.hogql_queries.query_runner import AnalyticsQueryRunner, QueryRunner, get_query_runner
 from posthog.hogql_queries.utils.person_display_name import person_display_name_property_exprs
-from posthog.models import Person, PropertyDefinition
+from posthog.models import Person
 from posthog.models.element import chain_to_elements
-from posthog.models.flag_evaluations.sql import FLAG_EVALUATIONS_SOURCE_EVENT
+from posthog.models.flag_evaluations.sql import FLAG_EVALUATIONS_RETENTION_DAYS, FLAG_EVALUATIONS_SOURCE_EVENT
 from posthog.models.person.person import MAX_LIMIT_DISTINCT_IDS, get_distinct_ids_for_subquery
 from posthog.models.person.util import get_person_by_pk_or_uuid, get_persons_mapped_by_distinct_id
 from posthog.personhog_client.caller_tag import personhog_caller_tag
 from posthog.utils import relative_date_parse
 
-from products.actions.backend.models.action import Action, ActionStepJSON
-from products.feature_flags.backend.facade.enums import FlagEvaluationsMode
-from products.feature_flags.backend.facade.flags import get_organization_flag_evaluations_mode
+from products.actions.backend.facade.api import get_action
+from products.actions.backend.facade.contracts import ActionNotFound, ActionStep
+from products.event_definitions.backend.models import PropertyDefinition
+from products.feature_flags.backend.facade.flags import reads_flag_calls_from_flag_evaluations
 
 logger = structlog.get_logger(__name__)
 
@@ -88,6 +92,9 @@ class EventsListTable:
     looks_up_person_display_names: bool
     # Fields that join another table. The outer presorted query leaves out filters on them.
     joined_fields: frozenset[str]
+    # The list starts no earlier than the UTC start of the day this many days back.
+    retention_days: int | None
+    cache_key_variant: str
 
     def join_expr(self) -> ast.JoinExpr:
         return ast.JoinExpr(table=ast.Field(chain=[*self.chain]), alias=self.alias)
@@ -99,6 +106,8 @@ EVENTS_LIST_TABLE = EventsListTable(
     person_id="person.id",
     looks_up_person_display_names=False,
     joined_fields=frozenset(),
+    retention_days=None,
+    cache_key_variant="",
 )
 FLAG_EVALUATIONS_LIST_TABLE = EventsListTable(
     chain=("posthog", "flag_evaluations"),
@@ -107,13 +116,24 @@ FLAG_EVALUATIONS_LIST_TABLE = EventsListTable(
     # It then prints the persons join before the override join that the persons join condition reads.
     alias="flag_evaluations",
     # The persons join reads a zero UUID from person.id for a distinct_id with no person row.
-    # person_id holds the id that flag_evaluations resolved through person merges.
-    person_id="person_id",
+    person_id="merged_person_id",
     # Reading person.properties in the query joins persons. That join deduplicates every person in the team before
     # the query picks the page. The runner reads display names for only the page's persons after the query, unless
     # the query sorts by Person and joins persons anyway.
     looks_up_person_display_names=True,
     joined_fields=EVENTS_LIST_JOINED_FIELDS,
+    # flag_evaluations drops a monthly part only after its newest row passes the TTL. Rows older than the TTL can
+    # therefore remain for up to a month. This bound ends the list at the first day that the Usage tab charts show.
+    # The TTL is longer than the retention, so the table holds that day in full.
+    retention_days=FLAG_EVALUATIONS_RETENTION_DAYS,
+    cache_key_variant="_flag_evaluations",
+)
+
+STORED_PERSON_PROPERTIES_MODES = frozenset(
+    {
+        PersonsOnEventsMode.PERSON_ID_NO_OVERRIDE_PROPERTIES_ON_EVENTS,
+        PersonsOnEventsMode.PERSON_ID_OVERRIDE_PROPERTIES_ON_EVENTS,
+    }
 )
 
 
@@ -168,17 +188,34 @@ def and_exprs(existing: ast.Expr | None, extra: ast.Expr | None) -> ast.Expr | N
 QueryPropertyFilter = AnyPropertyFilterDiscriminated | PropertyGroupFilter | PropertyGroupFilterValue
 
 
-def _exact_flag_keys(prop: QueryPropertyFilter) -> list[str] | None:
-    if not (
-        isinstance(prop, EventPropertyFilter)
-        and prop.key == "$feature_flag"
-        and prop.operator == PropertyOperator.EXACT
-    ):
+# HogQL reads these properties from the properties JSON of every flag call in the date range. Each column holds the
+# same value as its property. flag_key leads the table's sort key after team_id. The `_$group_N_raw` columns hold the
+# stored group keys, which the events list also compares. The public `$group_N` fields read empty for a call made
+# before its group type mapping existed, so a filter on them would drop calls that the Events tab shows.
+_FLAG_EVALUATIONS_PROPERTY_COLUMNS = {
+    "$feature_flag": "flag_key",
+    **{f"$group_{index}": f"_$group_{index}_raw" for index in range(GROUP_TYPES_LIMIT)},
+}
+
+
+def _flag_evaluations_column_match(prop: QueryPropertyFilter) -> tuple[str, list[str]] | None:
+    """The flag_evaluations column and the values that select the same rows as an exact event property filter."""
+    if not isinstance(prop, EventPropertyFilter) or prop.operator != PropertyOperator.EXACT:
+        return None
+    column = _FLAG_EVALUATIONS_PROPERTY_COLUMNS.get(prop.key)
+    if column is None:
         return None
     values = prop.value if isinstance(prop.value, list) else [prop.value]
-    if not values or not all(isinstance(value, str) for value in values):
+    # The column stores '' for a call without the property and 'null' for a JSON null. The JSON read turns both of
+    # those into NULL, so a filter on '' or 'null' keeps the JSON read and does not match calls that lack a value.
+    if not values or not all(isinstance(value, str) and value not in MAT_COL_NULL_SENTINELS for value in values):
         return None
-    return [str(value) for value in values]
+    return column, [str(value) for value in values]
+
+
+def _retention_start_expr(retention_days: int) -> ast.Expr:
+    retention_start = start_of_day(now()) - timedelta(days=retention_days)
+    return parse_expr("timestamp >= {retention_start}", {"retention_start": ast.Constant(value=retention_start)})
 
 
 def split_pagination_cursor(value: str) -> tuple[str, str | None]:
@@ -198,6 +235,9 @@ class EventsQueryRunner(AnalyticsQueryRunner[EventsQueryResponse]):
             limit_context=self.limit_context, limit=self.query.limit, offset=self.query.offset
         )
         self._cursor_eligible = False
+
+    def _child_runners(self) -> Iterable[QueryRunner]:
+        return [self.source_runner] if "source_runner" in self.__dict__ else []
 
     @cached_property
     def source_runner(self) -> InsightActorsQueryRunner:
@@ -356,6 +396,14 @@ class EventsQueryRunner(AnalyticsQueryRunner[EventsQueryResponse]):
                 # ``properties.<name>`` on the events table.
                 if len(chain) >= 2 and chain[0] == "properties" and chain[1] in restricted_event_props:
                     raise ResolutionError(f"Access to property '{chain[1]}' is restricted")
+                # ``properties.$set.<name>`` carries the person property on an identify event.
+                if (
+                    len(chain) >= 3
+                    and chain[0] == "properties"
+                    and chain[1] in PERSON_PROPERTY_CONTAINERS
+                    and chain[2] in restricted_person_props
+                ):
+                    raise ResolutionError(f"Access to property '{chain[2]}' is restricted")
                 # ``person.properties.<name>`` (or ``poe.properties.<name>``) on the joined person.
                 if (
                     len(chain) >= 3
@@ -390,7 +438,7 @@ class EventsQueryRunner(AnalyticsQueryRunner[EventsQueryResponse]):
                 has_any_aggregation = len(aggregations) > 0
 
             where_exprs = self._filter_where_exprs(table)
-            where_exprs.extend(self._timestamp_where_exprs())
+            where_exprs.extend(self._timestamp_where_exprs(table))
 
             # where & having
             with self.timings.measure("where"):
@@ -409,41 +457,53 @@ class EventsQueryRunner(AnalyticsQueryRunner[EventsQueryResponse]):
     def _event_names(self) -> list[str]:
         return [e for e in [self.query.event, *(self.query.events or [])] if e]
 
+    @cached_property
     def _list_table(self) -> EventsListTable:
         if self.query.source is not None or self.query.actionId or self.query.actionSteps:
             return EVENTS_LIST_TABLE
         if set(self._event_names()) != {FLAG_EVALUATIONS_SOURCE_EVENT}:
             return EVENTS_LIST_TABLE
-        mode = get_organization_flag_evaluations_mode(self.team.organization_id)
-        if mode != FlagEvaluationsMode.FLAG_EVALUATIONS_ONLY:
+        if not reads_flag_calls_from_flag_evaluations(self.team, self.modifiers):
             return EVENTS_LIST_TABLE
         return FLAG_EVALUATIONS_LIST_TABLE
 
+    def get_cache_key_variant(self) -> str:
+        return super().get_cache_key_variant() + self._list_table.cache_key_variant
+
     def _property_where_expr(self, prop: QueryPropertyFilter, table: EventsListTable) -> ast.Expr:
-        flag_keys = _exact_flag_keys(prop) if table is FLAG_EVALUATIONS_LIST_TABLE else None
-        if flag_keys is None:
+        if table is not FLAG_EVALUATIONS_LIST_TABLE:
             return property_to_expr(prop, self.team)
-        # HogQL reads properties.$feature_flag from the properties JSON, which reads the properties of every call of
-        # the flag in the date range. flag_key holds the same value and leads the table's sort key after team_id.
+        if isinstance(prop, PropertyGroupFilter | PropertyGroupFilterValue):
+            # Builds the group the way property_to_expr does, so an exact filter inside a group also reads its column.
+            exprs = [self._property_where_expr(value, table) for value in prop.values]
+            if not exprs:
+                return ast.Constant(value=1)
+            if len(exprs) == 1:
+                return exprs[0]
+            return ast.And(exprs=exprs) if prop.type == FilterLogicalOperator.AND_ else ast.Or(exprs=exprs)
+        column_match = _flag_evaluations_column_match(prop)
+        if column_match is None:
+            return property_to_expr(prop, self.team)
+        column, values = column_match
         return ast.CompareOperation(
             op=ast.CompareOperationOp.In,
-            left=ast.Field(chain=["flag_key"]),
-            right=ast.Tuple(exprs=[ast.Constant(value=key) for key in flag_keys]),
+            left=ast.Field(chain=[column]),
+            right=ast.Tuple(exprs=[ast.Constant(value=value) for value in values]),
         )
 
-    def _query_modifiers(self, table: EventsListTable) -> HogQLQueryModifiers:
-        # flag_evaluations rows carry no person properties, so a person filter joins persons.
-        # The pushdown limits that join to the persons that the page's flag calls reach.
-        # An explicit personIdPushdown value on the team or the query still wins.
-        if table is FLAG_EVALUATIONS_LIST_TABLE and self.modifiers.personIdPushdown is None:
-            return self.modifiers.model_copy(update={"personIdPushdown": True})
-        return self.modifiers
+    def _adds_persons_join(self, table: EventsListTable) -> bool:
+        if table is not FLAG_EVALUATIONS_LIST_TABLE:
+            return False
+        # Only a mode set on the query itself skips the join. Many teams default to a mode that reads stored
+        # properties. The activity list sends no mode. It must keep showing each person's current properties.
+        modifiers = self.query.modifiers
+        return modifiers is None or modifiers.personsOnEventsMode not in STORED_PERSON_PROPERTIES_MODES
 
     def _query_context(self, table: EventsListTable) -> HogQLContext:
         context = self.build_hogql_context()
         assert context.database is not None
-        if table is FLAG_EVALUATIONS_LIST_TABLE:
-            add_events_list_fields_to_flag_evaluations(context.database)
+        if self._adds_persons_join(table):
+            join_persons_to_flag_evaluations(context.database, person_id_field=table.person_id)
         return context
 
     def _filter_where_exprs(self, table: EventsListTable) -> list[ast.Expr]:
@@ -469,7 +529,7 @@ class EventsQueryRunner(AnalyticsQueryRunner[EventsQueryResponse]):
                     where_exprs.append(self._action_steps_where_expr())
             if self.query.personId:
                 with self.timings.measure("person_id"), personhog_caller_tag("persons/events-query"):
-                    where_exprs.append(self._person_where_expr(self.query.personId))
+                    where_exprs.extend(self._person_where_exprs(self.query.personId, table))
             if self.query.filterTestAccounts:
                 with self.timings.measure("test_account_filters"):
                     where_exprs.extend(
@@ -492,8 +552,8 @@ class EventsQueryRunner(AnalyticsQueryRunner[EventsQueryResponse]):
 
     def _action_where_expr(self, action_id: int) -> ast.Expr:
         try:
-            action = Action.objects.get(pk=action_id, team__project_id=self.team.project_id)
-        except Action.DoesNotExist:
+            action = get_action(action_id=action_id, project_id=self.team.project_id)
+        except ActionNotFound:
             raise Exception("Action does not exist")
         if not action.steps:
             raise Exception("Action does not have any match groups")
@@ -501,7 +561,7 @@ class EventsQueryRunner(AnalyticsQueryRunner[EventsQueryResponse]):
 
     def _action_steps_where_expr(self) -> ast.Expr:
         steps = [
-            ActionStepJSON(
+            ActionStep(
                 event=s.event,
                 tag_name=s.tag_name,
                 text=s.text,
@@ -517,22 +577,34 @@ class EventsQueryRunner(AnalyticsQueryRunner[EventsQueryResponse]):
         ]
         return steps_to_expr(steps, self.team)
 
-    def _person_where_expr(self, person_id: str) -> ast.Expr:
+    def _person_where_exprs(self, person_id: str, table: EventsListTable) -> list[ast.Expr]:
         person: Person | None = get_person_by_pk_or_uuid(
             self.team.pk, person_id, distinct_id_limit=MAX_LIMIT_DISTINCT_IDS
         )
-        return ast.CompareOperation(
-            left=ast.Call(name="cityHash64", args=[ast.Field(chain=["distinct_id"])]),
-            right=ast.Tuple(
-                exprs=[
-                    ast.Call(name="cityHash64", args=[ast.Constant(value=id)])
-                    for id in get_distinct_ids_for_subquery(person, self.team)
-                ]
-            ),
-            op=ast.CompareOperationOp.In,
-        )
+        distinct_ids = get_distinct_ids_for_subquery(person, self.team)
+        # The hashed predicate matches the sort key of both tables.
+        where_exprs: list[ast.Expr] = [
+            ast.CompareOperation(
+                left=ast.Call(name="cityHash64", args=[ast.Field(chain=["distinct_id"])]),
+                right=ast.Tuple(
+                    exprs=[ast.Call(name="cityHash64", args=[ast.Constant(value=id)]) for id in distinct_ids]
+                ),
+                op=ast.CompareOperationOp.In,
+            )
+        ]
+        if table is FLAG_EVALUATIONS_LIST_TABLE:
+            # flag_evaluations has a bloom filter index on distinct_id.
+            # ClickHouse cannot use that index to skip granules for a hashed comparison.
+            where_exprs.append(
+                ast.CompareOperation(
+                    left=ast.Field(chain=["distinct_id"]),
+                    right=ast.Tuple(exprs=[ast.Constant(value=id) for id in distinct_ids]),
+                    op=ast.CompareOperationOp.In,
+                )
+            )
+        return where_exprs
 
-    def _timestamp_where_exprs(self) -> list[ast.Expr]:
+    def _timestamp_where_exprs(self, table: EventsListTable) -> list[ast.Expr]:
         with self.timings.measure("timestamps"):
             # prevent accidentally future events from being visible by default
             before = self.query.before or (now() + timedelta(seconds=5)).isoformat()
@@ -542,6 +614,8 @@ class EventsQueryRunner(AnalyticsQueryRunner[EventsQueryResponse]):
             after = self.query.after or "-24h"
             if after != "all":
                 exprs.append(self._timestamp_boundary_expr(after, AFTER_BOUNDARY))
+            if table.retention_days is not None:
+                exprs.append(_retention_start_expr(table.retention_days))
             return exprs
 
     def _timestamp_boundary_expr(self, cursor: str, boundary: TimestampBoundary) -> ast.Expr:
@@ -703,14 +777,13 @@ class EventsQueryRunner(AnalyticsQueryRunner[EventsQueryResponse]):
         tag_contains_user_hogql()
         # Only this path reads flag_evaluations. Callers that run to_query() in their own context keep reading
         # events. Their select or database may need columns that flag_evaluations lacks.
-        table = self._list_table()
-        modifiers = self._query_modifiers(table)
+        table = self._list_table
         query_result = self.paginator.execute_hogql_query(
             query=self._build_query(table),
             team=self.team,
             query_type="EventsQuery",
             timings=self.timings,
-            modifiers=modifiers,
+            modifiers=self.modifiers,
             limit_context=self.limit_context,
             user=self.user,
             context=self._query_context(table),
@@ -733,7 +806,7 @@ class EventsQueryRunner(AnalyticsQueryRunner[EventsQueryResponse]):
             types=[t for _, t in query_result.types] if query_result.types else [],
             timings=self.timings.to_list(),
             hogql=query_result.hogql,
-            modifiers=modifiers,
+            modifiers=self.modifiers,
             nextCursor=self._next_cursor(),
             **self.paginator.response_params(),
         )

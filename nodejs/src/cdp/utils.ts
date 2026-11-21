@@ -2,6 +2,8 @@ import { DateTime } from 'luxon'
 import { Summary } from 'prom-client'
 import { gunzip, gzip } from 'zlib'
 
+import { escapeString } from '@posthog/hogvm'
+
 import { parseJSON } from '~/common/utils/json-parse'
 import { sanitizeForUTF8 } from '~/common/utils/strings'
 import { UUIDT, castTimestampOrNow, clickHouseTimestampToDateTime } from '~/common/utils/utils'
@@ -79,6 +81,7 @@ export function convertToHogFunctionInvocationGlobals(
 
     const eventTimestamp = parseClickHouseEventTimestamp(event.timestamp)!
     const eventCapturedAt = parseClickHouseEventTimestamp(event.captured_at)
+    const eventUrl = `${projectUrl}/events/${encodeURIComponent(event.uuid)}/${encodeURIComponent(eventTimestamp)}`
 
     const context: HogFunctionInvocationGlobals = {
         project: {
@@ -94,7 +97,12 @@ export function convertToHogFunctionInvocationGlobals(
             properties,
             timestamp: eventTimestamp,
             captured_at: eventCapturedAt,
-            url: `${projectUrl}/events/${encodeURIComponent(event.uuid)}/${encodeURIComponent(eventTimestamp)}`,
+            // The events page reads flag calls from flag_evaluations only when the link names the event.
+            // On flag_evaluations_mode 2 a flag call has no events row, so a link without the name finds nothing.
+            url:
+                event.event === '$feature_flag_called'
+                    ? `${eventUrl}?event=${encodeURIComponent(event.event)}`
+                    : eventUrl,
         },
         person,
     }
@@ -269,6 +277,8 @@ export const fixLogDeduplication = (logs: LogEntry[]): LogEntrySerialized[] => {
     sortedLogs.forEach((logEntry) => {
         // TRICKY: The clickhouse table dedupes logs with the same timestamp - we need to ensure they are unique by simply plus-ing 1ms
         // if the timestamp is the same as the previous one
+        // Changes the caller's entry in place, not only the copy below. HogFunctionMonitoringService relies on this to
+        // send the same timestamps to the logs product, and its test fails by 1 ms if this stops.
         if (logEntry.timestamp <= previousTimestamp) {
             logEntry.timestamp = previousTimestamp.plus(1)
         }
@@ -350,12 +360,13 @@ export const getSensitiveValues = (hogFunction: HogFunctionType, inputs: Record<
     // A webhook's `headers` is free-form, so it is not marked secret, but it is where a credential
     // most often sits — and a webhook whose credential is rejected is exactly the case that gets it
     // quoted back. Mask values under header names that carry one, whatever the secret flag says.
-    const collectCredentialHeaders = (obj: any): void => {
+    // Every entry of a secret dictionary is a credential, whatever its header name.
+    const collectCredentialHeaders = (obj: any, anyHeaderName: boolean): void => {
         if (!obj || typeof obj !== 'object') {
             return
         }
         Object.entries(obj).forEach(([key, val]) => {
-            if (typeof val !== 'string' || !CREDENTIAL_HEADER_NAMES.test(key.trim())) {
+            if (typeof val !== 'string' || (!anyHeaderName && !CREDENTIAL_HEADER_NAMES.test(key.trim()))) {
                 return
             }
             values.push(val)
@@ -368,8 +379,8 @@ export const getSensitiveValues = (hogFunction: HogFunctionType, inputs: Record<
     }
 
     hogFunction.inputs_schema?.forEach((schema) => {
-        if (schema.type === 'dictionary' && !schema.secret) {
-            collectCredentialHeaders(inputs[schema.key])
+        if (schema.type === 'dictionary') {
+            collectCredentialHeaders(inputs[schema.key], !!schema.secret)
         }
         // A function keeps the schema it was saved with, so a credential input that a later template
         // version marks secret is still `secret: false` on older functions.
@@ -429,10 +440,17 @@ export const redactSensitiveValues = (message: string, sensitiveValues?: string[
         if (typeof sensitiveValue !== 'string' || !sensitiveValue) {
             return
         }
-        variants.add(sensitiveValue)
         // Logged objects are JSON-encoded, which escapes quotes, backslashes and newlines, so a secret
         // such as a PEM private key no longer matches its raw form inside the message.
-        variants.add(JSON.stringify(sensitiveValue).slice(1, -1))
+        const jsonEncoded = JSON.stringify(sensitiveValue).slice(1, -1)
+        // Hog prints a string inside a list or dict with its own escaping, which an interpolated
+        // response body carries into a message.
+        const hogPrinted = escapeString(sensitiveValue).slice(1, -1)
+        for (const form of [sensitiveValue, jsonEncoded, hogPrinted]) {
+            variants.add(form)
+            // A thrown Hog error prints its message with each `'` escaped as `\'`.
+            variants.add(form.replaceAll("'", "\\'"))
+        }
     })
     if (!variants.size) {
         return message

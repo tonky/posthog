@@ -1,11 +1,16 @@
-import { Link } from '@posthog/lemon-ui'
+import { useActions, useValues } from 'kea'
 
+import { LemonSegmentedButton, Link } from '@posthog/lemon-ui'
+
+import { IconArrowDown, IconArrowUp } from 'lib/lemon-ui/icons'
 import { urls } from 'scenes/urls'
 
 import { Query } from '~/queries/Query/Query'
 import { NodeKind } from '~/queries/schema/schema-general'
 
-import { LATEST_BATCH_LOOKBACK_DAYS } from '../autoresearchPipelineLogic'
+import { autoresearchPipelineLogic } from '../autoresearchPipelineLogic'
+import { predictionScoredPeopleUrl } from '../predictionSegments'
+import { PREDICTIONS_PEOPLE_VIEWS, predictionsPeopleFooter, predictionsPeopleQuery } from '../predictionsPeopleQuery'
 
 /** Links to the person's page. The value is a (person UUID, display name) tuple; the display name falls back to the UUID. */
 function PersonCell({ value }: { value: unknown }): JSX.Element {
@@ -22,66 +27,77 @@ function PercentCell({ value }: { value: unknown }): JSX.Element {
     return value == null ? <>—</> : <>{String(value)}%</>
 }
 
-/** Top/bottom-N users by predicted probability for a pipeline, grouped by person. */
-export function ProbabilityUsersTable({
-    pipelineId,
-    direction,
-}: {
-    pipelineId: string
-    direction: 'DESC' | 'ASC'
-}): JSX.Element {
+/** A score can rise or fall for good reasons, so the change stays neutral: an arrow, no color. */
+function ChangeCell({ value }: { value: unknown }): JSX.Element {
+    const change = Number(value)
+    if (!change) {
+        return <span className="text-muted">No change</span>
+    }
     return (
-        <Query
-            readOnly
-            context={{
-                columns: {
-                    person: { title: 'Person', render: PersonCell },
-                    probability: { title: 'Probability', render: PercentCell },
-                    last_scored: { title: 'Last scored' },
-                },
-            }}
-            query={{
-                kind: NodeKind.DataTableNode,
-                source: {
-                    kind: NodeKind.HogQLQuery,
-                    query: `
-                        -- Capture can shift the timestamps of one batch apart, so the latest batch is its prediction date.
-                        WITH latest AS (
-                            SELECT max(properties.$autoresearch_prediction_date) AS prediction_date
-                            FROM events
-                            WHERE event = 'autoresearch_prediction'
-                              AND properties.$autoresearch_pipeline_id = {pipeline_id}
-                              AND timestamp >= now() - INTERVAL ${LATEST_BATCH_LOOKBACK_DAYS} DAY
-                        ),
-                        scored AS (
-                            SELECT
-                                coalesce(nullIf(properties.$autoresearch_person_id, ''), distinct_id) AS person_id,
-                                round(100 * argMax(toFloat(properties.$autoresearch_p_y), timestamp), 1) AS probability,
-                                max(timestamp) AS last_scored
-                            FROM events
-                            WHERE event = 'autoresearch_prediction'
-                              AND properties.$autoresearch_pipeline_id = {pipeline_id}
-                              AND timestamp >= now() - INTERVAL ${LATEST_BATCH_LOOKBACK_DAYS} DAY
-                              AND properties.$autoresearch_prediction_date = (SELECT prediction_date FROM latest)
-                            GROUP BY person_id
-                        )
-                        -- LEFT JOIN persons directly on the person UUID: the implicit person join goes via
-                        -- distinct_id, which drops scored people whose prediction events aren't person-mapped.
-                        SELECT
-                            tuple(s.person_id, coalesce(
-                                nullIf(toString(p.properties.email), ''),
-                                nullIf(toString(p.properties.name), '')
-                            )) AS person,
-                            s.probability AS probability,
-                            s.last_scored AS last_scored
-                        FROM scored s
-                        LEFT JOIN persons p ON toString(p.id) = s.person_id
-                        ORDER BY probability ${direction}
-                        LIMIT 50
-                    `,
-                    values: { pipeline_id: pipelineId },
-                },
-            }}
-        />
+        <span className="inline-flex items-center gap-1 tabular-nums">
+            {change > 0 ? <IconArrowUp /> : <IconArrowDown />}
+            <span>{`${change > 0 ? '+' : ''}${change.toFixed(1)} pts`}</span>
+        </span>
+    )
+}
+
+function PeopleFooter(): JSX.Element | null {
+    const { pipeline, predictionsPeopleView, scoredPeopleCount, personPropertyDisabledReason } =
+        useValues(autoresearchPipelineLogic)
+    if (scoredPeopleCount == null) {
+        return null
+    }
+    const outputProperty = pipeline?.output_person_property
+    return (
+        <div className="flex flex-wrap items-center gap-x-2 text-sm text-secondary">
+            <span>{predictionsPeopleFooter(predictionsPeopleView, scoredPeopleCount)}</span>
+            {outputProperty && !personPropertyDisabledReason && (
+                <Link to={predictionScoredPeopleUrl(outputProperty)} data-attr="autoresearch-predictions-view-all">
+                    View all
+                </Link>
+            )}
+        </div>
+    )
+}
+
+/** The top people of the latest scoring run, in the selected view. */
+export function ProbabilityUsersTable({ pipelineId }: { pipelineId: string }): JSX.Element {
+    const { predictionsPeopleView } = useValues(autoresearchPipelineLogic)
+    const { setPredictionsPeopleView } = useActions(autoresearchPipelineLogic)
+
+    return (
+        <div className="space-y-2">
+            <LemonSegmentedButton
+                size="small"
+                value={predictionsPeopleView}
+                onChange={setPredictionsPeopleView}
+                options={PREDICTIONS_PEOPLE_VIEWS.map(({ value, label }) => ({
+                    value,
+                    label,
+                    'data-attr': `autoresearch-predictions-view-${value}`,
+                }))}
+            />
+            <Query
+                readOnly
+                context={{
+                    dataTableHideLoadNextWhenComplete: true,
+                    columns: {
+                        person: { title: 'Person', render: PersonCell },
+                        probability: { title: 'Probability', render: PercentCell },
+                        change: { title: 'Change since last score', render: ChangeCell },
+                        last_scored: { title: 'Last scored' },
+                    },
+                }}
+                query={{
+                    kind: NodeKind.DataTableNode,
+                    source: {
+                        kind: NodeKind.HogQLQuery,
+                        query: predictionsPeopleQuery(predictionsPeopleView),
+                        values: { pipeline_id: pipelineId },
+                    },
+                }}
+            />
+            <PeopleFooter />
+        </div>
     )
 }

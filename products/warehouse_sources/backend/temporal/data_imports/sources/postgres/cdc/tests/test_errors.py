@@ -9,6 +9,7 @@ from products.warehouse_sources.backend.temporal.data_imports.sources.common.mix
 from products.warehouse_sources.backend.temporal.data_imports.sources.postgres.cdc.errors import (
     classify_postgres_cdc_error,
 )
+from products.warehouse_sources.backend.temporal.data_imports.sources.postgres.postgres import SSLRequiredError
 
 
 class TestClassifyPostgresCDCError:
@@ -35,6 +36,32 @@ class TestClassifyPostgresCDCError:
                 CDCErrorCategory.SSL_REQUIRED,
             ),
             (
+                # `_connect_to_postgres` converts the raw psycopg OperationalError above into this
+                # type before the CDC path ever sees it, so the connection must still classify as
+                # SSL_REQUIRED even though it's no longer a psycopg exception.
+                "ssl_required_wrapped_error",
+                SSLRequiredError(
+                    "SSL/TLS connection is required but your database does not support it. "
+                    "Please enable SSL/TLS on your PostgreSQL server or contact your database administrator."
+                ),
+                CDCErrorCategory.SSL_REQUIRED,
+            ),
+            (
+                "server_certificate_failed_verification",
+                psycopg.OperationalError("connection failed: SSL error: certificate verify failed"),
+                CDCErrorCategory.CERTIFICATE_REJECTED,
+            ),
+            (
+                "client_certificate_rejected_by_pg_hba",
+                psycopg.OperationalError('connection failed: FATAL:  certificate authentication failed for user "u"'),
+                CDCErrorCategory.CERTIFICATE_REJECTED,
+            ),
+            (
+                "client_certificate_rejected",
+                psycopg.OperationalError("connection failed: SSL error: tlsv13 alert certificate required"),
+                CDCErrorCategory.CERTIFICATE_REJECTED,
+            ),
+            (
                 "ssl_close_is_connection_not_ssl_required",
                 psycopg.OperationalError("SSL connection has been closed unexpectedly"),
                 CDCErrorCategory.CONNECTION_FAILED,
@@ -56,6 +83,24 @@ class TestClassifyPostgresCDCError:
                     "increase limits."
                 ),
                 CDCErrorCategory.QUOTA_EXCEEDED,
+            ),
+            (
+                "pooler_enotfound_tenant_is_non_retryable",
+                psycopg.OperationalError(
+                    'connection to server at "203.0.113.1", port 5432 failed: '
+                    "FATAL:  (ENOTFOUND) tenant/user postgres.exampleref not found"
+                ),
+                CDCErrorCategory.POOLER_TENANT_NOT_FOUND,
+            ),
+            (
+                "pooler_legacy_tenant_wording_is_non_retryable",
+                psycopg.OperationalError("FATAL:  Tenant or user not found"),
+                CDCErrorCategory.POOLER_TENANT_NOT_FOUND,
+            ),
+            (
+                "pooler_nxdomain_is_non_retryable",
+                psycopg.OperationalError("FATAL:  Failed to connect to database: {:error, :nxdomain}"),
+                CDCErrorCategory.POOLER_TENANT_NOT_FOUND,
             ),
             (
                 "network_unreachable_is_non_retryable_host",

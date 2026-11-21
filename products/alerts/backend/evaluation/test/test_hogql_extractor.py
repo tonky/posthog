@@ -63,18 +63,19 @@ def test_bad_result_shape_raises(rows, exc, match):
 
 
 @pytest.mark.parametrize(
-    "bad,match",
+    "bad,exc,match",
     [
-        ("text", "numeric value"),
-        (True, "numeric value"),
-        (float("nan"), "finite numeric value"),
-        (float("inf"), "finite numeric value"),
-        (float("-inf"), "finite numeric value"),
+        ("text", AlertExtractionError, "numeric value"),
+        (True, AlertExtractionError, "numeric value"),
+        (float("nan"), AlertDataUnavailableError, "finite numeric value"),
+        (float("inf"), AlertDataUnavailableError, "finite numeric value"),
+        (float("-inf"), AlertDataUnavailableError, "finite numeric value"),
     ],
 )
-def test_non_numeric_or_non_finite_value_raises(bad, match):
-    with pytest.raises(AlertExtractionError, match=match):
+def test_non_numeric_or_non_finite_value_raises(bad, exc, match):
+    with pytest.raises(exc, match=match) as raised:
         _extract([[bad]])
+    assert type(raised.value) is exc
 
 
 def test_none_bucket_becomes_zero():
@@ -325,7 +326,8 @@ def test_any_row_reports_every_breaching_row():
         "The SQL insight value (BR) (0.5) is more than upper threshold (0.25)",
     ]
     # Which rows breached is persisted on the check record — notifications are transient.
-    assert evaluation.triggered_metadata == {
+    assert evaluation.triggered_metadata is not None
+    assert {key: evaluation.triggered_metadata[key] for key in ("breaching_rows", "breaching_row_count")} == {
         "breaching_rows": [
             {"label": "DE", "value": 0.4},
             {"label": "FR", "value": 0.3},

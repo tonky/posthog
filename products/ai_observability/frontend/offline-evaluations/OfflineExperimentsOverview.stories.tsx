@@ -1,9 +1,8 @@
 import type { Meta, StoryObj } from '@storybook/react'
-import { fireEvent, waitFor } from '@testing-library/dom'
+import { fireEvent, waitFor, within } from '@testing-library/dom'
 
 import { playHoverAtFraction } from '@posthog/quill-charts/story-helpers'
 
-import { FEATURE_FLAGS } from 'lib/constants'
 import { cn } from 'lib/utils/css-classes'
 import { urls } from 'scenes/urls'
 
@@ -19,7 +18,6 @@ const meta: Meta<typeof OfflineExperimentsOverview> = {
     parameters: {
         mockDate: '2026-09-28T12:00:00Z',
         pageUrl: `${urls.aiObservabilityOfflineEvaluations()}?scores=${overviewScorers.map((scorer) => scorer.id).join(',')}`,
-        featureFlags: [FEATURE_FLAGS.AI_OBSERVABILITY_OFFLINE_EVALUATIONS],
     },
     decorators: [
         (Story, { parameters }) => (
@@ -29,6 +27,10 @@ const meta: Meta<typeof OfflineExperimentsOverview> = {
         ),
         mswDecorator({
             get: {
+                '/api/projects/:team/tags': ({ request }) => {
+                    const tags = ['production', 'quality', 'regression', 'support']
+                    return new URL(request.url).searchParams.has('limit') ? { results: tags, next: null } : tags
+                },
                 '/api/projects/:team/ai_observability/offline_experiments/': {
                     count: 8,
                     next_cursor: null,
@@ -54,7 +56,35 @@ const meta: Meta<typeof OfflineExperimentsOverview> = {
 export default meta
 type Story = StoryObj<typeof OfflineExperimentsOverview>
 
-export const RecentExperiments: Story = {}
+export const RecentExperiments: Story = {
+    play: async ({ canvasElement }) => {
+        const canvas = within(canvasElement)
+        await canvas.findByRole('heading', { name: 'Score trends' })
+        const expandButton = canvas.queryByRole('button', { name: 'Expand score trends' })
+        if (expandButton) {
+            fireEvent.click(expandButton)
+        }
+        const chart = await waitFor(() => {
+            const chart = canvasElement.querySelector('[data-attr="offline-score-trend"]')
+            if (!chart) {
+                throw new Error('Score charts have not loaded')
+            }
+            return chart
+        })
+        fireEvent.click(canvas.getByRole('button', { name: 'Collapse score trends' }))
+        await waitFor(() => {
+            if (!chart.isConnected || !chart.closest('[hidden]')) {
+                throw new Error('Collapsing score trends must hide the charts without unmounting them')
+            }
+        })
+        fireEvent.click(canvas.getByRole('button', { name: 'Expand score trends' }))
+        await waitFor(() => {
+            if (!chart.isConnected || chart.closest('[hidden]')) {
+                throw new Error('Expanding score trends must show the already mounted charts')
+            }
+        })
+    },
+}
 export const PartialHistory: Story = {
     parameters: { pageUrl: `${urls.aiObservabilityOfflineEvaluations()}?scores=${overviewScorers[0].id}` },
     decorators: [
@@ -62,7 +92,7 @@ export const PartialHistory: Story = {
             get: {
                 '/api/projects/:team/ai_observability/offline_scorers/:id/history/': {
                     count: 200,
-                    next_cursor: 'older-results',
+                    next_cursor: null,
                     results: overviewHistory(overviewScorers[0]),
                 },
             },

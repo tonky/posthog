@@ -1,18 +1,20 @@
 import { router } from 'kea-router'
 import { expectLogic } from 'kea-test-utils'
 
+import { FEATURE_FLAGS } from 'lib/constants'
+import { featureFlagLogic } from 'lib/logic/featureFlagLogic'
 import { urls } from 'scenes/urls'
 
 import { useMocks } from '~/mocks/jest'
 import { initKeaTests } from '~/test/init'
 
 import {
-    ReviewHogReviewsListScope,
+    CodeReviewReviewsListScope,
+    type ReviewReviewsTablePageApi,
     ReviewTriggerRequestRunModeEnumApi,
 } from 'products/review_hog/frontend/generated/api.schemas'
 
 import {
-    MAX_REVIEWS_LIMIT,
     REVIEW_SKILL_PREFIX_BY_KIND,
     REVIEWS_PAGE_SIZE,
     defaultAdoptSlug,
@@ -34,11 +36,12 @@ function reviewDetail(id: string, runUrgencyThreshold: string | null): Record<st
     }
 }
 
-// More project-wide reviews than the API's maximum limit, so both "Show more" growth and its
-// ceiling are reachable.
-const everyoneReviews = Array.from({ length: MAX_REVIEWS_LIMIT + REVIEWS_PAGE_SIZE }, (_, i) => ({
+// More project-wide reviews than one page, so paging is reachable.
+const everyoneReviews = Array.from({ length: REVIEWS_PAGE_SIZE * 2 + 3 }, (_, i) => ({
     id: `r${i}`,
+    repository: 'example-org/example-repo',
     in_progress: false,
+    run_count: 1,
 }))
 
 describe('reviewHogSettingsLogic', () => {
@@ -47,34 +50,34 @@ describe('reviewHogSettingsLogic', () => {
     beforeEach(() => {
         useMocks({
             get: {
-                // The user has no reviews of their own; the project has a dozen.
-                '/api/projects/:team_id/review_hog/reviews/': ({ request }) => {
+                // The user has no reviews of their own; the project has a few pages.
+                '/api/projects/:team_id/code_review/reviews/table/': ({ request }) => {
                     const url = new URL(request.url)
-                    const limit = Number(url.searchParams.get('limit') ?? REVIEWS_PAGE_SIZE)
+                    const limit = Number(url.searchParams.get('limit'))
+                    const offset = Number(url.searchParams.get('offset'))
                     const pool =
-                        url.searchParams.get('scope') === ReviewHogReviewsListScope.Everyone ? everyoneReviews : []
-                    return [200, { results: pool.slice(0, limit), has_more: pool.length > limit }]
+                        url.searchParams.get('scope') === CodeReviewReviewsListScope.Everyone ? everyoneReviews : []
+                    return [200, { count: pool.length, running_count: 0, results: pool.slice(offset, offset + limit) }]
                 },
-                '/api/projects/:team_id/review_hog/reviews/perspective_stats/': () => [
+                '/api/projects/:team_id/code_review/reviews/perspective_stats/': () => [
                     200,
                     { report_count: 0, perspectives: [] },
                 ],
-                '/api/projects/:team_id/review_hog/settings/': () => [
+                '/api/projects/:team_id/code_review/settings/': () => [
                     200,
                     {
                         review_inbox_prs: false,
-                        review_labeled_prs: true,
                         resolve_comments: true,
                         urgency_threshold: 'should_fix',
                     },
                 ],
-                '/api/projects/:team_id/review_hog/perspectives/': () => [200, []],
-                '/api/projects/:team_id/review_hog/blind_spots/': () => [200, []],
-                '/api/projects/:team_id/review_hog/validators/': () => [200, []],
-                '/api/projects/:team_id/review_hog/resolution/': () => [200, []],
+                '/api/projects/:team_id/code_review/perspectives/': () => [200, []],
+                '/api/projects/:team_id/code_review/blind_spots/': () => [200, []],
+                '/api/projects/:team_id/code_review/validators/': () => [200, []],
+                '/api/projects/:team_id/code_review/resolution/': () => [200, []],
             },
             post: {
-                '/api/projects/:team_id/review_hog/reviews/trigger/': () => [
+                '/api/projects/:team_id/code_review/reviews/trigger/': () => [
                     202,
                     { workflow_id: 'wf-1', status: 'started' },
                 ],
@@ -83,6 +86,8 @@ describe('reviewHogSettingsLogic', () => {
         // The scope reducers persist; without this a prior test's explicit choice leaks over.
         localStorage.clear()
         initKeaTests()
+        featureFlagLogic.mount()
+        featureFlagLogic.actions.setFeatureFlags([FEATURE_FLAGS.REVIEW_HOG], { [FEATURE_FLAGS.REVIEW_HOG]: true })
         logic = reviewHogSettingsLogic()
     })
 
@@ -94,25 +99,65 @@ describe('reviewHogSettingsLogic', () => {
         logic.mount()
 
         await expectLogic(logic)
-            .toDispatchActions(['loadRecentReviewsSuccess', 'applyDefaultReviewsScope', 'loadRecentReviewsSuccess'])
+            .toDispatchActions(['loadReviewsSuccess', 'applyDefaultReviewsScope', 'loadReviewsSuccess'])
             .toMatchValues({
-                reviewsScope: ReviewHogReviewsListScope.Everyone,
+                reviewsScope: CodeReviewReviewsListScope.Everyone,
                 // The auto-default is not an explicit choice — a later real one must still win.
                 hasUserChosenReviewsScope: false,
             })
-        expect(logic.values.recentReviews).toHaveLength(REVIEWS_PAGE_SIZE)
+        expect(logic.values.reviews).toHaveLength(REVIEWS_PAGE_SIZE)
         // The auto-default must not write the URL: hydrating `?reviews_scope=` from a link marks
         // the scope as explicitly chosen, so mirroring the fallback would make it permanent.
         expect(router.values.searchParams.reviews_scope).toBeUndefined()
     })
 
+    it('following the project default writes the project value, so the server drops the own value', async () => {
+        const patches: Record<string, unknown>[] = []
+        useMocks({
+            get: {
+                '/api/projects/:team_id/code_review/settings/': () => [
+                    200,
+                    {
+                        urgency_threshold: 'must_fix',
+                        sources: { urgency_threshold: 'user' },
+                        project_defaults: { urgency_threshold: 'should_fix', celebrate_clean_reviews: true },
+                    },
+                ],
+            },
+            patch: {
+                '/api/projects/:team_id/code_review/settings/': async ({ request }) => {
+                    const body = (await request.json()) as Record<string, unknown>
+                    patches.push(body)
+                    return [
+                        200,
+                        {
+                            urgency_threshold: 'should_fix',
+                            sources: { urgency_threshold: 'project' },
+                            project_defaults: { urgency_threshold: 'should_fix', celebrate_clean_reviews: true },
+                        },
+                    ]
+                },
+            },
+        })
+        logic.mount()
+        await expectLogic(logic).toDispatchActions(['loadSettingsSuccess'])
+
+        await expectLogic(logic, () => logic.actions.followProjectDefault('urgency_threshold')).toDispatchActions([
+            'updateSettings',
+            'updateSettingsSuccess',
+        ])
+
+        expect(patches).toEqual([{ urgency_threshold: 'should_fix' }])
+        expect(logic.values.settings?.sources.urgency_threshold).toBe('project')
+    })
+
     it('a started review clears the input, reloads the list, and resets the in-flight flag', async () => {
         logic.mount()
-        // Consume the mount-time auto-default so its loadRecentReviews can't satisfy the assertion below.
+        // Consume the mount-time auto-default so its loadReviews can't satisfy the assertion below.
         await expectLogic(logic).toDispatchActions([
-            'loadRecentReviewsSuccess',
+            'loadReviewsSuccess',
             'applyDefaultReviewsScope',
-            'loadRecentReviewsSuccess',
+            'loadReviewsSuccess',
         ])
         logic.actions.setTriggerPrUrl('https://github.com/PostHog/posthog.com/pull/1')
 
@@ -120,7 +165,7 @@ describe('reviewHogSettingsLogic', () => {
             .toDispatchActions([
                 'submitTriggerReview',
                 'startTriggeredReviewWatch',
-                'loadRecentReviews',
+                'loadReviews',
                 'submitTriggerReviewFinished',
             ])
             .toMatchValues({ triggeringReview: false, triggerPrUrl: '' })
@@ -135,7 +180,7 @@ describe('reviewHogSettingsLogic', () => {
         let triggerCalls = 0
         useMocks({
             post: {
-                '/api/projects/:team_id/review_hog/reviews/trigger/': () => {
+                '/api/projects/:team_id/code_review/reviews/trigger/': () => {
                     triggerCalls++
                     return [202, { workflow_id: 'wf-1', status: 'started' }]
                 },
@@ -143,9 +188,9 @@ describe('reviewHogSettingsLogic', () => {
         })
         logic.mount()
         await expectLogic(logic).toDispatchActions([
-            'loadRecentReviewsSuccess',
+            'loadReviewsSuccess',
             'applyDefaultReviewsScope',
-            'loadRecentReviewsSuccess',
+            'loadReviewsSuccess',
         ])
         logic.actions.setTriggerPrUrl('https://github.com/PostHog/posthog.com/pull/1')
 
@@ -163,7 +208,7 @@ describe('reviewHogSettingsLogic', () => {
         let requestBody: Record<string, unknown> | null = null
         useMocks({
             post: {
-                '/api/projects/:team_id/review_hog/reviews/trigger/': async ({ request }) => {
+                '/api/projects/:team_id/code_review/reviews/trigger/': async ({ request }) => {
                     requestBody = (await request.json()) as Record<string, unknown>
                     return [202, { workflow_id: 'wf-resolve-1', status: 'started' }]
                 },
@@ -171,16 +216,16 @@ describe('reviewHogSettingsLogic', () => {
         })
         logic.mount()
         await expectLogic(logic).toDispatchActions([
-            'loadRecentReviewsSuccess',
+            'loadReviewsSuccess',
             'applyDefaultReviewsScope',
-            'loadRecentReviewsSuccess',
+            'loadReviewsSuccess',
         ])
         logic.actions.setTriggerPrUrl('https://github.com/PostHog/posthog.com/pull/1')
 
         await expectLogic(logic, () =>
             logic.actions.submitTriggerReview(ReviewTriggerRequestRunModeEnumApi.ResolveOnly)
         )
-            .toDispatchActions(['submitTriggerReview', 'loadRecentReviews', 'submitTriggerReviewFinished'])
+            .toDispatchActions(['submitTriggerReview', 'loadReviews', 'submitTriggerReviewFinished'])
             .toNotHaveDispatchedActions(['startTriggeredReviewWatch'])
             .toMatchValues({ triggeringReview: false, triggerPrUrl: '', awaitingTriggeredReview: false })
         expect(requestBody).toMatchObject({ run_mode: 'resolve_only' })
@@ -192,7 +237,7 @@ describe('reviewHogSettingsLogic', () => {
         let requestBody: Record<string, unknown> | null = null
         useMocks({
             post: {
-                '/api/projects/:team_id/review_hog/reviews/trigger/': async ({ request }) => {
+                '/api/projects/:team_id/code_review/reviews/trigger/': async ({ request }) => {
                     requestBody = (await request.json()) as Record<string, unknown>
                     return [202, { workflow_id: 'wf-flash-1', status: 'started' }]
                 },
@@ -200,9 +245,9 @@ describe('reviewHogSettingsLogic', () => {
         })
         logic.mount()
         await expectLogic(logic).toDispatchActions([
-            'loadRecentReviewsSuccess',
+            'loadReviewsSuccess',
             'applyDefaultReviewsScope',
-            'loadRecentReviewsSuccess',
+            'loadReviewsSuccess',
         ])
         logic.actions.setTriggerPrUrl('https://github.com/PostHog/posthog.com/pull/1')
 
@@ -218,19 +263,22 @@ describe('reviewHogSettingsLogic', () => {
     ])('a %s response informs without arming the watch', async (status, code, workflowId) => {
         useMocks({
             post: {
-                '/api/projects/:team_id/review_hog/reviews/trigger/': () => [code, { workflow_id: workflowId, status }],
+                '/api/projects/:team_id/code_review/reviews/trigger/': () => [
+                    code,
+                    { workflow_id: workflowId, status },
+                ],
             },
         })
         logic.mount()
         await expectLogic(logic).toDispatchActions([
-            'loadRecentReviewsSuccess',
+            'loadReviewsSuccess',
             'applyDefaultReviewsScope',
-            'loadRecentReviewsSuccess',
+            'loadReviewsSuccess',
         ])
         logic.actions.setTriggerPrUrl('https://github.com/PostHog/posthog.com/pull/1')
 
         await expectLogic(logic, () => logic.actions.submitTriggerReview())
-            .toDispatchActions(['submitTriggerReview', 'loadRecentReviews', 'submitTriggerReviewFinished'])
+            .toDispatchActions(['submitTriggerReview', 'loadReviews', 'submitTriggerReviewFinished'])
             .toNotHaveDispatchedActions(['startTriggeredReviewWatch'])
             .toMatchValues({ triggeringReview: false, triggerPrUrl: '', awaitingTriggeredReview: false })
     })
@@ -238,7 +286,7 @@ describe('reviewHogSettingsLogic', () => {
     it('a rejected trigger resets the in-flight flag and keeps the input for correction', async () => {
         useMocks({
             post: {
-                '/api/projects/:team_id/review_hog/reviews/trigger/': () => [
+                '/api/projects/:team_id/code_review/reviews/trigger/': () => [
                     403,
                     { error: "PostHog Review can't start reviews from this project yet" },
                 ],
@@ -246,15 +294,15 @@ describe('reviewHogSettingsLogic', () => {
         })
         logic.mount()
         await expectLogic(logic).toDispatchActions([
-            'loadRecentReviewsSuccess',
+            'loadReviewsSuccess',
             'applyDefaultReviewsScope',
-            'loadRecentReviewsSuccess',
+            'loadReviewsSuccess',
         ])
         logic.actions.setTriggerPrUrl('https://github.com/PostHog/posthog.com/pull/1')
 
         await expectLogic(logic, () => logic.actions.submitTriggerReview())
             .toDispatchActions(['submitTriggerReview', 'submitTriggerReviewFinished'])
-            .toNotHaveDispatchedActions(['loadRecentReviews', 'startTriggeredReviewWatch'])
+            .toNotHaveDispatchedActions(['loadReviews', 'startTriggeredReviewWatch'])
             .toMatchValues({
                 triggeringReview: false,
                 triggerPrUrl: 'https://github.com/PostHog/posthog.com/pull/1',
@@ -262,7 +310,7 @@ describe('reviewHogSettingsLogic', () => {
             })
     })
 
-    it('the scope switch rescopes the effectiveness stats along with the list', async () => {
+    it('the scope switch rescopes the effectiveness stats along with the list, never the skill counts', async () => {
         // The page-level switch must move the stat cards and the reviews list together — dropping
         // the stats reload from the scope listeners (or the scope param from the request) would
         // show one scope's list over the other scope's numbers, the exact confusion the switch
@@ -270,7 +318,7 @@ describe('reviewHogSettingsLogic', () => {
         const statsScopes: (string | null)[] = []
         useMocks({
             get: {
-                '/api/projects/:team_id/review_hog/reviews/perspective_stats/': ({ request }) => {
+                '/api/projects/:team_id/code_review/reviews/perspective_stats/': ({ request }) => {
                     statsScopes.push(new URL(request.url).searchParams.get('scope'))
                     return [200, { report_count: 0, perspectives: [] }]
                 },
@@ -278,67 +326,99 @@ describe('reviewHogSettingsLogic', () => {
         })
         logic.mount()
         await expectLogic(logic)
-            .toDispatchActions(['loadRecentReviewsSuccess', 'applyDefaultReviewsScope', 'loadRecentReviewsSuccess'])
+            .toDispatchActions(['loadReviewsSuccess', 'applyDefaultReviewsScope', 'loadReviewsSuccess'])
             .toFinishAllListeners()
+        // The Settings tab's skill counts read the viewer's own Deep reviews, so the Activity switch
+        // must never reload or rescope them.
+        const ownDeepLoads = statsScopes.filter((scope) => scope === 'own_deep').length
+        expect(ownDeepLoads).toBe(1)
+        const listScopes = (): (string | null)[] => statsScopes.filter((scope) => scope !== 'own_deep')
         // The mount-time auto-default to Entire project already rescoped the stats.
-        expect(statsScopes[statsScopes.length - 1]).toBe(ReviewHogReviewsListScope.Everyone)
+        expect(listScopes()[listScopes().length - 1]).toBe(CodeReviewReviewsListScope.Everyone)
 
-        logic.actions.setReviewsScope(ReviewHogReviewsListScope.Mine)
+        logic.actions.setReviewsScope(CodeReviewReviewsListScope.Mine)
         // Old data drops synchronously so neither the cards nor the list ever show the other
         // scope's content — even if the reload were to fail.
         expect(logic.values.perspectiveStats).toBeNull()
-        expect(logic.values.recentReviews).toBeNull()
+        expect(logic.values.reviews).toBeNull()
         await expectLogic(logic).toDispatchActions(['loadPerspectiveStatsSuccess'])
-        expect(statsScopes[statsScopes.length - 1]).toBe(ReviewHogReviewsListScope.Mine)
+        expect(listScopes()[listScopes().length - 1]).toBe(CodeReviewReviewsListScope.Mine)
+        expect(statsScopes.filter((scope) => scope === 'own_deep')).toHaveLength(ownDeepLoads)
     })
 
     it('respects an explicit scope choice even when that scope is empty', async () => {
         logic.mount()
         // Consume the mount-time auto-default, so the not-dispatched window below starts after it.
         await expectLogic(logic).toDispatchActions([
-            'loadRecentReviewsSuccess',
+            'loadReviewsSuccess',
             'applyDefaultReviewsScope',
-            'loadRecentReviewsSuccess',
+            'loadReviewsSuccess',
         ])
 
-        await expectLogic(logic, () => logic.actions.setReviewsScope(ReviewHogReviewsListScope.Mine))
-            .toDispatchActions(['loadRecentReviewsSuccess'])
+        await expectLogic(logic, () => logic.actions.setReviewsScope(CodeReviewReviewsListScope.Mine))
+            .toDispatchActions(['loadReviewsSuccess'])
             .toNotHaveDispatchedActions(['applyDefaultReviewsScope'])
             .toMatchValues({
-                reviewsScope: ReviewHogReviewsListScope.Mine,
+                reviewsScope: CodeReviewReviewsListScope.Mine,
                 hasUserChosenReviewsScope: true,
-                recentReviews: [],
+                reviews: [],
             })
     })
 
-    it('grows the list by a page per "Show more" and collapses instantly on "Show fewer"', async () => {
+    it('a filter change resets the page and sends the filter with the request', async () => {
+        // Page 2 of every review is rarely a page at all once a filter narrows the set; a kept page
+        // number would land the reader on an empty table.
+        const requests: URLSearchParams[] = []
         logic.mount()
-        // Land on the everyone scope (auto-default) with the first page loaded.
         await expectLogic(logic).toDispatchActions([
-            'loadRecentReviewsSuccess',
+            'loadReviewsSuccess',
             'applyDefaultReviewsScope',
-            'loadRecentReviewsSuccess',
+            'loadReviewsSuccess',
         ])
-        expect(logic.values.moreReviewsAvailable).toBe(true)
-
-        await expectLogic(logic, () => logic.actions.showMoreReviews())
-            .toDispatchActions(['loadRecentReviewsSuccess'])
-            .toMatchValues({ reviewsLimit: REVIEWS_PAGE_SIZE * 2 })
-        expect(logic.values.recentReviews).toHaveLength(REVIEWS_PAGE_SIZE * 2)
-
-        // The collapse must not wait for the reconciling refetch, and hiding loaded rows means
-        // "Show more" must stay on offer regardless of the last response's flag.
-        logic.actions.showFewerReviews()
-        expect(logic.values.recentReviews).toHaveLength(REVIEWS_PAGE_SIZE)
-        expect(logic.values.moreReviewsAvailable).toBe(true)
-        await expectLogic(logic).toDispatchActions(['loadRecentReviewsSuccess']).toMatchValues({
-            reviewsLimit: REVIEWS_PAGE_SIZE,
+        useMocks({
+            get: {
+                '/api/projects/:team_id/code_review/reviews/table/': ({ request }) => {
+                    requests.push(new URL(request.url).searchParams)
+                    return [200, { count: 0, running_count: 0, results: [] }]
+                },
+            },
         })
 
-        // A scope flip is a different list — it starts compact again.
-        logic.actions.showMoreReviews()
-        logic.actions.setReviewsScope(ReviewHogReviewsListScope.Mine)
-        await expectLogic(logic).toMatchValues({ reviewsLimit: REVIEWS_PAGE_SIZE })
+        await expectLogic(logic, () => logic.actions.setReviewsPage(2)).toDispatchActions(['loadReviewsSuccess'])
+        expect(requests[requests.length - 1].get('offset')).toBe(String(REVIEWS_PAGE_SIZE))
+
+        await expectLogic(logic, () => logic.actions.setReviewsRepository('example-org/example-repo'))
+            .toDispatchActions(['loadReviewsSuccess'])
+            .toMatchValues({ reviewsCurrentPage: 1 })
+        expect(requests[requests.length - 1].get('offset')).toBe('0')
+        expect(requests[requests.length - 1].get('repository')).toBe('example-org/example-repo')
+        expect(router.values.searchParams.reviews_repository).toBe('example-org/example-repo')
+        expect(router.values.searchParams.reviews_page).toBeUndefined()
+    })
+
+    it('restores filters and the page from a link without resetting the page', async () => {
+        // Each filter setter resets the page, so an unguarded replay would drop every shared
+        // `reviews_page` back to page 1.
+        router.actions.push(urls.codeReview(), {
+            reviews_scope: 'everyone',
+            reviews_status: 'completed',
+            reviews_published: 'false',
+            reviews_page: '2',
+        })
+        logic.mount()
+        await expectLogic(logic).toDispatchActions(['loadReviewsSuccess']).toMatchValues({
+            reviewsStatus: 'completed',
+            reviewsPublished: false,
+            reviewsCurrentPage: 2,
+        })
+        expect(logic.values.reviews?.[0].id).toBe(`r${REVIEWS_PAGE_SIZE}`)
+    })
+
+    it.each(['0', '-1', 'Infinity', '40002'])('falls back to page 1 for a linked reviews_page of %s', async (page) => {
+        // Each of these would send an offset the API rejects, and a retry would repeat it.
+        router.actions.push(urls.codeReview(), { reviews_page: page })
+        logic.mount()
+        await expectLogic(logic).toDispatchActions(['loadReviewsSuccess']).toMatchValues({ reviewsCurrentPage: 1 })
     })
 
     it('buckets drawer findings by the stored run threshold, with the viewer proxy only for old rows', async () => {
@@ -347,11 +427,11 @@ describe('reviewHogSettingsLogic', () => {
         // published — the exact lie the stored snapshot exists to fix.
         useMocks({
             get: {
-                '/api/projects/:team_id/review_hog/reviews/r-stamped/': () => [
+                '/api/projects/:team_id/code_review/reviews/r-stamped/': () => [
                     200,
                     reviewDetail('r-stamped', 'must_fix'),
                 ],
-                '/api/projects/:team_id/review_hog/reviews/r-old/': () => [200, reviewDetail('r-old', null)],
+                '/api/projects/:team_id/code_review/reviews/r-old/': () => [200, reviewDetail('r-old', null)],
             },
         })
         logic.mount()
@@ -375,11 +455,11 @@ describe('reviewHogSettingsLogic', () => {
         // sync silently dead-ends every held-back-findings link already posted to GitHub.
         useMocks({
             get: {
-                '/api/projects/:team_id/review_hog/reviews/r-9/': () => [200, reviewDetail('r-9', null)],
+                '/api/projects/:team_id/code_review/reviews/r-9/': () => [200, reviewDetail('r-9', null)],
             },
         })
         logic.mount()
-        await expectLogic(logic).toDispatchActions(['loadRecentReviewsSuccess'])
+        await expectLogic(logic).toDispatchActions(['loadReviewsSuccess'])
 
         router.actions.push(urls.codeReview(), { review: 'r-9' })
         await expectLogic(logic)
@@ -407,16 +487,94 @@ describe('reviewHogSettingsLogic', () => {
         expect(logic.values.reviewDrawerOpen).toBe(false)
     })
 
+    it('opens the tab from ?tab= and mirrors tab changes back to the URL', async () => {
+        logic.mount()
+        router.actions.push(urls.codeReview(), { tab: 'settings' })
+        expect(logic.values.activeTab).toBe('settings')
+
+        // Activity is the default, so it keeps the URL clean; other params survive the write.
+        router.actions.push(urls.codeReview(), { tab: 'settings', reviews_scope: 'everyone' })
+        logic.actions.setActiveTab('activity')
+        expect(router.values.searchParams.tab).toBeUndefined()
+        expect(router.values.searchParams.reviews_scope).toBe('everyone')
+
+        logic.actions.setActiveTab('settings')
+        expect(router.values.searchParams.tab).toBe('settings')
+
+        router.actions.push(urls.codeReview(), { tab: 'approval_history' })
+        expect(logic.values.activeTab).toBe('approval_history')
+
+        // The GitHub App callback keeps its path and its params, because the Approval settings tab
+        // reads them to finish the connection.
+        router.actions.push(urls.stamphogCallback(), { code: 'example-code', state: 'example-state' })
+        expect(logic.values.activeTab).toBe('approval_settings')
+        expect(router.values.location.pathname).toContain(urls.stamphogCallback())
+        expect(router.values.searchParams.code).toBe('example-code')
+    })
+
+    it('loads review data on the first visit to a review tab, not on an approval tab', async () => {
+        router.actions.push(urls.codeReview(), { tab: 'approval_settings' })
+        await expectLogic(logic, () => {
+            logic.mount()
+        }).toNotHaveDispatchedActions(['loadAll'])
+
+        await expectLogic(logic, () => {
+            logic.actions.setActiveTab('settings')
+        }).toDispatchActions(['loadAll'])
+        await expectLogic(logic, () => {
+            logic.actions.setActiveTab('activity')
+        }).toNotHaveDispatchedActions(['loadAll'])
+
+        await expectLogic(logic, () => {
+            logic.actions.setActiveTab('approval_settings')
+            logic.actions.setActiveTab('settings')
+        })
+            .toDispatchActions(['loadSettings'])
+            .toNotHaveDispatchedActions(['loadAll'])
+    })
+
+    it('loads review data once for a deep link to a review tab', async () => {
+        let settingsRequests = 0
+        useMocks({
+            get: {
+                '/api/projects/:team_id/code_review/settings/': () => {
+                    settingsRequests += 1
+                    return [200, { review_inbox_prs: false, resolve_comments: true, urgency_threshold: 'should_fix' }]
+                },
+            },
+        })
+        router.actions.push(urls.codeReview(), { tab: 'settings' })
+        await expectLogic(logic, () => {
+            logic.mount()
+        }).toFinishAllListeners()
+        expect(settingsRequests).toBe(1)
+    })
+
+    it('opens Approval settings and loads no review data without the review-hog flag', async () => {
+        featureFlagLogic.actions.setFeatureFlags([], {})
+        router.actions.push(urls.codeReview(), { tab: 'settings', review: 'r-9' })
+        await expectLogic(logic, () => {
+            logic.mount()
+        }).toNotHaveDispatchedActions(['loadAll', 'openReviewDetailById'])
+        expect(logic.values.activeTab).toBe('approval_settings')
+
+        // Approval settings is the default tab here, so it keeps the URL clean.
+        logic.actions.setActiveTab('approval_history')
+        expect(router.values.searchParams.tab).toBe('approval_history')
+        logic.actions.setActiveTab('approval_settings')
+        expect(router.values.searchParams.tab).toBeUndefined()
+    })
+
     it('closes a deep-linked drawer when the review fails to load', async () => {
         // A stale ?review= link (deleted report, wrong project) has no list row to fall back on —
         // without the failure path the drawer would sit open on skeletons forever.
         useMocks({
             get: {
-                '/api/projects/:team_id/review_hog/reviews/r-gone/': () => [404, { detail: 'Not found.' }],
+                '/api/projects/:team_id/code_review/reviews/r-gone/': () => [404, { detail: 'Not found.' }],
             },
         })
         logic.mount()
-        await expectLogic(logic).toDispatchActions(['loadRecentReviewsSuccess'])
+        await expectLogic(logic).toDispatchActions(['loadReviewsSuccess'])
 
         router.actions.push(urls.codeReview(), { review: 'r-gone' })
         await expectLogic(logic).toDispatchActions([
@@ -428,103 +586,140 @@ describe('reviewHogSettingsLogic', () => {
         expect(router.values.searchParams.review).toBeUndefined()
     })
 
-    it('stops "Show more" at the API\'s maximum limit', async () => {
+    it('polls only while the page has a running review', async () => {
+        // A poll that never stops spends a request every 10s on an idle table; one that never
+        // starts leaves a running row's stage frozen.
+        const page = (inProgress: boolean): ReviewReviewsTablePageApi =>
+            ({
+                count: 1,
+                running_count: inProgress ? 1 : 0,
+                results: [
+                    { id: 'r-live', repository: 'example-org/example-repo', in_progress: inProgress, run_count: 1 },
+                ],
+            }) as ReviewReviewsTablePageApi
         logic.mount()
-        await expectLogic(logic).toDispatchActions([
-            'loadRecentReviewsSuccess',
-            'applyDefaultReviewsScope',
-            'loadRecentReviewsSuccess',
-        ])
-
-        // Enough clicks to push an unclamped limit past the API's max, where the request would 400
-        // and strand the user on a dead button.
-        for (let i = 0; i < MAX_REVIEWS_LIMIT / REVIEWS_PAGE_SIZE; i++) {
-            logic.actions.showMoreReviews()
-        }
-        await expectLogic(logic).toFinishAllListeners()
-
-        expect(logic.values.reviewsLimit).toBe(MAX_REVIEWS_LIMIT)
-        expect(logic.values.recentReviews).toHaveLength(MAX_REVIEWS_LIMIT)
-        // More rows exist server-side, but the ceiling is reached — the button goes away rather
-        // than offering a request the server rejects.
-        expect(logic.values.moreReviewsAvailable).toBe(false)
-    })
-
-    it('keeps a slower baseline poll running when nothing is in progress', async () => {
-        // Reviews started outside this page (the GitHub label, inbox auto-reviews, a teammate)
-        // only ever appear via the baseline poll — reverting to dispose-on-idle makes the page
-        // permanently stale until a manual refresh.
+        await expectLogic(logic)
+            .toDispatchActions(['loadReviewsSuccess', 'applyDefaultReviewsScope', 'loadReviewsSuccess'])
+            .toFinishAllListeners()
         jest.useFakeTimers()
         try {
-            logic.mount()
-            await expectLogic(logic).toDispatchActions([
-                'loadRecentReviewsSuccess',
-                'applyDefaultReviewsScope',
-                'loadRecentReviewsSuccess',
-            ])
-
+            logic.actions.loadReviewsSuccess(page(true))
             await expectLogic(logic, () => {
-                jest.advanceTimersByTime(30_000)
-            }).toDispatchActions(['loadRecentReviews', 'loadRecentReviewsSuccess'])
+                jest.advanceTimersByTime(10_000)
+            }).toDispatchActions(['loadReviews'])
+
+            logic.actions.loadReviewsSuccess(page(false))
+            await expectLogic(logic, () => {
+                jest.advanceTimersByTime(60_000)
+            }).toNotHaveDispatchedActions(['loadReviews'])
+
+            // A triggered review polls even when the reload after the trigger fails and no success arrives.
+            logic.actions.startTriggeredReviewWatch()
+            await expectLogic(logic, () => {
+                jest.advanceTimersByTime(10_000)
+            }).toDispatchActions(['loadReviews'])
         } finally {
             jest.useRealTimers()
         }
     })
 
-    it('refreshes the stats and an open drawer when a watched run finishes', async () => {
+    it.each([
+        ['stays on the page', false],
+        ['leaves a Running filter', true],
+    ])('refreshes the stats and an open drawer when a watched run finishes and %s', async (_, leavesPage) => {
         // A poll response is the only place a completion becomes visible: without the fan-out the
         // proof/effectiveness cards and an open drawer keep pre-completion numbers until reload.
         let finished = false
         useMocks({
             get: {
-                '/api/projects/:team_id/review_hog/reviews/': () => [
+                '/api/projects/:team_id/code_review/reviews/table/': () => [
                     200,
                     {
-                        results: [{ id: 'r-live', in_progress: !finished, run_count: finished ? 1 : 0 }],
-                        has_more: false,
+                        count: finished && leavesPage ? 0 : 1,
+                        running_count: finished ? 0 : 1,
+                        results:
+                            finished && leavesPage
+                                ? []
+                                : [
+                                      {
+                                          id: 'r-live',
+                                          repository: 'example-org/example-repo',
+                                          in_progress: !finished,
+                                          run_count: finished ? 1 : 0,
+                                      },
+                                  ],
                     },
                 ],
-                '/api/projects/:team_id/review_hog/reviews/r-live/': () => [200, reviewDetail('r-live', null)],
+                '/api/projects/:team_id/code_review/reviews/r-live/': () => [200, reviewDetail('r-live', null)],
             },
         })
         logic.mount()
-        await expectLogic(logic).toDispatchActions(['loadRecentReviewsSuccess']).toFinishAllListeners()
+        await expectLogic(logic).toDispatchActions(['loadReviewsSuccess']).toFinishAllListeners()
 
         logic.actions.openReviewDetailById('r-live')
         await expectLogic(logic).toDispatchActions(['loadReviewDetailSuccess'])
 
         finished = true
-        await expectLogic(logic, () => logic.actions.loadRecentReviews()).toDispatchActions([
-            'loadRecentReviewsSuccess',
+        await expectLogic(logic, () => logic.actions.loadReviews()).toDispatchActions([
+            'loadReviewsSuccess',
             'loadPerspectiveStats',
             'loadReviewDetail',
         ])
     })
 
-    it('keeps the failure banner off for a background refresh blip', async () => {
+    it('keeps the rows on a background refresh blip and shows the error only with nothing loaded', async () => {
+        // A poll blip must not replace rows on screen with an error, and a first load that fails
+        // must not read as an empty table.
         logic.mount()
         await expectLogic(logic).toDispatchActions([
-            'loadRecentReviewsSuccess',
+            'loadReviewsSuccess',
             'applyDefaultReviewsScope',
-            'loadRecentReviewsSuccess',
+            'loadReviewsSuccess',
         ])
-        useMocks({ get: { '/api/projects/:team_id/review_hog/reviews/': () => [500, {}] } })
+        useMocks({ get: { '/api/projects/:team_id/code_review/reviews/table/': () => [500, {}] } })
 
-        // The poll retries on its next tick and the prior rows stay on screen — flashing the
-        // page-level banner over one blip would cry wolf every time a request hiccups.
-        await expectLogic(logic, () => logic.actions.loadRecentReviews())
-            .toDispatchActions(['loadRecentReviewsFailure'])
-            .toNotHaveDispatchedActions(['markInitialLoadFailed'])
-        expect(logic.values.initialLoadFailed).toBe(false)
+        await expectLogic(logic, () => logic.actions.loadReviews()).toDispatchActions(['loadReviewsFailure'])
+        expect(logic.values.reviews).toHaveLength(REVIEWS_PAGE_SIZE)
+
+        await expectLogic(logic, () => logic.actions.setReviewsPage(2)).toDispatchActions(['loadReviewsFailure'])
+        expect(logic.values).toMatchObject({ reviewsPage: null, reviewsFailed: true, initialLoadFailed: false })
     })
 
-    it('flags a reviews failure with nothing loaded yet as an initial-load failure', async () => {
-        // Without this the section sits on skeletons forever with no retry path offered.
-        useMocks({ get: { '/api/projects/:team_id/review_hog/reviews/': () => [500, {}] } })
+    it('turns a feature flag 403 into one page state and stops sending requests', async () => {
+        const requestedPaths: string[] = []
+        const gated = ({ request }: { request: Request }): [number, Record<string, string>] => {
+            requestedPaths.push(new URL(request.url).pathname)
+            return [403, { type: 'authentication_error', code: 'feature_flag_required', detail: 'Not enabled.' }]
+        }
+        useMocks({
+            get: {
+                '/api/projects/:team_id/code_review/reviews/table/': gated,
+                '/api/projects/:team_id/code_review/reviews/perspective_stats/': gated,
+                '/api/projects/:team_id/code_review/settings/': gated,
+                '/api/projects/:team_id/code_review/perspectives/': gated,
+                '/api/projects/:team_id/code_review/blind_spots/': gated,
+                '/api/projects/:team_id/code_review/validators/': gated,
+                '/api/projects/:team_id/code_review/resolution/': gated,
+            },
+        })
         logic.mount()
 
-        await expectLogic(logic).toDispatchActions(['loadRecentReviewsFailure', 'markInitialLoadFailed'])
-        expect(logic.values.initialLoadFailed).toBe(true)
+        await expectLogic(logic)
+            .toDispatchActions(['markFeatureFlagGated'])
+            .toFinishAllListeners()
+            .toNotHaveDispatchedActions([
+                'loadSettingsFailure',
+                'loadReviewsFailure',
+                'loadPerspectiveStatsFailure',
+                'loadDeepSkillStatsFailure',
+            ])
+        expect(logic.values).toMatchObject({ featureFlagGated: true, initialLoadFailed: false, reviewsFailed: false })
+
+        const requestCount = requestedPaths.length
+        await expectLogic(logic, () => {
+            document.dispatchEvent(new Event('visibilitychange'))
+        }).toDispatchActions(['loadReviewsSuccess'])
+        expect(requestedPaths).toHaveLength(requestCount)
     })
 
     it('checks the list immediately when the tab becomes visible again', async () => {
@@ -532,14 +727,14 @@ describe('reviewHogSettingsLogic', () => {
         // which reads as stale exactly when the user comes back to look.
         logic.mount()
         await expectLogic(logic).toDispatchActions([
-            'loadRecentReviewsSuccess',
+            'loadReviewsSuccess',
             'applyDefaultReviewsScope',
-            'loadRecentReviewsSuccess',
+            'loadReviewsSuccess',
         ])
 
         await expectLogic(logic, () => {
             document.dispatchEvent(new Event('visibilitychange'))
-        }).toDispatchActions(['loadRecentReviews'])
+        }).toDispatchActions(['loadReviews'])
     })
 
     test.each([
@@ -571,7 +766,7 @@ describe('reviewHogSettingsLogic', () => {
         // other-kind review skills stay offered as plain store skills.
         useMocks({
             get: {
-                '/api/projects/:team_id/review_hog/perspectives/': () => [
+                '/api/projects/:team_id/code_review/perspectives/': () => [
                     200,
                     [
                         {
@@ -621,8 +816,8 @@ describe('reviewHogSettingsLogic', () => {
     })
 
     test.each([
-        ['perspective' as const, '/review_hog/perspectives/', { enabled: true }],
-        ['validator' as const, '/review_hog/validators/', { active: true }],
+        ['perspective' as const, '/code_review/perspectives/', { enabled: true }],
+        ['validator' as const, '/code_review/validators/', { active: true }],
     ])('adopting a skill as %s copies it under the prefix and switches it on', async (kind, patchPath, patchBody) => {
         // Guards the kind→endpoint mapping end to end: the duplicate must target the picked source
         // with the prefixed name, and the follow-up activation must hit the right kind's endpoint
@@ -646,11 +841,11 @@ describe('reviewHogSettingsLogic', () => {
                 },
             },
             patch: {
-                '/api/projects/:team_id/review_hog/perspectives/:skill_name/': async ({ request }) => {
+                '/api/projects/:team_id/code_review/perspectives/:skill_name/': async ({ request }) => {
                     patched.push({ url: request.url, body: (await request.json()) as Record<string, unknown> })
                     return [200, {}]
                 },
-                '/api/projects/:team_id/review_hog/validators/:skill_name/': async ({ request }) => {
+                '/api/projects/:team_id/code_review/validators/:skill_name/': async ({ request }) => {
                     patched.push({ url: request.url, body: (await request.json()) as Record<string, unknown> })
                     return [200, {}]
                 },
@@ -689,7 +884,7 @@ describe('reviewHogSettingsLogic', () => {
                 ],
             },
             patch: {
-                '/api/projects/:team_id/review_hog/perspectives/:skill_name/': () => {
+                '/api/projects/:team_id/code_review/perspectives/:skill_name/': () => {
                     patchCalls++
                     return [200, {}]
                 },
@@ -722,7 +917,7 @@ describe('reviewHogSettingsLogic', () => {
                 '/api/projects/:team_id/llm_skills/name/:skill_name/duplicate/': () => [201, { name: 'created' }],
             },
             patch: {
-                '/api/projects/:team_id/review_hog/perspectives/:skill_name/': () => [500, {}],
+                '/api/projects/:team_id/code_review/perspectives/:skill_name/': () => [500, {}],
             },
         })
         logic.mount()

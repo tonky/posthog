@@ -31,13 +31,26 @@ const config: SignalScoutConfigApi = {
     structured_output_schema: null,
     mcp_gateway_server_ids: [],
     write_scopes: [],
+    report_actions: [],
+    max_report_actions_per_day: 3,
+    allowed_mcp_tools: null,
+    tool_preset: null,
     last_run_at: null,
     consecutive_failure_count: 0,
     status_changed_at: null,
     status_changed_by: null,
     auto_pause_exempt: false,
+    lifecycle_locked: false,
     network_access: 'trusted',
     model: null,
+    custom_image_id: null,
+    precheck_query: null,
+    precheck_disabled: false,
+    effective_precheck_query: null,
+    precheck_query_source: 'off',
+    last_precheck_at: null,
+    last_precheck_outcome: null,
+    last_precheck_row_count: null,
     tags: [],
     source_product: null,
     source_id: null,
@@ -60,7 +73,7 @@ describe('ScoutConfigForm', () => {
     })
     afterEach(cleanup)
 
-    const emitSwitchLabel = 'signals-scout-general write signals to the inbox'
+    const emitSwitchLabel = 'General write signals to the inbox'
 
     it.each([
         ['live', true, false],
@@ -77,15 +90,19 @@ describe('ScoutConfigForm', () => {
         expect(onUpdate).toHaveBeenCalledWith('config-1', { emit: expectedPatch })
     })
 
-    // Settable while the scout is off, so a dry-run posture can be chosen before the enable
-    // sends the first run out.
-    it('leaves the dry-run switch editable while the scout is disabled', () => {
+    // Settable while the scout is off: a dry-run posture has to be chosen before the enable sends
+    // the first run out, and the lock decides who may resume a paused scout.
+    it.each([
+        ['dry-run', emitSwitchLabel],
+        ['owner lock', 'General only the owner can pause or delete'],
+        ['show in inbox', 'General show in inbox'],
+    ])('leaves the %s switch editable while the scout is disabled', (_name, label) => {
         const onUpdate = jest.fn()
         const { getByLabelText } = render(
             <ScoutConfigForm config={{ ...config, enabled: false }} onUpdate={onUpdate} />
         )
 
-        expect(getByLabelText(emitSwitchLabel)).not.toBeDisabled()
+        expect(getByLabelText(label)).not.toBeDisabled()
     })
 
     it('saves the daily run time on blur and never clears the schedule from an empty input', () => {
@@ -117,7 +134,7 @@ describe('ScoutConfigForm', () => {
 
         expect(container.querySelector<HTMLInputElement>('input[type="time"]')?.value).toBe('08:30')
 
-        fireEvent.click(getByLabelText('signals-scout-general run day'))
+        fireEvent.click(getByLabelText('General run day'))
         fireEvent.click(getByText('Thursday'))
         expect(onUpdate).toHaveBeenCalledWith('config-1', { run_cron_schedule: '30 8 * * 4' })
         unmount()
@@ -156,7 +173,7 @@ describe('ScoutConfigForm', () => {
 
         fireEvent.click(getByText('Daily'))
         fireEvent.click(getByText('Custom cron'))
-        expect(getByLabelText('signals-scout-general cron expression')).toBeTruthy()
+        expect(getByLabelText('General cron expression')).toBeTruthy()
         expect(onUpdate).not.toHaveBeenCalled()
         unmount()
     })
@@ -166,7 +183,7 @@ describe('ScoutConfigForm', () => {
         const { getByLabelText, getByText, unmount } = render(
             <ScoutConfigForm config={{ ...config, run_cron_schedule: '0 9 1 2 *' }} onUpdate={onUpdate} />
         )
-        const input = getByLabelText('signals-scout-general cron expression')
+        const input = getByLabelText('General cron expression')
 
         fireEvent.change(input, { target: { value: '0,15 9 * * *' } })
         fireEvent.blur(input)
@@ -188,7 +205,7 @@ describe('ScoutConfigForm', () => {
         const { getByLabelText, rerender, unmount } = render(
             <ScoutConfigForm config={customConfig} onUpdate={onUpdate} />
         )
-        const input = getByLabelText('signals-scout-general cron expression')
+        const input = getByLabelText('General cron expression')
 
         expect(input).toHaveValue('0 9 1 2 *')
 
@@ -208,6 +225,7 @@ describe('ScoutConfigForm', () => {
         ['Claude Opus 5.5', 'claude-opus-5-5'],
         ['GPT-6 Luna', 'gpt-6-luna'],
         ['GPT-5.6 Luna', 'gpt-5.6-luna'],
+        ['GPT-6.1 Sol', 'gpt-6.1-sol'],
         ['GPT-6 Sol', 'gpt-6-sol'],
         ['GPT-6 Astra', 'gpt-6-astra'],
     ])('pins %s from the dropdown and clears the pin via Default', (label, modelId) => {
@@ -216,7 +234,7 @@ describe('ScoutConfigForm', () => {
             [FEATURE_FLAGS.SCOUTS_MODEL_CONFIG]: true,
         })
         const onUpdate = jest.fn()
-        const modelSelectLabel = 'signals-scout-general model'
+        const modelSelectLabel = 'General model'
         const { getByLabelText, getByText, rerender, unmount } = render(
             <ScoutConfigForm config={config} onUpdate={onUpdate} />
         )
@@ -241,9 +259,35 @@ describe('ScoutConfigForm', () => {
             <ScoutConfigForm config={{ ...config, model: 'claude-opus-5' }} onUpdate={jest.fn()} />
         )
 
-        const select = getByLabelText('signals-scout-general model')
+        const select = getByLabelText('General model')
         expect(select).toHaveTextContent('claude-opus-5')
         expect(select).not.toHaveTextContent('Default')
+        unmount()
+    })
+
+    // An update replaces the stored destinations, so a toggle that sends only the inbox flag
+    // would silently turn off Slack delivery and drop the webhook.
+    it.each([
+        ['hides', true, false],
+        ['shows', false, true],
+    ])('%s the scout in the inbox and keeps its Slack and webhook destinations', (_action, inbox, expected) => {
+        const onUpdate = jest.fn()
+        const outputDestinations = {
+            slack: { integration_id: 7, channel: 'C123', thread_reports: false },
+            webhook: { hog_function_id: 'hog-function-1' },
+            inbox,
+        }
+        const { getByLabelText, unmount } = render(
+            <ScoutConfigForm config={{ ...config, output_destinations: outputDestinations }} onUpdate={onUpdate} />
+        )
+        const inboxSwitch = getByLabelText(`General show in inbox`)
+        expect(inboxSwitch).toHaveAttribute('aria-checked', String(inbox))
+
+        fireEvent.click(inboxSwitch)
+
+        expect(onUpdate).toHaveBeenCalledWith('config-1', {
+            output_destinations: { ...outputDestinations, inbox: expected },
+        })
         unmount()
     })
 
@@ -252,7 +296,7 @@ describe('ScoutConfigForm', () => {
         const { getByLabelText, unmount } = render(
             <ScoutConfigForm config={{ ...config, tags: ['on-call'] }} onUpdate={onUpdate} />
         )
-        const input = getByLabelText(`${config.skill_name} tags`)
+        const input = getByLabelText(`General tags`)
 
         fireEvent.change(input, { target: { value: 'Revenue' } })
         fireEvent.keyDown(input, { key: 'Enter' })
@@ -270,7 +314,7 @@ describe('ScoutConfigForm', () => {
             <ScoutConfigForm config={config} onUpdate={onUpdate} />
         )
         fireEvent.click(getByText('Structured output'))
-        fireEvent.change(getByLabelText(`${config.skill_name} record schema`), { target: { value: draft } })
+        fireEvent.change(getByLabelText(`General record schema`), { target: { value: draft } })
 
         rerender(
             <ScoutConfigForm

@@ -149,8 +149,10 @@ def _configure_syrupy_snapshots() -> None:
 def _rewrite_warehouse_table_url(sender, instance, **kwargs) -> None:
     """Rewrite hardcoded host.docker.internal:19000 URLs on DataWarehouseTable to
     settings.DATAWAREHOUSE_BUCKET_DOMAIN so ClickHouse reaches the run's object store."""
+    if sender.__name__ != "DataWarehouseTable":
+        return
     url = getattr(instance, "url_pattern", None)
-    if sender.__name__ == "DataWarehouseTable" and isinstance(url, str) and url.startswith(UPSTREAM_BUCKET):
+    if isinstance(url, str) and url.startswith(UPSTREAM_BUCKET):
         from django.conf import settings
 
         domain = getattr(settings, "DATAWAREHOUSE_BUCKET_DOMAIN", None)

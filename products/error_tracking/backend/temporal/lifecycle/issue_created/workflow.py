@@ -8,7 +8,10 @@ from temporalio.exceptions import ActivityError, ApplicationError
 
 from posthog.temporal.common.base import PostHogWorkflow
 
-from products.error_tracking.backend.temporal.fingerprint_embedding_result.types import FingerprintEmbeddingMergeResult
+from products.error_tracking.backend.temporal.fingerprint_embedding_result.types import (
+    AutoMergeReopenedTarget,
+    FingerprintEmbeddingMergeResult,
+)
 from products.error_tracking.backend.temporal.lifecycle.issue_created.types import (
     EMBEDDING_SERVICE_UNAVAILABLE_ERROR_TYPE,
     IssueCreatedSnapshot,
@@ -17,6 +20,8 @@ from products.error_tracking.backend.temporal.lifecycle.issue_created.types impo
     IssueEmbeddingPreparationResult,
     IssueSeverityInferenceResult,
 )
+from products.error_tracking.backend.temporal.lifecycle.issue_reopened.types import IssueReopenedWorkflowInputs
+from products.error_tracking.backend.temporal.lifecycle.issue_reopened.workflow import run_issue_reopened_side_effects
 from products.error_tracking.backend.temporal.lifecycle.policies import (
     ACTIVITY_RETRY_POLICY,
     ACTIVITY_START_TO_CLOSE_TIMEOUT,
@@ -24,6 +29,7 @@ from products.error_tracking.backend.temporal.lifecycle.policies import (
     ALERT_DISPATCH_RETRY_POLICY,
     ALERT_DISPATCH_SCHEDULE_TO_CLOSE_TIMEOUT,
 )
+from products.error_tracking.backend.temporal.lifecycle.summary_activity import execute_summary_activity
 
 WORKFLOW_NAME = "error-tracking-issue-created"
 
@@ -36,6 +42,18 @@ SEVERITY_INFERENCE_RETRY_POLICY = common.RetryPolicy(
 SEVERITY_INFERENCE_START_TO_CLOSE_TIMEOUT = timedelta(seconds=35)
 # Alerts wait for inference, so a model outage must not hold them past this bound, retries included.
 SEVERITY_INFERENCE_SCHEDULE_TO_CLOSE_TIMEOUT = timedelta(seconds=45)
+ISSUE_TAGS_PATCH = "error-tracking-issue-tags-activity"
+ISSUE_TAGS_RETRY_POLICY = common.RetryPolicy(
+    initial_interval=timedelta(seconds=2),
+    maximum_interval=timedelta(seconds=30),
+    maximum_attempts=3,
+)
+ISSUE_TAGS_START_TO_CLOSE_TIMEOUT = timedelta(seconds=35)
+# Alerts do not wait for tags, so this bound only has to outlast a lifecycle queue backlog
+# while the worker pool scales up.
+ISSUE_TAGS_SCHEDULE_TO_CLOSE_TIMEOUT = timedelta(minutes=5)
+MERGE_TARGET_TAGS_PATCH = "error-tracking-merge-target-tags-activity"
+SUMMARY_ON_WRITE_PATCH = "error-tracking-summary-on-write-activity"
 EMBEDDING_ACTIVITY_RETRY_POLICY = common.RetryPolicy(
     initial_interval=timedelta(seconds=1),
     maximum_interval=timedelta(seconds=15),
@@ -108,7 +126,29 @@ class ErrorTrackingIssueCreatedWorkflow(PostHogWorkflow):
                 retry_policy=ACTIVITY_RETRY_POLICY,
             )
             if merge_result.merged_count > 0:
-                return IssueCreatedWorkflowResult(merged=True)
+                tags = (
+                    asyncio.create_task(
+                        self._tag_issue(
+                            "tag_issue_created_merge_target_activity",
+                            inputs,
+                            fail_open_counter="error_tracking_issue_created_merge_target_tags_fail_open",
+                            description="Issue-created workflows whose merge target tag activity failed",
+                        )
+                    )
+                    if workflow.patched(MERGE_TARGET_TAGS_PATCH)
+                    else None
+                )
+                try:
+                    # The exception belongs to the target issue now. A dormant target that the merge
+                    # put back to active owes its subscribers a reopened notification; an already
+                    # active target owes nothing, which matches a fingerprint that links directly.
+                    if merge_result.reopened_target is None:
+                        return IssueCreatedWorkflowResult(merged=True)
+                    await run_issue_reopened_side_effects(_reopened_inputs(inputs, merge_result.reopened_target))
+                    return IssueCreatedWorkflowResult(merged=True, notified=True)
+                finally:
+                    if tags is not None:
+                        await tags
 
         # Runs before the alert and the side effects so that they carry the inferred severity.
         inputs = await self._with_inferred_severity(inputs)
@@ -130,6 +170,33 @@ class ErrorTrackingIssueCreatedWorkflow(PostHogWorkflow):
             if workflow.patched(ALERT_DISPATCH_PATCH)
             else None
         )
+        # Patched for the same reason. The alert and the emit activities do not wait for the summary.
+        # The workflow awaits it before it completes, because a task left unawaited is dropped when the workflow returns.
+        summary = (
+            asyncio.create_task(
+                execute_summary_activity(
+                    "generate_issue_created_summary_activity",
+                    inputs,
+                    fail_open_counter="error_tracking_issue_created_summary_fail_open",
+                    description="Issue-created workflows whose summary activity failed",
+                )
+            )
+            if workflow.patched(SUMMARY_ON_WRITE_PATCH)
+            else None
+        )
+        # Patched, and awaited like the summary: nothing on the alert path reads tags.
+        tags = (
+            asyncio.create_task(
+                self._tag_issue(
+                    "tag_issue_created_activity",
+                    inputs,
+                    fail_open_counter="error_tracking_issue_created_tags_fail_open",
+                    description="Issue-created workflows whose tag activity failed",
+                )
+            )
+            if workflow.patched(ISSUE_TAGS_PATCH)
+            else None
+        )
         try:
             await workflow.execute_activity(
                 "emit_issue_created_internal_event_activity",
@@ -146,6 +213,10 @@ class ErrorTrackingIssueCreatedWorkflow(PostHogWorkflow):
         finally:
             if dispatch is not None:
                 await dispatch
+            if summary is not None:
+                await summary
+            if tags is not None:
+                await tags
         return IssueCreatedWorkflowResult(
             notified=True,
             embedding_skipped_reason=preparation.skipped_reason,
@@ -178,3 +249,34 @@ class ErrorTrackingIssueCreatedWorkflow(PostHogWorkflow):
         if not result.resolved or result.stored_severity == inputs.issue.severity:
             return inputs
         return dataclasses.replace(inputs, issue=dataclasses.replace(inputs.issue, severity=result.stored_severity))
+
+    async def _tag_issue(
+        self, activity: str, inputs: IssueCreatedWorkflowInputs, *, fail_open_counter: str, description: str
+    ) -> None:
+        try:
+            await workflow.execute_activity(
+                activity,
+                inputs,
+                schedule_to_close_timeout=ISSUE_TAGS_SCHEDULE_TO_CLOSE_TIMEOUT,
+                start_to_close_timeout=ISSUE_TAGS_START_TO_CLOSE_TIMEOUT,
+                retry_policy=ISSUE_TAGS_RETRY_POLICY,
+            )
+        except ActivityError:
+            workflow.logger.warning("Issue tag activity %s failed; some tags may be missing", activity)
+            workflow.metric_meter().create_counter(fail_open_counter, description).add(1)
+
+
+def _reopened_inputs(
+    inputs: IssueCreatedWorkflowInputs, target: AutoMergeReopenedTarget
+) -> IssueReopenedWorkflowInputs:
+    return IssueReopenedWorkflowInputs(
+        notification_id=target.notification_id,
+        team_id=inputs.team_id,
+        issue_id=target.issue_id,
+        issue=target.issue,
+        # The new fingerprint and its exception: the merge moved both onto the target issue.
+        fingerprint=inputs.fingerprint,
+        event_uuid=inputs.event_uuid,
+        event_timestamp=inputs.event_timestamp,
+        assignee=target.assignee,
+    )

@@ -6,6 +6,8 @@ from unittest.mock import patch
 from django.conf import settings
 from django.test import override_settings
 
+from parameterized import parameterized
+
 from posthog.schema import HogQLQueryModifiers, MaterializationMode, PersonsArgMaxVersion, PersonsOnEventsMode
 
 from posthog.hogql.modifiers import create_default_modifiers_for_team
@@ -61,6 +63,29 @@ class TestModifiers(BaseTest):
         )
         assert modifiers.personsOnEventsMode == PersonsOnEventsMode.PERSON_ID_OVERRIDE_PROPERTIES_ON_EVENTS
 
+    @parameterized.expand(
+        [
+            (modifier, flag_key, explicit, flag, expected)
+            for modifier, flag_key in [
+                ("materializeRepeatedCTEs", "hogql-materialize-repeated-ctes"),
+                ("optimizeCrossJoins", "hogql-optimize-cross-joins"),
+            ]
+            for explicit, flag, expected in [(None, False, None), (None, True, True), (False, True, False)]
+        ]
+    )
+    def test_flagged_rollout_respects_explicit_kill_switch(
+        self, modifier: str, flag_key: str, explicit: bool | None, flag: bool, expected: bool | None
+    ) -> None:
+        with (
+            patch("posthog.hogql.modifiers.is_cloud", return_value=True),
+            patch(
+                "posthog.ph_client.feature_enabled_or_false",
+                side_effect=lambda key, *args, **kwargs: key == flag_key and flag,
+            ),
+        ):
+            modifiers = create_default_modifiers_for_team(self.team, HogQLQueryModifiers(**{modifier: explicit}))
+        assert getattr(modifiers, modifier) is expected
+
     @override_settings(PERSON_ON_EVENTS_OVERRIDE=False, PERSON_ON_EVENTS_V2_OVERRIDE=False)
     def test_team_modifiers_override(self):
         assert self.team.modifiers is None
@@ -80,7 +105,11 @@ class TestModifiers(BaseTest):
             == PersonsOnEventsMode.PERSON_ID_OVERRIDE_PROPERTIES_JOINED  # no change here
         )
 
-        self.team.modifiers = {"personsOnEventsMode": PersonsOnEventsMode.PERSON_ID_NO_OVERRIDE_PROPERTIES_ON_EVENTS}
+        # A modifier removed from the schema can stay stored on a project.
+        self.team.modifiers = {
+            "personsOnEventsMode": PersonsOnEventsMode.PERSON_ID_NO_OVERRIDE_PROPERTIES_ON_EVENTS,
+            "useNewEventsCluster": True,
+        }
         self.team.save()
         modifiers = create_default_modifiers_for_team(self.team)
         assert modifiers.personsOnEventsMode == PersonsOnEventsMode.PERSON_ID_NO_OVERRIDE_PROPERTIES_ON_EVENTS

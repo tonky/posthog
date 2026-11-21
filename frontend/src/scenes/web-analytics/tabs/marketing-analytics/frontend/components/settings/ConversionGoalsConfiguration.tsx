@@ -1,18 +1,21 @@
 import { useActions, useValues } from 'kea'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { IconCheck, IconPencil, IconPlusSmall, IconTrash, IconWarning, IconX } from '@posthog/icons'
-import { LemonButton, LemonInput } from '@posthog/lemon-ui'
+import { LemonBanner, LemonButton, LemonInput } from '@posthog/lemon-ui'
 
 import { RestrictionScope, useRestrictedArea } from 'lib/components/RestrictedArea'
 import { TeamMembershipLevel } from 'lib/constants'
 import { LemonCheckbox } from 'lib/lemon-ui/LemonCheckbox'
 import { LemonTable } from 'lib/lemon-ui/LemonTable'
-import { uuid } from 'lib/utils/dom'
+import { useQuillSurface } from 'lib/ui/QuillSurface/quillSurfaceContext'
 import { QUERY_TYPES_METADATA } from 'scenes/saved-insights/insightTypesMetadata'
+import { teamLogic } from 'scenes/teamLogic'
 
 import { SceneSection } from '~/layout/scenes/components/SceneSection'
-import { ConversionGoalFilter, NodeKind } from '~/queries/schema/schema-general'
+import { ConversionGoalFilter } from '~/queries/schema/schema-general'
+
+import { conversionGoalFormLogic } from 'products/marketing_analytics/frontend/setup/conversionGoalFormLogic'
 
 import { marketingAnalyticsSettingsLogic } from '../../logic/marketingAnalyticsSettingsLogic'
 import { ConversionGoalDropdown } from '../common/ConversionGoalDropdown'
@@ -23,20 +26,11 @@ import {
 import {
     conversionGoalDescription,
     conversionGoalNamePlaceholder,
-    defaultConversionGoalFilter,
     getConfiguredConversionGoalsLabel,
 } from './constants'
 import { revenueDisabledReason, withValidFlags } from './conversionGoalFlags'
-
-interface ConversionGoalFormState {
-    filter: ConversionGoalFilter
-    name: string
-}
-
-const createEmptyFormState = (): ConversionGoalFormState => ({
-    filter: defaultConversionGoalFilter,
-    name: '',
-})
+import { isInvalidConversionGoal } from './isInvalidConversionGoal'
+import { QuillConversionGoalsConfiguration } from './QuillConversionGoalsConfiguration'
 
 function CountsAsToggles({
     goal,
@@ -76,7 +70,30 @@ export function ConversionGoalsConfiguration({
 }): JSX.Element {
     const { conversion_goals } = useValues(marketingAnalyticsSettingsLogic)
     const { addOrUpdateConversionGoal, removeConversionGoal } = useActions(marketingAnalyticsSettingsLogic)
-    const [formState, setFormState] = useState<ConversionGoalFormState>(createEmptyFormState)
+    const { currentTeamId } = useValues(teamLogic)
+    const formLogic = conversionGoalFormLogic({ projectId: currentTeamId ?? -1 })
+    const {
+        filter,
+        name,
+        recommendation,
+        editingGoalId: reviewingGoalId,
+        duplicateGoal,
+        formFocusRequested,
+        isFormValid,
+        isSaving,
+        currentTeamLoading,
+        saveError,
+    } = useValues(formLogic)
+    const { setName, setFilter, saveGoal, clearDraft, reviewGoal, formFocused } = useActions(formLogic)
+    const formRef = useRef<HTMLDivElement>(null)
+    const nameInputRef = useRef<HTMLInputElement>(null)
+    useEffect(() => {
+        if (formFocusRequested) {
+            formRef.current?.scrollIntoView({ block: 'nearest' })
+            nameInputRef.current?.focus({ preventScroll: true })
+            formFocused()
+        }
+    }, [formFocusRequested, formFocused])
     const [editingGoalId, setEditingGoalId] = useState<string | null>(null)
     const [editingGoal, setEditingGoal] = useState<ConversionGoalFilter | null>(null)
     const restrictedReason = useRestrictedArea({
@@ -84,22 +101,9 @@ export function ConversionGoalsConfiguration({
         minimumAccessLevel: TeamMembershipLevel.Admin,
     })
 
+    const quillSurface = useQuillSurface()
+
     const validationWarnings = useMemo(() => validateConversionGoals(conversion_goals), [conversion_goals])
-
-    const handleAddConversionGoal = (): void => {
-        let conversionGoalName = formState.name.trim()
-        if (conversionGoalName === '') {
-            conversionGoalName = formState.filter.custom_name || formState.filter.name || 'No name'
-        }
-        const newGoal: ConversionGoalFilter = withValidFlags({
-            ...formState.filter,
-            conversion_goal_id: formState.filter.conversion_goal_id || uuid(),
-            conversion_goal_name: conversionGoalName,
-        })
-
-        addOrUpdateConversionGoal(newGoal)
-        setFormState(createEmptyFormState())
-    }
 
     const handleStartEdit = (goal: ConversionGoalFilter): void => {
         setEditingGoalId(goal.conversion_goal_id)
@@ -123,7 +127,52 @@ export function ConversionGoalsConfiguration({
         removeConversionGoal(goalId)
     }
 
-    const isFormValid = defaultConversionGoalFilter.name !== formState.filter.name
+    const formDisabledReason =
+        restrictedReason || (isSaving ? 'Wait for this conversion goal to finish saving.' : undefined)
+
+    const reviewGoalDisabledReason =
+        formDisabledReason || (currentTeamLoading ? 'Wait for the project settings to finish saving.' : undefined)
+
+    const saveGoalDisabledReason =
+        formDisabledReason || (duplicateGoal ? 'Review the existing goal instead of adding a duplicate.' : undefined)
+
+    if (quillSurface) {
+        return (
+            <QuillConversionGoalsConfiguration
+                hideTitle={hideTitle}
+                hideDescription={hideDescription}
+                conversionGoals={conversion_goals}
+                validationWarnings={validationWarnings}
+                formRef={formRef}
+                nameInputRef={nameInputRef}
+                reviewingGoalId={reviewingGoalId}
+                recommendation={recommendation}
+                duplicateGoal={duplicateGoal}
+                saveError={saveError}
+                name={name}
+                onNameChange={setName}
+                filter={filter}
+                onFilterChange={setFilter}
+                isFormValid={isFormValid}
+                isSaving={isSaving}
+                currentTeamLoading={currentTeamLoading}
+                formDisabledReason={formDisabledReason}
+                reviewGoalDisabledReason={reviewGoalDisabledReason}
+                saveGoalDisabledReason={saveGoalDisabledReason}
+                onSaveGoal={saveGoal}
+                onClearDraft={clearDraft}
+                onReviewGoal={reviewGoal}
+                editingGoalId={editingGoalId}
+                editingGoal={editingGoal}
+                onEditingGoalChange={setEditingGoal}
+                restrictedReason={restrictedReason}
+                onStartEdit={handleStartEdit}
+                onSaveEdit={handleSaveEdit}
+                onCancelEdit={handleCancelEdit}
+                onRemoveGoal={handleRemoveGoal}
+            />
+        )
+    }
 
     return (
         <SceneSection
@@ -135,58 +184,70 @@ export function ConversionGoalsConfiguration({
             )}
 
             {/* Add New Conversion Goal Form */}
-            <div className="border rounded p-4 space-y-4">
-                <h4 className="font-medium">Add new conversion goal</h4>
+            <div ref={formRef} className="border rounded p-4 space-y-4" data-attr="marketing-conversion-goal-form">
+                <h4 className="font-medium">
+                    {reviewingGoalId ? 'Review conversion goal' : 'Add new conversion goal'}
+                </h4>
 
+                {!!recommendation?.questions.length && (
+                    <LemonBanner type="info">
+                        Review these questions before saving the goal:
+                        <ul className="pl-5 mb-0 mt-2 space-y-1">
+                            {recommendation.questions.map((question, index) => (
+                                <li key={index}>{question}</li>
+                            ))}
+                        </ul>
+                    </LemonBanner>
+                )}
+                {duplicateGoal && (
+                    <LemonBanner
+                        type="info"
+                        action={{
+                            children: 'Review goal',
+                            onClick: () => reviewGoal(duplicateGoal.conversion_goal_id),
+                            disabledReason: reviewGoalDisabledReason,
+                        }}
+                    >
+                        <span>{`Already configured as "${duplicateGoal.conversion_goal_name}". Review the existing goal.`}</span>
+                    </LemonBanner>
+                )}
+                {saveError && <LemonBanner type="error">{saveError}</LemonBanner>}
                 <div className="space-y-3">
                     <div>
                         <LemonInput
-                            value={formState.name}
-                            onChange={(value) => setFormState((prev) => ({ ...prev, name: value }))}
+                            inputRef={nameInputRef}
+                            value={name}
+                            onChange={setName}
                             placeholder={conversionGoalNamePlaceholder}
-                            disabledReason={restrictedReason}
+                            disabledReason={formDisabledReason}
                         />
                     </div>
 
                     <div>
                         <ConversionGoalDropdown
-                            value={formState.filter}
+                            value={filter}
                             typeKey="conversion-goal"
-                            onChange={(newFilter) =>
-                                setFormState((prev) => ({
-                                    ...prev,
-                                    filter: {
-                                        ...newFilter,
-                                        conversion_goal_id: newFilter.conversion_goal_id || uuid(),
-                                    },
-                                }))
-                            }
-                            disabledReason={restrictedReason}
+                            onChange={setFilter}
+                            disabledReason={formDisabledReason}
                         />
                     </div>
 
-                    <CountsAsToggles
-                        goal={formState.filter}
-                        onChange={(filter) => setFormState((prev) => ({ ...prev, filter }))}
-                        disabledReason={restrictedReason}
-                    />
+                    <CountsAsToggles goal={filter} onChange={setFilter} disabledReason={formDisabledReason} />
 
                     <div className="flex gap-2">
                         <LemonButton
                             type="primary"
-                            onClick={handleAddConversionGoal}
-                            disabled={!isFormValid}
+                            onClick={saveGoal}
+                            loading={isSaving}
+                            disabled={!isFormValid || currentTeamLoading}
                             size="small"
-                            icon={<IconPlusSmall />}
-                            disabledReason={restrictedReason}
+                            icon={reviewingGoalId ? <IconCheck /> : <IconPlusSmall />}
+                            disabledReason={saveGoalDisabledReason}
                         >
-                            Add conversion goal
+                            {reviewingGoalId ? 'Save changes' : 'Add conversion goal'}
                         </LemonButton>
 
-                        <LemonButton
-                            onClick={() => setFormState(createEmptyFormState())}
-                            disabledReason={restrictedReason}
-                        >
+                        <LemonButton onClick={clearDraft} disabledReason={formDisabledReason}>
                             Clear
                         </LemonButton>
                     </div>
@@ -206,11 +267,7 @@ export function ConversionGoalsConfiguration({
                             title: 'Goal name',
                             render: (_, goal: ConversionGoalFilter) => {
                                 // Check if this goal is invalid (All Events)
-                                const isInvalid =
-                                    goal.kind === NodeKind.EventsNode &&
-                                    ('event' in goal
-                                        ? (goal as any).event === null || (goal as any).event === ''
-                                        : false)
+                                const isInvalid = isInvalidConversionGoal(goal)
 
                                 if (editingGoalId === goal.conversion_goal_id && editingGoal) {
                                     return (

@@ -13,14 +13,14 @@ export const manifest: ProductManifest = {
             projectBased: true,
             description: 'Automated code reviews of your pull requests, and your review agent settings.',
             iconType: 'code_review',
-            docsHref: 'https://posthog.com/docs/posthog-desktop/code-review',
         },
     },
     routes: {
         '/code-review': ['CodeReview', 'codeReview'],
     },
     urls: {
-        codeReview: (): string => '/code-review',
+        codeReview: (tab?: 'approval_history' | 'code_you_own' | 'settings' | 'approval_settings'): string =>
+            tab ? `/code-review?tab=${tab}` : '/code-review',
     },
     treeItemsProducts: [
         {
@@ -30,6 +30,7 @@ export const manifest: ProductManifest = {
             iconType: 'code_review' as FileSystemIconType,
             iconColor: ['var(--color-product-code-review-light)', 'var(--color-product-code-review-dark)'],
             href: urls.codeReview(),
+            searchKeywords: ['pr review', 'review agent', 'reviewhog'],
             flag: FEATURE_FLAGS.REVIEW_HOG,
             tags: ['alpha'],
             sceneKey: 'CodeReview',

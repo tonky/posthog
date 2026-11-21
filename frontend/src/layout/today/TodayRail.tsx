@@ -1,116 +1,130 @@
 import { useActions, useValues } from 'kea'
-import { ComponentProps } from 'react'
+import { Suspense, useEffect, useState } from 'react'
 
-import { IconSearch, IconSidebarClose, IconSidebarOpen } from '@posthog/icons'
-import { Button, Separator, Tooltip, TooltipContent, TooltipTrigger } from '@posthog/quill'
+import { PostHogErrorBoundary } from '@posthog/react'
 
-import { Logomark } from 'lib/brand'
-import { NewAccountMenu } from 'lib/components/Account/NewAccountMenu'
-import { pendingInvitesLogic } from 'lib/components/Account/pendingInvitesLogic'
-import { PendingInviteDot } from 'lib/components/Account/ProjectMenu'
-import { commandLogic } from 'lib/components/Command/commandLogic'
-import { UploadedLogo } from 'lib/lemon-ui/UploadedLogo/UploadedLogo'
-import { organizationLogic } from 'scenes/organizationLogic'
+import { useFeatureFlag } from 'lib/hooks/useFeatureFlag'
+import { useResizeObserver } from 'lib/hooks/useResizeObserver'
+import { lazyWithRetry } from 'lib/utils/retryImport'
+import { projectLogic } from 'scenes/projectLogic'
 
-import { TODAY_RAIL_ITEMS } from './todayRailItems'
+import { TodayAccountMenu } from './TodayAccountMenu'
+import { TodayMoreMenu } from './TodayMoreMenu'
+import { TodayPreviewCardProvider } from './TodayPreviewCardProvider'
+import type { TodayRailPreview } from './todayPreviewCards'
+import { TodayPreviewTrigger } from './TodayPreviewTrigger'
+import { TODAY_PANES, TODAY_RAIL_FOOTER_PANES } from './todayRailItems'
 import { TodayRailTile } from './TodayRailTile'
-import { TODAY_RAIL_WIDTH, railPaneHref, todayShellLogic } from './todayShellLogic'
+import { TODAY_RAIL_WIDTH, TodayRailPane, railPaneHref, todayShellLogic } from './todayShellLogic'
+import { TodaySpacesLogicMount } from './TodaySpacesLogicMount'
+import { todayTourLogic } from './todayTourLogic'
 
-function RailUtility({
-    label,
-    children,
-    ...props
-}: { label: string; children: JSX.Element } & ComponentProps<typeof Button>): JSX.Element {
-    return (
-        <Tooltip>
-            <TooltipTrigger
-                delay={0}
-                render={
-                    <Button
-                        variant="default"
-                        size="icon"
-                        aria-label={label}
-                        className="relative size-10 rounded-md text-muted-foreground hover:text-foreground [&_svg]:size-5"
-                        {...props}
-                    />
-                }
-            >
-                {children}
-            </TooltipTrigger>
-            <TooltipContent side="right">{label}</TooltipContent>
-        </Tooltip>
-    )
+// Flag-gated, so users without the flag skip the wizard chunk.
+const WizardRailButton = lazyWithRetry(() =>
+    import('products/wizard/frontend/views/run-sidebar/WizardRailButton').then(({ WizardRailButton }) => ({
+        default: WizardRailButton,
+    }))
+)
+
+// pinned: autocapture data-attr. The Settings tile kept the attribute of the gear button it replaced.
+const RAIL_DATA_ATTRS: Partial<Record<TodayRailPane, string>> = { settings: 'today-settings' }
+
+const RAIL_PREVIEWS = Object.fromEntries(
+    Object.keys(TODAY_PANES)
+        .filter((pane) => pane !== 'home' && pane !== 'settings')
+        .map((pane) => [pane, { kind: 'rail', pane }])
+) as Partial<Record<TodayRailPane, TodayRailPreview>>
+
+const RAIL_TILE_HEIGHT = 56
+const RAIL_GAP = 12
+
+export function railPanesThatFit(panes: TodayRailPane[], height: number | undefined): number {
+    if (height === undefined) {
+        return panes.length
+    }
+    return Math.max(0, Math.floor((height + RAIL_GAP) / (RAIL_TILE_HEIGHT + RAIL_GAP)))
 }
 
 export function TodayRail(): JSX.Element {
-    const { activePane, sidebarVisible } = useValues(todayShellLogic)
-    const { pickPane, toggleSidebar } = useActions(todayShellLogic)
-    const { toggleCommand } = useActions(commandLogic)
-    const { currentOrganization } = useValues(organizationLogic)
-    const { pendingInvites } = useValues(pendingInvitesLogic)
+    const { activePane, effectivePhaiView, featureFlags, railPanes, sidebarVisible } = useValues(todayShellLogic)
+    const { clickRailPane } = useActions(todayShellLogic)
+    const { tourActive } = useValues(todayTourLogic)
+    const [chatsPreviewed, setChatsPreviewed] = useState(false)
+    const [pointerInRail, setPointerInRail] = useState(false)
+    const [cardOpen, setCardOpen] = useState(false)
+    useEffect(() => {
+        if (!pointerInRail && !cardOpen) {
+            setChatsPreviewed(false)
+        }
+    }, [pointerInRail, cardOpen])
+    const wizardUiEnabled = useFeatureFlag('WIZARD_UI_ENABLED')
+    const { currentProjectId } = useValues(projectLogic)
+    const { ref: paneListRef, height: paneListHeight } = useResizeObserver<HTMLDivElement>()
+    const fitCount = railPanesThatFit(railPanes, paneListHeight)
+    const visiblePanes = railPanes.slice(0, fitCount)
+    const overflowPanes = railPanes.slice(fitCount)
+
+    const renderTile = (pane: TodayRailPane): JSX.Element => {
+        const tile = (
+            <TodayRailTile
+                key={pane}
+                label={TODAY_PANES[pane].label}
+                icon={TODAY_PANES[pane].icon}
+                active={activePane === pane}
+                to={railPaneHref(pane, effectivePhaiView, featureFlags)}
+                onClick={() => clickRailPane(pane)}
+                dataAttr={RAIL_DATA_ATTRS[pane] ?? `today-rail-${pane}`}
+                onPointerEnter={pane === 'spaces' ? () => setChatsPreviewed(true) : undefined}
+            />
+        )
+        const preview = RAIL_PREVIEWS[pane]
+        return preview ? (
+            <TodayPreviewTrigger
+                key={pane}
+                payload={preview}
+                disabled={activePane === pane && sidebarVisible}
+                className="w-full min-w-0"
+            >
+                {tile}
+            </TodayPreviewTrigger>
+        ) : (
+            tile
+        )
+    }
 
     return (
-        <nav
-            aria-label="Main"
-            className="flex shrink-0 flex-col items-center gap-3 border-r border-[var(--border)] pb-3"
-            // eslint-disable-next-line react/forbid-dom-props
-            style={{ width: TODAY_RAIL_WIDTH }}
-        >
-            {/* h-12 matches QuillSceneHeader, so the line under the logo meets the pane header's bottom border. */}
-            <div className="-mb-1 flex h-12 w-full shrink-0 flex-col items-center" aria-hidden>
-                <div className="flex flex-1 items-center">
-                    <Logomark className="h-auto w-6" />
+        <TodayPreviewCardProvider disabled={tourActive} onOpenChange={setCardOpen}>
+            <nav
+                aria-label="Main"
+                onPointerEnter={() => setPointerInRail(true)}
+                onPointerLeave={() => setPointerInRail(false)}
+                className="TodayShell__rail flex shrink-0 flex-col items-center gap-3 bg-[var(--chrome)] pt-3 pb-3"
+                // eslint-disable-next-line react/forbid-dom-props
+                style={{ width: TODAY_RAIL_WIDTH }}
+            >
+                <div
+                    ref={paneListRef}
+                    className="flex min-h-0 w-full flex-1 flex-col items-center gap-3 overflow-hidden"
+                >
+                    {visiblePanes.map(renderTile)}
                 </div>
-                <Separator className="w-11" />
-            </div>
-            {TODAY_RAIL_ITEMS.map(({ pane, label, icon }) => (
-                <TodayRailTile
-                    key={pane}
-                    label={label}
-                    icon={icon}
-                    active={activePane === pane}
-                    to={railPaneHref(pane)}
-                    onClick={() => pickPane(pane)}
-                    dataAttr={`today-rail-${pane}`}
-                />
-            ))}
-            <div className="mt-auto flex flex-col items-center gap-1">
-                {!sidebarVisible && (
-                    <NewAccountMenu
-                        side="right"
-                        align="end"
-                        renderTrigger={(props) => (
-                            <RailUtility {...props} label="Account menu" data-attr="new-account-menu-button">
-                                <>
-                                    <UploadedLogo
-                                        name={currentOrganization?.name ?? '?'}
-                                        entityId={currentOrganization?.id ?? ''}
-                                        mediaId={currentOrganization?.logo_media_id ?? ''}
-                                        size="small"
-                                    />
-                                    {pendingInvites.length > 0 && (
-                                        <PendingInviteDot className="absolute top-1.5 right-1.5" />
-                                    )}
-                                </>
-                            </RailUtility>
-                        )}
-                    />
-                )}
-                <RailUtility
-                    label="Search"
-                    data-attr="today-rail-search"
-                    onClick={() => toggleCommand('nav-search-button')}
-                >
-                    <IconSearch />
-                </RailUtility>
-                <RailUtility
-                    label={sidebarVisible ? 'Hide sidebar' : 'Show sidebar'}
-                    data-attr="today-rail-toggle-sidebar"
-                    onClick={toggleSidebar}
-                >
-                    {sidebarVisible ? <IconSidebarClose /> : <IconSidebarOpen />}
-                </RailUtility>
-            </div>
-        </nav>
+                {wizardUiEnabled &&
+                    currentProjectId !== null && (
+                        // A local boundary keeps a failed wizard chunk from reaching the shell's
+                        // ChunkLoadErrorBoundary, which reloads the whole app.
+                        <PostHogErrorBoundary fallback={<></>}>
+                            <Suspense fallback={null}>
+                                <WizardRailButton key={currentProjectId} projectId={String(currentProjectId)} />
+                            </Suspense>
+                        </PostHogErrorBoundary>
+                    )}
+                <div className="flex w-full flex-col items-center gap-3">
+                    <TodayMoreMenu overflowPanes={overflowPanes} />
+                    {TODAY_RAIL_FOOTER_PANES.map(renderTile)}
+                </div>
+                <TodayAccountMenu />
+                {chatsPreviewed && <TodaySpacesLogicMount />}
+            </nav>
+        </TodayPreviewCardProvider>
     )
 }

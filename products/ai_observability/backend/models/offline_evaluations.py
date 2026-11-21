@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from django.contrib.postgres.fields import ArrayField
 from django.db import models
 from django.db.models import F, Func, Q, Value
@@ -5,6 +7,7 @@ from django.db.models.lookups import Exact
 from django.utils import timezone
 
 from posthog.models.scoping.manager import EnvironmentScopedManager
+from posthog.models.tagged_items_relation import Taggable
 from posthog.models.utils import UUIDModel
 
 
@@ -14,7 +17,7 @@ class PayloadState(models.TextChoices):
     EXPIRED = "expired", "Expired"
 
 
-class OfflineExperiment(models.Model):
+class OfflineExperiment(Taggable):
     class Status(models.TextChoices):
         UPLOADING = "uploading", "Uploading"
         COMPLETED = "completed", "Completed"
@@ -32,7 +35,14 @@ class OfflineExperiment(models.Model):
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.UPLOADING)
     started_at = models.DateTimeField()
     created_at = models.DateTimeField(default=timezone.now, editable=False)
+    created_by = models.ForeignKey(
+        "posthog.User", on_delete=models.SET_NULL, null=True, blank=True, related_name="+", db_constraint=False
+    )
     finished_at = models.DateTimeField(null=True, blank=True)
+    updated_at = models.DateTimeField(null=True, blank=True)
+    closed_item_count = models.BigIntegerField(null=True, blank=True)
+    closed_result_count = models.BigIntegerField(null=True, blank=True)
+    next_item_revision = models.BigIntegerField(default=0, db_default=0)
     expected_item_count = models.PositiveBigIntegerField(null=True, blank=True)
     expected_result_count = models.PositiveBigIntegerField(null=True, blank=True)
     submission_fingerprint = models.CharField(max_length=64)
@@ -87,6 +97,8 @@ class OfflineExperiment(models.Model):
 class OfflinePayloadOwner(models.Model):
     team = models.ForeignKey("posthog.Team", on_delete=models.CASCADE, db_constraint=False, related_name="+")
     accepted_at = models.DateTimeField(default=timezone.now, editable=False)
+    revision = models.BigIntegerField(default=0, db_default=0)
+    payload_deleted_at = models.DateTimeField(null=True, blank=True)
     payload_state = models.CharField(max_length=16, choices=PayloadState.choices, default=PayloadState.NOT_PROVIDED)
     payload_expires_at = models.DateTimeField(null=True, blank=True)
     submission_fingerprint = models.CharField(max_length=64)
@@ -113,12 +125,18 @@ class OfflinePayloadOwner(models.Model):
             ),
         ]
 
+    @property
+    def payload_availability(self) -> str:
+        return "deleted" if self.payload_deleted_at is not None else self.payload_state
+
 
 class OfflineExperimentItem(OfflinePayloadOwner):
+    content_updated_at = models.DateTimeField(null=True, blank=True)
     id = models.UUIDField(primary_key=True)
     experiment = models.ForeignKey(OfflineExperiment, on_delete=models.CASCADE, related_name="items", db_index=False)
     case_key = models.CharField(max_length=255, null=True, blank=True)
     trial = models.CharField(max_length=255, null=True, blank=True)
+    model_version = models.CharField(max_length=255, null=True, blank=True)
     dataset_item_identifier = models.CharField(max_length=255, null=True, blank=True)
     dataset_item_version_identifier = models.CharField(max_length=255, null=True, blank=True)
     dataset_item_version = models.ForeignKey(
@@ -139,10 +157,20 @@ class OfflineExperimentItem(OfflinePayloadOwner):
         ]
         indexes = [
             models.Index(fields=["experiment", "id"], name="aio_offline_item_exp_idx"),
+            models.Index(
+                fields=["payload_expires_at", "id"],
+                condition=Q(payload_state="available"),
+                name="aio_item_payload_expiry_idx",
+            ),
         ]
 
 
 class OfflineEvaluationResult(OfflinePayloadOwner, UUIDModel):
+    receipt_requires_read = models.BooleanField(default=False, db_default=False)
+    score_updated_at = models.DateTimeField(null=True, blank=True)
+    original_status = models.CharField(max_length=16, null=True, blank=True)
+    original_error_code = models.CharField(max_length=128, null=True, blank=True)
+
     class Status(models.TextChoices):
         OK = "ok", "OK"
         ERROR = "error", "Error"
@@ -168,6 +196,7 @@ class OfflineEvaluationResult(OfflinePayloadOwner, UUIDModel):
     error_code = models.CharField(max_length=128, null=True, blank=True)
     evaluator_trace_id = models.CharField(max_length=255, null=True, blank=True)
     evaluated_at = models.DateTimeField(null=True, blank=True)
+    input_result_ids = ArrayField(models.UUIDField(), null=True, blank=True)
 
     class Meta:
         db_table = "llm_analytics_offlineevaluationresult"
@@ -211,6 +240,43 @@ class OfflineEvaluationResult(OfflinePayloadOwner, UUIDModel):
             models.Index(
                 fields=["team", "scorer_version", "-accepted_at", "id"], name="aio_offline_result_history_idx"
             ),
+            models.Index(
+                fields=["payload_expires_at", "id"],
+                condition=Q(payload_state="available"),
+                name="aio_result_payload_expiry_idx",
+            ),
+        ]
+
+    @property
+    def effective_score_time(self) -> datetime:
+        return self.score_updated_at or self.evaluated_at or self.accepted_at
+
+    @property
+    def value(self) -> float | bool | list[str] | None:
+        if self.numeric_value is not None:
+            return self.numeric_value
+        if self.boolean_value is not None:
+            return self.boolean_value
+        return self.categorical_values
+
+
+class OfflineEvaluationUsageLedger(UUIDModel):
+    team_id = models.BigIntegerField(editable=False)
+    organization_id = models.UUIDField(editable=False)
+    experiment_id = models.UUIDField(editable=False)
+    accepted_at = models.DateTimeField(default=timezone.now, editable=False)
+    quantity = models.PositiveBigIntegerField(editable=False)
+
+    objects = EnvironmentScopedManager()
+
+    class Meta:
+        db_table = "llm_analytics_offlineevaluationusageledger"
+        constraints = [
+            models.CheckConstraint(condition=Q(quantity__gt=0), name="aio_offline_usage_quantity_pos"),
+        ]
+        indexes = [
+            models.Index(fields=["accepted_at"], name="aio_offline_usage_accepted_idx"),
+            models.Index(fields=["team_id", "accepted_at"], name="aio_offline_usage_team_idx"),
         ]
 
 

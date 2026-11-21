@@ -5,15 +5,16 @@ import { LemonButton, LemonCheckbox, LemonDrawer, LemonTabs } from '@posthog/lem
 
 import { JSONViewer } from 'lib/components/JSONViewer'
 import { TZLabel } from 'lib/components/TZLabel'
-import ViewRecordingButton, { RecordingPlayerType } from 'lib/components/ViewRecordingButton/ViewRecordingButton'
+import { useApmMobileLayout } from 'lib/hooks/useApmMobileLayout'
 import { IconLink } from 'lib/lemon-ui/icons'
+import { cn } from 'lib/utils/css-classes'
 
 import { PropertyFilterType, PropertyOperator } from '~/types'
 
 import { CopyLogButton, copyLogRaw } from 'products/logs/frontend/components/LogsViewer/CopyLogButton'
+import { LogContextLinks } from 'products/logs/frontend/components/LogsViewer/LogContextLinks/LogContextLinks'
 import { LogContextSelector } from 'products/logs/frontend/components/LogsViewer/LogContextSelector/LogContextSelector'
 import { LogDetailsTabContent } from 'products/logs/frontend/components/LogsViewer/LogDetailsModal/Tabs/Details/LogDetailsTab'
-import { ViewTraceButton } from 'products/tracing/frontend/components/ViewTraceButton'
 
 import { logsViewerLogic } from '../logsViewerLogic'
 import { LogComments } from './LogComments'
@@ -58,7 +59,9 @@ interface LogDetailsModalProps {
 }
 
 export function LogDetailsModal({ timezone }: LogDetailsModalProps): JSX.Element | null {
-    const { isLogDetailsOpen, selectedLog, jsonParseAllFields, activeTab, sessionId } = useValues(logDetailsModalLogic)
+    const mobileLayout = useApmMobileLayout()
+    const { isLogDetailsOpen, selectedLog, jsonParseAllFields, activeTab, sessionId, relatedErrorsInitialScope } =
+        useValues(logDetailsModalLogic)
     const { closeLogDetails, setJsonParseAllFields, setActiveTab } = useActions(logDetailsModalLogic)
     const { addFilter, copyLinkToLog } = useActions(logsViewerLogic)
 
@@ -83,15 +86,15 @@ export function LogDetailsModal({ timezone }: LogDetailsModalProps): JSX.Element
             isOpen={isLogDetailsOpen}
             onClose={closeLogDetails}
             simple
-            width="50vw"
-            resizable
+            width={mobileLayout ? '100vw' : '50vw'}
+            resizable={!mobileLayout}
             hideCloseButton
             overlayTransparent
             aria-label="Log details"
         >
             <div className="flex flex-col h-full">
                 <LemonDrawer.Header className="flex flex-col gap-2">
-                    <div className="flex items-center justify-between">
+                    <div className={cn('flex items-center justify-between', mobileLayout && 'flex-wrap gap-2')}>
                         <h3>Log details</h3>
                         <div className="flex items-center gap-1">
                             <CopyLogButton log={selectedLog} />
@@ -113,8 +116,8 @@ export function LogDetailsModal({ timezone }: LogDetailsModalProps): JSX.Element
                             />
                         </div>
                     </div>
-                    <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-6">
+                    <div className="flex items-center justify-between flex-wrap gap-2">
+                        <div className={cn('flex items-center gap-6', mobileLayout && 'flex-wrap')}>
                             <div className="flex items-center gap-2">
                                 <span className="text-muted text-xs font-semibold uppercase">Timestamp</span>
                                 <span className="text-xs font-mono">
@@ -135,25 +138,15 @@ export function LogDetailsModal({ timezone }: LogDetailsModalProps): JSX.Element
                                 </div>
                             </div>
                         </div>
-                        <div className="flex items-center gap-1">
-                            <ViewTraceButton
-                                traceId={selectedLog.trace_id}
-                                spanId={selectedLog.span_id}
-                                timestamp={selectedLog.timestamp}
-                                size="xsmall"
-                                type="secondary"
-                                data-attr="logs-details-view-trace"
-                            />
-                            {sessionId && (
-                                <ViewRecordingButton
-                                    sessionId={sessionId}
-                                    timestamp={selectedLog.timestamp}
-                                    size="xsmall"
-                                    openPlayerIn={RecordingPlayerType.Modal}
-                                    checkRecordingExists
-                                />
-                            )}
-                        </div>
+                        <LogContextLinks
+                            surface="drawer"
+                            log={selectedLog}
+                            // The count and the tab share one logic instance, so the counted scope is already
+                            // selected. Passing it as the initial scope would reapply it each time the tab
+                            // remounts and overwrite a scope the user picked in the tab.
+                            onOpenRelatedErrors={() => setActiveTab('related-errors')}
+                            onLeave={closeLogDetails}
+                        />
                     </div>
                 </LemonDrawer.Header>
                 <LemonDrawer.Content>
@@ -171,7 +164,12 @@ export function LogDetailsModal({ timezone }: LogDetailsModalProps): JSX.Element
                                 label: 'Raw',
                                 content: (
                                     <div className="flex flex-col gap-2">
-                                        <div className="flex items-center justify-between">
+                                        <div
+                                            className={cn(
+                                                'flex items-center justify-between',
+                                                mobileLayout && 'flex-wrap gap-2'
+                                            )}
+                                        >
                                             <LemonCheckbox
                                                 checked={jsonParseAllFields}
                                                 onChange={setJsonParseAllFields}
@@ -199,9 +197,9 @@ export function LogDetailsModal({ timezone }: LogDetailsModalProps): JSX.Element
                                 label: 'Related errors',
                                 content: (
                                     <RelatedErrorsTab
-                                        logUuid={selectedLog.uuid}
-                                        logTimestamp={selectedLog.timestamp}
+                                        log={selectedLog}
                                         sessionId={sessionId}
+                                        initialScope={relatedErrorsInitialScope}
                                     />
                                 ),
                             },

@@ -80,8 +80,6 @@ describe('PersonCreateService', () => {
                 version: 0,
                 is_identified: true,
                 is_user_id: isUserId,
-                properties_last_updated_at: {},
-                properties_last_operation: {},
                 last_seen_at: null,
             }
 
@@ -165,15 +163,13 @@ describe('PersonCreateService', () => {
                 version: 1,
                 is_identified: false,
                 is_user_id: null,
-                properties_last_updated_at: {},
-                properties_last_operation: {},
                 last_seen_at: null,
             }
 
             mockPersonStore.createPerson.mockResolvedValue(conflictResult)
             mockPersonStore.fetchForUpdate.mockResolvedValue(existingPerson)
 
-            const [person, created] = await personCreateService.createPerson(
+            const [person, created, , idOwned] = await personCreateService.createPerson(
                 createdAt,
                 properties,
                 propertiesOnce,
@@ -186,6 +182,7 @@ describe('PersonCreateService', () => {
 
             expect(person).toEqual(existingPerson)
             expect(created).toBe(false)
+            expect(idOwned).toBe(true)
             expect(mockPersonStore.fetchForUpdate).toHaveBeenCalledWith(teamId, 'test-distinct-id')
         })
 
@@ -202,8 +199,6 @@ describe('PersonCreateService', () => {
                 version: 1,
                 is_identified: false,
                 is_user_id: null,
-                properties_last_updated_at: {},
-                properties_last_operation: {},
                 last_seen_at: null,
             })
             const holder = makePerson('999')
@@ -215,7 +210,7 @@ describe('PersonCreateService', () => {
             })
             mockPersonStore.fetchForUpdate.mockResolvedValue(null)
 
-            const [person, created] = await personCreateService.createPerson(
+            const [person, created, , idOwned] = await personCreateService.createPerson(
                 createdAt,
                 properties,
                 propertiesOnce,
@@ -228,6 +223,7 @@ describe('PersonCreateService', () => {
 
             expect(person).toEqual(holder)
             expect(created).toBe(false)
+            expect(idOwned).toBe(false)
         })
 
         it('should prefer the distinct ID match over the uuid holder when both exist', async () => {
@@ -242,8 +238,6 @@ describe('PersonCreateService', () => {
                 version: 1,
                 is_identified: false,
                 is_user_id: null,
-                properties_last_updated_at: {},
-                properties_last_operation: {},
                 last_seen_at: null,
             })
             const holder = makePerson('999')

@@ -1,10 +1,20 @@
 import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
 import { describe, it } from 'node:test'
 
+import { buildDependencyScanSection } from './post-dependency-scan-section.mjs'
 import { buildDocsPreviewSection } from './post-docs-preview-section.mjs'
 import { buildHobbySection } from './post-hobby-section.mjs'
 import { buildHogboxPreviewSection } from './post-hogbox-preview-section.mjs'
-import { buildTrunkLaneSection, postTrunkLaneSection } from './post-trunk-lane-section.mjs'
+import {
+    buildQuarantinedFailuresSection,
+    collectFailures,
+    failedTestIds,
+    testJobsPassed,
+} from './post-quarantined-failures-section.mjs'
+import { buildTrunkLaneSection, parseCrossLane, postTrunkLaneSection } from './post-trunk-lane-section.mjs'
 
 const commonHobby = {
     previewMode: true,
@@ -102,6 +112,80 @@ describe('CI report section builders', () => {
         })
     }
 
+    it('warns and names both sides when a PR mixes lanes', () => {
+        const section = buildTrunkLaneSection({
+            impactedTargets: ['node:ingestion', 'py:core'],
+            isUniversal: false,
+            crossLane: { mixed: true, heavyFiles: ['posthog/api/x.py'], lightFiles: ['nodejs/src/y.ts'] },
+        })
+        assert.equal(section.status, 'warn')
+        assert.match(section.summary, /mixes lanes/)
+        assert.match(section.body, /<code>posthog\/api\/x\.py<\/code>/)
+        assert.match(section.body, /<code>nodejs\/src\/y\.ts<\/code>/)
+    })
+
+    it('counts the files the telemetry cut from a capped list', () => {
+        const crossLane = parseCrossLane({
+            cross_lane: true,
+            cross_lane_heavy_files: ['a.py', 'b.py', 'c.py', 'd.py'],
+            cross_lane_heavy_file_count: 150,
+            cross_lane_light_files: ['nodejs/src/y.ts'],
+        })
+        const section = buildTrunkLaneSection({ impactedTargets: ['node:ingestion', 'py:core'], crossLane })
+        assert.match(section.body, /<code>c\.py<\/code> and 147 more/)
+    })
+
+    it('gives no cross-lane warning when the file lists have the wrong shape', () => {
+        assert.equal(
+            parseCrossLane({ cross_lane: true, cross_lane_heavy_files: 'a.py', cross_lane_light_files: [1] }),
+            null
+        )
+    })
+
+    for (const testCase of [
+        {
+            name: 'reports a clean dependency scan',
+            input: {
+                scanned: 4,
+                skipped: 0,
+                flagged: [{ ecosystem: 'pypi', package: 'idna@3.10', label: 'low', score: 4.9, rules: [] }],
+            },
+            status: 'ok',
+            summary: 'clean, 4 packages scanned',
+        },
+        {
+            name: 'warns on a high-risk package',
+            input: {
+                scanned: 2,
+                skipped: 0,
+                flagged: [
+                    { ecosystem: 'npm', package: 'left-pad@1.3.1', label: 'high_risk', score: 8.8, rules: ['a|b'] },
+                ],
+            },
+            status: 'warn',
+            summary: '1 high-risk package',
+        },
+        {
+            name: 'warns on packages the scanner could not read',
+            input: {
+                scanned: 1,
+                skipped: 2,
+                flagged: [
+                    { ecosystem: 'go', package: 'example.com/m@v1.0.0', label: 'not_scanned', score: 0, rules: [] },
+                ],
+            },
+            status: 'warn',
+            summary: '3 packages not scanned',
+        },
+    ]) {
+        it(testCase.name, () => {
+            const section = buildDependencyScanSection(testCase.input)
+            assert.equal(section.status, testCase.status)
+            assert.equal(section.summary, testCase.summary)
+            assert.doesNotMatch(section.body.split('\n').at(-1), /a\|b/)
+        })
+    }
+
     it('renders a docs preview link after a successful trigger', () => {
         const section = buildDocsPreviewSection({
             triggerStatus: 'success',
@@ -181,5 +265,62 @@ describe('CI report section builders', () => {
         assert.match(ready.body, /https:\/\/hobby\.example\.com/)
         assert.equal(failed.status, 'fail')
         assert.match(failed.body, /line 2/)
+    })
+})
+
+describe('quarantined failures section', () => {
+    const report = `<?xml version="1.0"?><testsuites><testsuite name="pytest">
+        <testcase classname="posthog.api.test.test_a.TestA" name="test_passes" file="posthog/api/test/test_a.py"/>
+        <testcase classname="posthog.api.test.test_a.TestA" name="test_fails" file="posthog/api/test/test_a.py"><failure message="assert 400 == 201">boom</failure></testcase>
+        <testcase classname="posthog.api.test.test_a.TestA" name="test_errors[a&amp;b]" file="posthog/api/test/test_a.py"><error message="setup">boom</error></testcase>
+        <testcase classname="posthog.api.test.test_a.TestA" name="test_shared" file="posthog/api/test/test_a.py"><failure message="inherited">x</failure></testcase>
+        <testcase classname="posthog.api.test.test_a.TestB" name="test_shared" file="posthog/api/test/test_a.py"><failure message="other class">x</failure></testcase>
+        <testcase classname="posthog.api.test.test_a.TestA" name="test_skipped" file="posthog/api/test/test_a.py"><skipped message="s"/></testcase>
+    </testsuite></testsuites>`
+
+    it('lists each failing test with its class, even when another class has a test with the same name', () => {
+        assert.deepEqual(failedTestIds(report), [
+            'posthog/api/test/test_a.py::TestA::test_fails',
+            'posthog/api/test/test_a.py::TestA::test_errors[a&b]',
+            'posthog/api/test/test_a.py::TestA::test_shared',
+            'posthog/api/test/test_a.py::TestB::test_shared',
+        ])
+    })
+
+    it('refuses a report that declares entities', () => {
+        assert.deepEqual(failedTestIds(`<!DOCTYPE x [<!ENTITY a "b">]>${report}`), [])
+    })
+
+    it('reads shard and product reports from artifact directories', () => {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'junit-'))
+        fs.mkdirSync(path.join(dir, 'junit-results-backend-core-4'))
+        fs.writeFileSync(path.join(dir, 'junit-results-backend-core-4', 'junit-core.xml'), report)
+        for (const shard of ['0', '1']) {
+            fs.mkdirSync(path.join(dir, `product-junit-results-${shard}`))
+            fs.writeFileSync(path.join(dir, `product-junit-results-${shard}`, 'junit-product-surveys.xml'), report)
+        }
+        const shards = new Set(collectFailures(dir).map((failure) => failure.shard))
+        assert.deepEqual([...shards].sort(), ['core-4', 'products-0', 'products-1'])
+        assert.equal(collectFailures(dir).filter((failure) => failure.shard === 'core-4').length, 4)
+        assert.equal(collectFailures(path.join(dir, 'missing')), null)
+        assert.equal(collectFailures(fs.mkdtempSync(path.join(os.tmpdir(), 'junit-empty-'))), null)
+    })
+
+    it('warns with the count of failures and shards', () => {
+        const section = buildQuarantinedFailuresSection([
+            { shard: 'core-4', test: 'a.py::one' },
+            { shard: 'core-4', test: 'a.py::two' },
+            { shard: 'core-5', test: 'b.py::three' },
+        ])
+        assert.equal(section.status, 'warn')
+        assert.equal(section.summary, '3 quarantined failures in 2 shards')
+        assert.match(section.body, /\| core-5 \| `b\.py::three` \|/)
+    })
+
+    it('trusts the failures only when no test job failed or was cancelled', () => {
+        assert.equal(testJobsPassed(['success', 'skipped']), true)
+        assert.equal(testJobsPassed(['success', 'failure']), false)
+        assert.equal(testJobsPassed(['cancelled', 'success']), false)
+        assert.equal(testJobsPassed([undefined, 'success']), false)
     })
 })

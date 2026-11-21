@@ -1,18 +1,21 @@
 import gzip
 import json
 import threading
-from concurrent.futures import Future
-from datetime import datetime, timedelta
+from concurrent.futures import Future, ThreadPoolExecutor
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
-from posthog.test.base import BaseTest
+from posthog.test.base import BaseTest, ClickhouseTestMixin
 from unittest.mock import MagicMock, call, patch
 
+from django.test import SimpleTestCase
 from django.utils.dateparse import parse_datetime
 
 import dagster
 from parameterized import parameterized
 
+from posthog.clickhouse.client import sync_execute
+from posthog.clickhouse.query_log_archive import SHARDED_QUERY_LOG_ARCHIVE_V3_TABLE
 from posthog.clickhouse.query_tagging import Feature, get_query_tags, reset_query_tags, tag_queries
 from posthog.exceptions import ClickHouseAtCapacity
 from posthog.hogql_queries.query_runner import ExecutionMode
@@ -21,6 +24,7 @@ from posthog.models.instance_setting import override_instance_config
 from posthog.query_cache import EntryFreshness
 from posthog.scheduling.jitter import deterministic_offset
 
+from products.web_analytics.backend.hogql_queries.web_analytics_query_runner import WebAnalyticsQueryRunner
 from products.web_analytics.backend.hogql_queries.web_lazy_precompute_common import is_background_warming_request
 from products.web_analytics.backend.models.web_analytics_filter_preset import WebAnalyticsFilterPreset
 from products.web_analytics.dags import cache_warming
@@ -43,7 +47,7 @@ from products.web_analytics.dags.cache_warming import (
 )
 
 
-class TestMaybeOptIntoLazyPrecompute(BaseTest):
+class TestMaybeOptIntoLazyPrecompute(SimpleTestCase):
     def test_web_query_gets_opt_in(self) -> None:
         # If this breaks, the warmer silently stops building precompute buckets
         # for replayed shapes wherever the opt-in default still applies.
@@ -66,7 +70,7 @@ class TestMaybeOptIntoLazyPrecompute(BaseTest):
         self.assertEqual(maybe_opt_into_lazy_precompute(query), query)
 
 
-class TestMaybeExpandWarmingDateRange(BaseTest):
+class TestMaybeExpandWarmingDateRange(SimpleTestCase):
     @parameterized.expand(
         [
             # Sub-30d ranges deepen to -30d; if these stop expanding, warming
@@ -123,7 +127,7 @@ class TestMaybeExpandWarmingDateRange(BaseTest):
         self.assertEqual(maybe_expand_warming_date_range(query), query)
 
 
-class TestDeepenToWidestWarmableRange(BaseTest):
+class TestDeepenToWidestWarmableRange(SimpleTestCase):
     @parameterized.expand(
         [
             # Deepen to the widest exact range the shape's demand covers, so one
@@ -334,7 +338,7 @@ class TestBuildReplayRunner(BaseTest):
         self.assertEqual(base_runner.get_cache_key(), variant_runner.get_cache_key())
 
 
-class TestCanonicalizeLazyReplay(BaseTest):
+class TestCanonicalizeLazyReplay(SimpleTestCase):
     @parameterized.expand(
         [
             ("steps_up_to_next_multiple", "-31d", "-45d"),
@@ -515,18 +519,39 @@ class TestFleetQuerySelection(BaseTest):
             ],
         )
 
+    @parameterized.expand(
+        [
+            # The archive path drops preset ids, so only the preset lane may still pay
+            # for the system.query_log scan.
+            ("archive", False, "FROM query_log_archive", "system.query_log"),
+            ("preset_lane_query_log", True, "system.query_log", "query_log_archive"),
+        ]
+    )
+    @patch("products.web_analytics.dags.cache_warming._apply_preset_lane", side_effect=lambda _c, rows, _m, _e: rows)
     @patch("products.web_analytics.dags.cache_warming.sync_execute", return_value=[])
-    def test_selection_sql_survives_driver_percent_formatting(self, mock_exec: MagicMock) -> None:
+    def test_selection_reads_the_source_its_lane_needs(
+        self,
+        _name: str,
+        preset_lane: bool,
+        expected_source: str,
+        unexpected_source: str,
+        mock_exec: MagicMock,
+        _mock_lane: MagicMock,
+    ) -> None:
         # clickhouse_driver %-formats the query when params are passed, so literal
         # % (the LIKE prefilter) must be written as %%. A bare % would crash only
         # in production, because tests mock sync_execute away.
-        queries_to_keep_fresh(dagster.build_op_context(), days=2, minimum_query_count=10, max_shapes=100)
+        queries_to_keep_fresh(
+            dagster.build_op_context(), days=2, minimum_query_count=10, max_shapes=100, preset_lane=preset_lane
+        )
 
         sql, params = mock_exec.call_args[0]
         rendered = sql % dict.fromkeys(params, "1")  # what the driver's substitution does
 
-        self.assertIn("LIKE '%Web%'", rendered)
-        self.assertIn("system.query_log", rendered)
+        self.assertIn(expected_source, rendered)
+        self.assertNotIn(unexpected_source, rendered)
+        if preset_lane:
+            self.assertIn("""LIKE '%"kind":"Web%'""", rendered)
 
     @patch("products.web_analytics.dags.cache_warming._read_cached_warmable_queries", return_value=None)
     @patch("products.web_analytics.dags.cache_warming._write_cached_warmable_queries")
@@ -568,6 +593,100 @@ class TestFleetQuerySelection(BaseTest):
         self.assertIsInstance(entry["normalized_query_hash"], int)
 
 
+class TestFleetQuerySelectionFromArchive(ClickhouseTestMixin, BaseTest):
+    def setUp(self) -> None:
+        super().setUp()
+        sync_execute(f"TRUNCATE TABLE {SHARDED_QUERY_LOG_ARCHIVE_V3_TABLE}")
+
+    def _insert_chain(
+        self,
+        chain_id: str,
+        query: dict,
+        lc_kind: str = "request",
+        lc_id: str = "",
+        status: str = "QueryFinish",
+        query_type: str = "web_overview_query",
+    ) -> None:
+        sync_execute(
+            f"""
+            INSERT INTO {SHARDED_QUERY_LOG_ARCHIVE_V3_TABLE}
+                (initial_query_start_time, team_id, initial_query_id, is_initial_query, type,
+                 query_kind_by_root, lc_kind, lc_id, lc_feature, lc_query_type, lc_query__kind, lc_query)
+            VALUES (now64(6), %(team_id)s, %(chain_id)s, 1, %(status)s,
+                    (1, 'Select'), %(lc_kind)s, %(lc_id)s, 'query', %(query_type)s, %(kind)s, %(lc_query)s)
+            """,
+            {
+                "team_id": self.team.pk,
+                "chain_id": chain_id,
+                "status": status,
+                "lc_kind": lc_kind,
+                "lc_id": lc_id,
+                "query_type": query_type,
+                "kind": query["kind"],
+                "lc_query": json.dumps(query),
+            },
+        )
+
+    # The archive has no trigger tag, so background replays are told apart from user
+    # reads by kind and celery task id. Any of them leaking in keeps a shape hot forever.
+    @parameterized.expand(
+        [
+            ("dagster_warmer_without_kind", "", ""),
+            (
+                "stale_revalidation_task",
+                "celery",
+                "products.web_analytics.backend.tasks.lazy_precompute_revalidation.revalidate_web_analytics_precompute",
+            ),
+            ("insight_cache_warmer_task", "celery", "posthog.caching.warming.warm_insight_cache_task"),
+            ("temporal_workflow", "temporal", ""),
+        ]
+    )
+    def test_counts_user_reads_and_ignores_background_replays(
+        self, _name: str, background_kind: str, background_task_id: str
+    ) -> None:
+        user_shape = {"kind": "WebOverviewQuery", "dateRange": {"date_from": "-7d"}, "properties": []}
+        background_shape = {"kind": "WebStatsTableQuery", "breakdownBy": "Page", "dateRange": {"date_from": "-7d"}}
+        self._insert_chain("user-sync", user_shape)
+        # A dashboard tile computed asynchronously on a user's behalf lands in the archive as
+        # celery with the async query task's id. Without it the shape misses the demand floor.
+        self._insert_chain(
+            "user-async",
+            {**user_shape, "dateRange": {"date_from": "-30d"}},
+            lc_kind="celery",
+            lc_id="posthog.tasks.tasks.process_query_task",
+        )
+        self._insert_chain("failed", user_shape, status="ExceptionWhileProcessing")
+        self._insert_chain("bucket-build", user_shape, query_type="web_overview_lazy_insert")
+        for index in range(2):
+            self._insert_chain(
+                f"background-{index}", background_shape, lc_kind=background_kind, lc_id=background_task_id
+            )
+
+        result = queries_to_keep_fresh(dagster.build_op_context(), days=1, minimum_query_count=2, max_shapes=100)
+
+        rows = [row for row in result if row["team_id"] == self.team.pk]
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["query_json"]["kind"], "WebOverviewQuery")
+        self.assertEqual(rows[0]["query_count"], 2)
+        self.assertEqual(sorted(rows[0]["observed_date_froms"]), ["-30d", "-7d"])
+
+    @parameterized.expand([("experiment_team", True, 1), ("other_team", False, 0)])
+    def test_experiment_teams_select_shapes_below_the_demand_floor(
+        self, _name: str, in_experiment: bool, expected_rows: int
+    ) -> None:
+        self._insert_chain("single-read", {"kind": "WebOverviewQuery", "dateRange": {"date_from": "-7d"}})
+
+        result = queries_to_keep_fresh(
+            dagster.build_op_context(),
+            days=1,
+            minimum_query_count=2,
+            max_shapes=100,
+            experiment_team_ids=frozenset({self.team.pk}) if in_experiment else frozenset(),
+        )
+
+        self.assertEqual(len([row for row in result if row["team_id"] == self.team.pk]), expected_rows)
+
+
 class TestPresetLane(BaseTest):
     """The preset lane selects shapes a team ran under a saved filter preset, below the
     demand floor. Everything here guards the two things that keeps honest: only real
@@ -601,7 +720,9 @@ class TestPresetLane(BaseTest):
             representative_tagged,
         )
 
-    def _select(self, rows: list[tuple], minimum_query_count: int = 5) -> list[dict]:
+    def _select(
+        self, rows: list[tuple], minimum_query_count: int = 5, experiment_team_ids: frozenset[int] = frozenset()
+    ) -> list[dict]:
         with patch("products.web_analytics.dags.cache_warming.sync_execute", return_value=rows):
             return queries_to_keep_fresh(
                 dagster.build_op_context(),
@@ -609,6 +730,7 @@ class TestPresetLane(BaseTest):
                 minimum_query_count=minimum_query_count,
                 max_shapes=1000,
                 preset_lane=True,
+                experiment_team_ids=experiment_team_ids,
             )
 
     def test_preset_sql_bounds_ids_and_caps_priority(self) -> None:
@@ -639,6 +761,17 @@ class TestPresetLane(BaseTest):
 
         self.assertEqual([row["query_json"]["properties"][0]["key"] for row in result], ["tagged"])
         self.assertEqual(result[0]["preset_ids"], ["abc123"])
+
+    @parameterized.expand([("experiment_team", True, ["untagged"]), ("other_team", False, [])])
+    def test_experiment_teams_keep_untagged_shapes_below_the_demand_floor(
+        self, _name: str, in_experiment: bool, expected_shapes: list[str]
+    ) -> None:
+        result = self._select(
+            [self._row([], query_count=1, shape="untagged")],
+            experiment_team_ids=frozenset({self.team.pk}) if in_experiment else frozenset(),
+        )
+
+        self.assertEqual([row["query_json"]["properties"][0]["key"] for row in result], expected_shapes)
 
     @parameterized.expand(
         [
@@ -837,6 +970,45 @@ class TestWarmQueriesOp(BaseTest):
                         "normalized_query_hash": "h",
                         "preset_ids": preset_ids,
                         "representative_preset_tagged": representative_preset_tagged,
+                    }
+                ],
+            )
+
+        self.assertEqual(runner.run.call_count, expected_runs)
+
+    @parameterized.expand(
+        [
+            ("predictive_unlikely_skipped", "predictive", 0.05, 0),
+            ("predictive_likely_warms", "predictive", 0.5, 1),
+            ("predictive_unscored_warms", "predictive", None, 1),
+            ("current_unlikely_still_warms", "current", 0.05, 1),
+        ]
+    )
+    def test_model_only_gates_the_predictive_arm(
+        self, _name: str, arm: str, probability: float | None, expected_runs: int
+    ) -> None:
+        runner = MagicMock(spec=WebAnalyticsQueryRunner)
+        runner.get_cache_key.return_value = f"key-{_name}"
+        with (
+            patch(
+                "products.web_analytics.dags.cache_warming.build_replay_runner",
+                return_value=(runner, {}, True),
+            ),
+            patch("products.web_analytics.dags.cache_warming.QueryCache") as mock_cm,
+            patch("products.web_analytics.dags.cache_warming.warming_arm", return_value=arm),
+            patch.object(cache_warming._TeamDemand, "request_probability", return_value=probability),
+        ):
+            mock_cm.return_value.freshness.return_value = None
+            warm_queries_op(
+                dagster.build_op_context(),
+                WarmQueriesConfig(),
+                [
+                    {
+                        "team_id": self.team.pk,
+                        "query_json": {"kind": "WebOverviewQuery", "properties": []},
+                        "query_count": 5,
+                        "representative_query_count": 5,
+                        "normalized_query_hash": "h",
                     }
                 ],
             )
@@ -1439,3 +1611,28 @@ class TestWarmQueriesOp(BaseTest):
         )
 
         mock_capture.assert_not_called()
+
+
+class TestTeamDemand(SimpleTestCase):
+    NOW = datetime(2026, 11, 18, 10, 30, tzinfo=UTC)
+
+    @parameterized.expand(
+        [
+            ("read_history", True, {"shape": [datetime(2026, 11, 17, 10, tzinfo=UTC)]}, True, 1),
+            ("no_read_history", True, {}, False, 1),
+            ("redis_down", True, ConnectionError("down"), False, 1),
+            ("recording_off", False, {"shape": [datetime(2026, 11, 17, 10, tzinfo=UTC)]}, False, 0),
+        ]
+    )
+    def test_each_team_loads_its_history_once_and_is_scored_only_with_history(
+        self, _name: str, history_available: bool, history: object, scored: bool, expected_loads: int
+    ) -> None:
+        load = MagicMock(side_effect=history) if isinstance(history, Exception) else MagicMock(return_value=history)
+        demand = cache_warming._TeamDemand(now=self.NOW, history_available=history_available)
+
+        with patch("products.web_analytics.dags.cache_warming.shape_read_hours", load):
+            with ThreadPoolExecutor(max_workers=8) as pool:
+                probabilities = list(pool.map(lambda _: demand.request_probability(1, "shape"), range(16)))
+
+        self.assertEqual({probability is not None for probability in probabilities}, {scored})
+        self.assertEqual(load.call_count, expected_loads)

@@ -14,7 +14,9 @@ detailed flow behind step 6 of `creating-an-endpoint` and the step 2 decision in
 | Callers can tolerate 5-15 minute staleness                   | The refresh interval becomes the freshness floor                     |
 | Variables are bounded — small known set of values            | Bucket overrides become tractable; the materialised view stays small |
 
-If two or more of these apply, materialise. If none apply, don't.
+If any of these apply, materialise. If none apply but code will still call the endpoint on a
+schedule, materialise anyway: one refresh per interval is cheap next to repeated inline reads, and
+the platform turns off a materialisation nobody calls for 30 days.
 
 ## When materialisation is wrong
 
@@ -22,12 +24,13 @@ If two or more of these apply, materialise. If none apply, don't.
   10-minute lag.
 - **High-cardinality variables.** If callers pass arbitrary `user_id` values, each materialised
   bucket is tiny and the refresh churn outweighs the read savings.
-- **Low-traffic endpoint.** If it's called once a day, the materialisation refresh costs more
-  than the inline reads would.
+- **Low-traffic endpoint on a short refresh.** Called once a day but refreshed every 5 minutes,
+  the refresh costs more than the inline reads would. Raise `data_freshness_seconds` to match
+  the call cadence before you give up on materialisation.
 - **Cohort breakdowns (insight endpoints).** Regular property breakdowns materialise fine, but
-  cohort breakdowns are rejected. Compare mode can materialise for eligible Trends endpoints
-  during its controlled rollout. It stores and computes both periods, so expect about twice the
-  storage and refresh work. Use `endpoints-materialization-preview` to confirm eligibility.
+  cohort breakdowns are rejected. Compare mode can materialise for Trends endpoints. It stores
+  and computes both periods, so expect about twice the storage and refresh work. Use
+  `endpoints-materialization-preview` to confirm eligibility.
 - **Query reads `now()` / `today()` directly.** Replace with a variable; otherwise the
   materialised result is anchored to the refresh time, not the call time.
 
@@ -39,7 +42,7 @@ rejection reasons:
 | Reason                                         | What it means                                                                                                                                                               | Fix                                                                                           |
 | ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
 | `Cohort breakdowns are not supported`          | Cohort breakdowns produce a UNION ALL the transform can't tag by series                                                                                                     | Use a property breakdown, or split into separate endpoints, one per cohort                    |
-| `Compare mode is not supported`                | The query is not a Trends query, or the project is not in the compare-mode materialisation rollout                                                                          | Keep it inline, drop compare mode, or expose the comparison window as a variable              |
+| `Compare mode is only supported`               | Compare mode is set on a query that is not a Trends query                                                                                                                   | Keep it inline, drop compare mode, or expose the comparison window as a variable              |
 | `Query has unresolved variables`               | A variable in the query has no default and the materialisation can't pick a value                                                                                           | Set defaults for all variables                                                                |
 | `Query references non-deterministic functions` | `now()`, `today()`, `rand()` change between refresh runs                                                                                                                    | Replace with a `date_from` / `date_to` variable                                               |
 | `CTE variables with JOINs … not supported`     | A variable filter combined with a top-level `JOIN` changes joined-row cardinality, silently producing wrong results (e.g. `LEFT JOIN` non-matches lose the variable column) | Filter inside a subquery/CTE, then join the result — don't apply the variable across the JOIN |

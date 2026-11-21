@@ -5,6 +5,8 @@ import { SaveAsMenuItem } from 'scenes/data-warehouse/editor/editorSceneLogic'
 import { sqlEditorLogic } from 'scenes/data-warehouse/editor/sqlEditorLogic'
 import { SQLEditorMode } from 'scenes/data-warehouse/editor/sqlEditorModes'
 
+import type { DataWarehouseSavedQueryIncremental } from '~/types'
+
 export interface LogsSqlEditorTrackingLogicProps {
     sqlEditorTabId: string
 }
@@ -17,9 +19,11 @@ const captureSaved = (target: SaveAsMenuItem['action']): void => {
 export interface logsSqlEditorTrackingLogicActions {
     sqlEditorRunQuery: (
         queryOverride?: string | undefined,
-        switchTab?: boolean | undefined
+        switchTab?: boolean | undefined,
+        reuseResults?: boolean | undefined
     ) => {
         queryOverride: string | undefined
+        reuseResults: boolean
         switchTab: boolean | undefined
     } // sqlEditorLogic
     sqlEditorSaveAsEndpointSubmit: (
@@ -45,11 +49,13 @@ export interface logsSqlEditorTrackingLogicActions {
         folderId?: string | null | undefined,
         isTest?: any,
         queryOverride?: string | undefined,
-        incremental?: import('~/types').DataWarehouseSavedQueryIncremental | undefined
+        incremental?: DataWarehouseSavedQueryIncremental | undefined,
+        description?: string | undefined
     ) => {
+        description: string | undefined
         folderId: string | null | undefined
         fromDraft: string | undefined
-        incremental: import('~/types').DataWarehouseSavedQueryIncremental | undefined
+        incremental: DataWarehouseSavedQueryIncremental | undefined
         isTest: any
         materializeAfterSave: any
         name: string

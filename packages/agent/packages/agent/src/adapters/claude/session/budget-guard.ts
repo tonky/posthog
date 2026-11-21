@@ -1,4 +1,5 @@
 import type { HookCallback, HookInput } from "@anthropic-ai/claude-agent-sdk";
+import { isGitlabRun } from "@posthog/git/gitlab";
 import type { Logger } from "../../../utils/logger";
 
 export const BUDGET_CAP_ENV = "AI_GATEWAY_TOKEN_CAP_USD";
@@ -9,6 +10,7 @@ export const BUDGET_CRITICAL_RATIO = 0.7;
 export const BUDGET_STOP_RATIO = 0.9;
 export const FAST_MODE_PRICE_MULTIPLIER = 2;
 export const ONE_HOUR_CACHE_WRITE_INPUT_MULTIPLIER = 2;
+export const BUDGET_STEER_MAX_ATTEMPTS = 3;
 
 export type BudgetStage = "ok" | "warn" | "critical";
 export type BudgetSteerStage = Exclude<BudgetStage, "ok">;
@@ -77,6 +79,10 @@ const OPUS_PRICE: ModelPrice = {
 
 export const DEFAULT_MODEL_PRICES: readonly ModelPriceRule[] = [
   {
+    match: /(fable|mythos)-5-2/i,
+    price: { input: 8, output: 40, cacheRead: 0.2, cacheWrite: 10 },
+  },
+  {
     match: /fable|mythos/i,
     price: { input: 10, output: 50, cacheRead: 1, cacheWrite: 12.5 },
   },
@@ -104,6 +110,10 @@ export const DEFAULT_MODEL_PRICES: readonly ModelPriceRule[] = [
   {
     match: /kimi/i,
     price: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3 },
+  },
+  {
+    match: /deepseek-v4\.1-flash-1017-fast/i,
+    price: { input: 0.6, output: 2.4, cacheRead: 0.014, cacheWrite: 0.6 },
   },
   {
     match: /deepseek/i,
@@ -207,6 +217,7 @@ export class RunBudgetGuard {
   private steerMode: BudgetSteerMode;
   private readonly steers: BudgetSteerRecord[] = [];
   private stopTaken = false;
+  private gitlab = false;
 
   constructor(
     readonly capUsd: number,
@@ -230,7 +241,9 @@ export class RunBudgetGuard {
     const prices =
       parseModelPricesJson(env[BUDGET_PRICES_ENV], logger) ??
       DEFAULT_MODEL_PRICES;
-    return new RunBudgetGuard(capUsd, prices, logger, mode);
+    const guard = new RunBudgetGuard(capUsd, prices, logger, mode);
+    guard.gitlab = isGitlabRun(env);
+    return guard;
   }
 
   get mode(): BudgetSteerMode {
@@ -326,6 +339,15 @@ export class RunBudgetGuard {
     return stage;
   }
 
+  hasRetryableSteer(): boolean {
+    const stage = this.pendingSteer;
+    if (!stage) return false;
+    const attempts = this.steers.filter(
+      (steer) => steer.stage === stage,
+    ).length;
+    return attempts > 0 && attempts < BUDGET_STEER_MAX_ATTEMPTS;
+  }
+
   markUndelivered(stage: BudgetSteerStage): void {
     if (STAGE_RANK[stage] <= STAGE_RANK[this.deliveredStage]) return;
     if (
@@ -370,6 +392,22 @@ export class RunBudgetGuard {
   steerText(stage: BudgetSteerStage): string {
     const spent = formatUsd(this.spentUsd);
     const cap = formatUsd(this.capUsd);
+    if (this.gitlab) {
+      const publish =
+        "Stage and commit your changes with git commit, push with git push, and open or update the merge request using gitlab_merge_request. ";
+      const instruction =
+        this.mode === "publish"
+          ? publish
+          : "If the user requested a merge request, " + publish;
+      return (
+        `Budget ${stage === "critical" ? "critical" : "notice"}: this run has used about ${spent} of its ${cap} model budget. Wrap up now. ` +
+        instruction +
+        (stage === "critical"
+          ? "The gateway will refuse further calls very soon. Do not start subagents or workflows, or run further tests. "
+          : "Skip optional checks and parallel subagents. ") +
+        "End your turn with a summary of what is done and what remains."
+      );
+    }
     if (this.mode === "publish") {
       if (stage === "critical") {
         return (
@@ -437,7 +475,9 @@ export class RunBudgetGuard {
       );
       const next =
         this.mode === "publish"
-          ? "Commit what is on disk with the git_signed_commit tool and open or update the pull request yourself."
+          ? this.gitlab
+            ? "Commit with git commit, push with git push, and open or update the merge request with gitlab_merge_request."
+            : "Commit what is on disk with the git_signed_commit tool and open or update the pull request yourself."
           : "Finish with the result you have.";
       return {
         continue: true,

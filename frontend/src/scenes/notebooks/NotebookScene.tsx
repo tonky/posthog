@@ -13,9 +13,14 @@ import { FEATURE_FLAGS } from 'lib/constants'
 import { useFileSystemLogView } from 'lib/hooks/useFileSystemLogView'
 import { featureFlagLogic } from 'lib/logic/featureFlagLogic'
 import { cn } from 'lib/utils/css-classes'
+import { AnalyticsScenePinButton } from 'scenes/analytics/AnalyticsScenePinButton'
 import { SceneExport } from 'scenes/sceneTypes'
 
 import { SceneBreadcrumbBackButton } from '~/layout/scenes/components/SceneBreadcrumbs'
+import { SceneTitleSection } from '~/layout/scenes/components/SceneTitleSection'
+import { todayShellLogic } from '~/layout/today/todayShellLogic'
+
+import { NotebookAppScene } from 'products/notebooks/frontend/AppBuilder/NotebookAppScene'
 
 import { Notebook } from './Notebook/Notebook'
 import { NotebookLoadingState } from './Notebook/NotebookLoadingState'
@@ -50,6 +55,7 @@ export const scene: SceneExport<NotebookSceneLogicProps> = {
 }
 
 export function NotebookScene(): JSX.Element {
+    const [collapsedToolbarContainer, setCollapsedToolbarContainer] = useState<HTMLDivElement | null>(null)
     const { notebookId, loading } = useValues(notebookSceneLogic)
     const { createNotebook } = useActions(notebookSceneLogic)
     const { notebook, accessDeniedToNotebook } = useValues(
@@ -60,6 +66,7 @@ export function NotebookScene(): JSX.Element {
     const [isMarkdownSourceOpen, setIsMarkdownSourceOpen] = useState(false)
     const { featureFlags } = useValues(featureFlagLogic)
     const sceneMenuBarEnabled = !!featureFlags[FEATURE_FLAGS.SCENE_MENU_BAR]
+    const { todayRailEnabled } = useValues(todayShellLogic)
 
     useEffect(() => {
         if (notebookId === 'new') {
@@ -131,9 +138,18 @@ export function NotebookScene(): JSX.Element {
     return (
         <>
             <NotebookSceneMenuBar shortId={notebookId} />
-            <div className={cn('flex items-center justify-between', sceneMenuBarEnabled && 'mt-2')}>
+            {/* Under the Today layout the title row carries the breadcrumbs, as on every other scene. */}
+            {todayRailEnabled && (
+                <SceneTitleSection
+                    name={notebook?.title || 'Unnamed'}
+                    isLoading={!notebook}
+                    resourceType={{ type: 'notebook' }}
+                    nameAction={<AnalyticsScenePinButton dataAttrKey="notebook" />}
+                />
+            )}
+            <div className={cn('flex flex-wrap gap-2 items-center justify-between', sceneMenuBarEnabled && 'mt-2')}>
                 <div className="flex gap-2 items-center">
-                    <SceneBreadcrumbBackButton />
+                    {!todayRailEnabled && <SceneBreadcrumbBackButton />}
                     {isTemplate && <LemonTag type="highlight">TEMPLATE</LemonTag>}
                     <UserActivityIndicator at={notebook?.last_modified_at} by={notebook?.last_modified_by} />
                     <BindLogic logic={notebookLogic} props={{ shortId: notebookId, target: NotebookTarget.Scene }}>
@@ -142,7 +158,8 @@ export function NotebookScene(): JSX.Element {
                     </BindLogic>
                 </div>
 
-                <div className="flex gap-2 items-center">
+                <div className="flex flex-wrap gap-2 items-center justify-end ml-auto">
+                    <div ref={setCollapsedToolbarContainer} className="shrink-0 empty:hidden" />
                     <NotebookSyncInfo shortId={notebookId} />
                     <NotebookPresence shortId={notebookId} />
 
@@ -190,13 +207,16 @@ export function NotebookScene(): JSX.Element {
                 <NotebookRunAllBanner shortId={notebookId} />
             </BindLogic>
 
-            <Notebook
-                key={notebookId}
-                shortId={notebookId}
-                editable={!isTemplate}
-                markdownSourceOpen={isMarkdownSourceOpen}
-                onMarkdownSourceOpenChange={setIsMarkdownSourceOpen}
-            />
+            <NotebookAppScene shortId={notebookId}>
+                <Notebook
+                    collapsedToolbarContainer={collapsedToolbarContainer}
+                    key={notebookId}
+                    shortId={notebookId}
+                    editable={!isTemplate}
+                    markdownSourceOpen={isMarkdownSourceOpen}
+                    onMarkdownSourceOpenChange={setIsMarkdownSourceOpen}
+                />
+            </NotebookAppScene>
             <NotebookShareModal shortId={notebookId} />
         </>
     )

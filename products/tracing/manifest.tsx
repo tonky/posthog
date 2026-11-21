@@ -6,6 +6,8 @@ import { urls } from 'scenes/urls'
 import { ProductItemCategory, ProductKey } from '~/queries/schema/schema-general'
 import { FileSystemIconColor, ProductManifest } from '~/types'
 
+import type { TracingSceneTab } from './frontend/tracingSceneLogic'
+
 export const manifest: ProductManifest = {
     name: 'Tracing',
     scenes: {
@@ -53,18 +55,21 @@ export const manifest: ProductManifest = {
     },
     redirects: {},
     urls: {
-        tracing: (): string => '/tracing',
+        tracing: (tab?: TracingSceneTab): string => (tab ? `/tracing?tab=${tab}` : '/tracing'),
         // Query params rather than path segments: span names ("GET /api/stats") contain slashes
         // and arbitrary characters that break path routing.
         tracingOperation: (
             serviceName: string,
             spanName: string,
-            dateRange?: { date_from?: string | null; date_to?: string | null }
+            dateRange?: { date_from?: string | null; date_to?: string | null },
+            // Narrows a bare-method span name ("GET") to the route an endpoint row stands for.
+            route?: { attribute: string; value: string } | null
         ): string =>
             combineUrl('/tracing/operation', {
                 service: serviceName,
                 name: spanName,
                 ...(dateRange ? { dateRange: JSON.stringify(dateRange) } : {}),
+                ...(route ? { route_attribute: route.attribute, route: route.value } : {}),
             }).url,
         tracingRetentionNew: (): string => '/tracing/retention-rules/new',
         tracingRetentionDetail: (id: string): string => `/tracing/retention-rules/${id}`,
@@ -82,6 +87,8 @@ export const manifest: ProductManifest = {
                 'var(--color-product-tracing-dark)',
             ] as FileSystemIconColor,
             href: urls.tracing(),
+            searchKeywords: ['traces', 'distributed tracing', 'apm', 'spans', 'latency'],
+            searchTabs: [{ name: 'SQL', href: urls.tracing('sql'), flag: FEATURE_FLAGS.TRACING_SCENE_TABS }],
             flag: FEATURE_FLAGS.TRACING,
             sceneKey: 'Tracing',
         },

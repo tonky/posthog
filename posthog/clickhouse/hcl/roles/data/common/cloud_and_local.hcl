@@ -104,34 +104,6 @@ database "posthog" {
     }
   }
 
-  table "cohort_membership" {
-    order_by = ["team_id", "cohort_id", "person_id"]
-    settings = {
-      index_granularity = "8192"
-    }
-    column "team_id" {
-      type = "Int64"
-    }
-    column "cohort_id" {
-      type = "Int64"
-    }
-    column "person_id" {
-      type = "UUID"
-    }
-    column "status" {
-      type = "Enum8('entered'=1, 'left'=2)"
-    }
-    column "last_updated" {
-      type    = "DateTime64(6)"
-      default = "now64()"
-    }
-    engine "replicated_replacing_merge_tree" {
-      zoo_path       = "/clickhouse/tables/noshard/posthog.cohort_membership"
-      replica_name   = "{replica}-{shard}"
-      version_column = "last_updated"
-    }
-  }
-
   table "distinct_id_usage" {
     column "team_id" {
       type = "Int64"
@@ -437,6 +409,13 @@ SQL
     column "entity_id" {
       type = "String"
     }
+    column "distinct_id" {
+      type = "String"
+    }
+    column "person_id" {
+      type    = "UUID"
+      default = "toUUIDOrZero(entity_id)"
+    }
     column "variant" {
       type = "String"
     }
@@ -463,65 +442,23 @@ SQL
       type    = "Date"
       default = "today() + toIntervalDay(7)"
     }
+    column "timestamp" {
+      type  = "DateTime64(6, 'UTC')"
+      alias = "first_exposure_time"
+    }
+    column "uuid" {
+      type  = "UUID"
+      alias = "exposure_event_uuid"
+    }
+    column "inserted_at" {
+      type  = "Nullable(DateTime64(6, 'UTC'))"
+      alias = "NULL"
+    }
     engine "distributed" {
       cluster_name    = "posthog"
       remote_database = "posthog"
       remote_table    = "sharded_experiment_exposures_preaggregated"
       sharding_key    = "cityHash64(entity_id)"
-    }
-  }
-
-  table "heatmaps" {
-    column "session_id" {
-      type = "String"
-    }
-    column "team_id" {
-      type = "Int64"
-    }
-    column "distinct_id" {
-      type = "String"
-    }
-    column "timestamp" {
-      type = "DateTime64(6, 'UTC')"
-    }
-    column "x" {
-      type = "Int16"
-    }
-    column "y" {
-      type = "Int16"
-    }
-    column "scale_factor" {
-      type = "Int16"
-    }
-    column "viewport_width" {
-      type = "Int16"
-    }
-    column "viewport_height" {
-      type = "Int16"
-    }
-    column "pointer_target_fixed" {
-      type = "Bool"
-    }
-    column "current_url" {
-      type = "String"
-    }
-    column "type" {
-      type = "LowCardinality(String)"
-    }
-    column "_timestamp" {
-      type = "DateTime"
-    }
-    column "_offset" {
-      type = "UInt64"
-    }
-    column "_partition" {
-      type = "UInt64"
-    }
-    engine "distributed" {
-      cluster_name    = "posthog"
-      remote_database = "posthog"
-      remote_table    = "sharded_heatmaps"
-      sharding_key    = "cityHash64(concat(toString(team_id), '-', session_id, '-', toString(toDate(timestamp))))"
     }
   }
 
@@ -549,7 +486,9 @@ SQL
     }
   }
 
-  table "log_entries" {
+  # Main-cluster reader over sharded_log_entries, kept as the rollback target for log_entries
+  # reads. The app-facing `log_entries` aux reader comes from roles/coshared/log_entries_aux.
+  table "log_entries_distributed" {
     column "team_id" {
       type = "UInt64"
     }
@@ -1102,6 +1041,13 @@ SQL
     column "entity_id" {
       type = "String"
     }
+    column "distinct_id" {
+      type = "String"
+    }
+    column "person_id" {
+      type    = "UUID"
+      default = "toUUIDOrZero(entity_id)"
+    }
     column "variant" {
       type = "String"
     }
@@ -1127,6 +1073,18 @@ SQL
     column "expires_at" {
       type    = "Date"
       default = "today() + toIntervalDay(7)"
+    }
+    column "timestamp" {
+      type  = "DateTime64(6, 'UTC')"
+      alias = "first_exposure_time"
+    }
+    column "uuid" {
+      type  = "UUID"
+      alias = "exposure_event_uuid"
+    }
+    column "inserted_at" {
+      type  = "Nullable(DateTime64(6, 'UTC'))"
+      alias = "NULL"
     }
     engine "replicated_replacing_merge_tree" {
       zoo_path       = "/clickhouse/tables/{shard}/posthog.experiment_exposures_preaggregated"

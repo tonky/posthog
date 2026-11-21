@@ -24,17 +24,25 @@ from posthog.models import Organization, OrganizationMembership, Team, User
 from posthog.models.integration import Integration
 from posthog.models.scoping import team_scope
 from posthog.sync import database_sync_to_async
+from posthog.test.cascade_delete import delete_skipping_empty_tables
 
 from products.access_control.backend.models.access_control import AccessControl
 from products.signals.backend.models import SignalScoutConfig, SignalScoutSuggestionSet, SignalSourceConfig
+from products.signals.backend.scout_chat import SCOUT_CHAT_TEMPLATES, SCOUT_REFINE_SUGGESTION_PROMPT
+from products.signals.backend.scout_harness.lazy_seed import HARNESS_SEEDED_BY
 from products.signals.backend.scout_harness.suggestions import (
+    ACTIVITY_READ_MAX_ROWS,
+    ACTIVITY_READ_MAX_ROWS_READ,
     MAX_DESCRIPTION_CHARS,
+    FleetContext,
     PlannedSuggestionRun,
     ScoutSuggestionBatch,
     ScoutSuggestionItem,
     SuggestionSettings,
     TeamActivity,
+    build_suggestions_prompt,
     dismiss_suggestion,
+    fleet_context,
     mark_generation_failed,
     mark_suggestion_created,
     parse_suggestion_settings,
@@ -43,13 +51,17 @@ from products.signals.backend.scout_harness.suggestions import (
     read_team_activity,
     reserved_scout_names,
     select_teams_to_scan,
+    set_up_team_q,
     stamp_requested,
     team_is_active_enough,
     visible_items,
 )
 from products.signals.backend.scout_harness.suggestions_runner import arun_scout_suggestions, validate_suggestion_items
 from products.skills.backend.models.skills import LLMSkill
+from products.tasks.backend.facade.profiles import get_task_profile
 from products.tasks.backend.models import Task
+
+SCOUT_SUGGESTIONS_PROFILE = get_task_profile("signals.scout_suggestions")
 
 CANONICAL = {"signals-scout-general", "signals-scout-error-tracking"}
 
@@ -97,6 +109,7 @@ class TestSuggestionSettings(SimpleTestCase):
             ("overridden", {"activity_window_days": 7, "min_events_in_window": 50}, 7, 50, 3),
             ("checks_off", {"min_events_in_window": 0, "min_active_days_in_window": 0}, 14, 0, 0),
             ("clamped", {"activity_window_days": 900, "min_active_days_in_window": -1}, 90, 100, 0),
+            ("events_clamped", {"min_events_in_window": 10**9}, 14, ACTIVITY_READ_MAX_ROWS, 3),
         ]
     )
     def test_activity_knobs(self, _name, extra, window_days, min_events, min_days):
@@ -110,6 +123,27 @@ class TestSuggestionSettings(SimpleTestCase):
     def test_allowlist_ignores_non_int_entries(self):
         settings = parse_suggestion_settings({"enabled": True, "team_allowlist": [2, "3", True, 4]})
         self.assertEqual(settings.team_allowlist, frozenset({2, 4}))
+
+
+class TestBuiltinSkillReads(SimpleTestCase):
+    @parameterized.expand(
+        [
+            (
+                "suggestions",
+                build_suggestions_prompt(FleetContext(enabled_skill_names=(), available_canonical=())),
+                "authoring-scouts",
+            ),
+            ("author_scout", SCOUT_CHAT_TEMPLATES["author_scout"][1], "authoring-scouts"),
+            ("fleet_overview", SCOUT_CHAT_TEMPLATES["fleet_overview"][1], "exploring-scouts"),
+            ("recent_signals", SCOUT_CHAT_TEMPLATES["recent_signals"][1], "exploring-scouts"),
+            ("refine", SCOUT_REFINE_SUGGESTION_PROMPT.format(suggestion="draft"), "authoring-scouts"),
+        ]
+    )
+    def test_prompt_reads_the_builtin_skill_locally(self, _name, prompt, skill_name):
+        self.assertIn(f"{skill_name} is a built-in PostHog skill installed in this sandbox", prompt)
+        self.assertIn("do not fetch it with `skill-get`", prompt)
+        self.assertNotIn("from the PostHog MCP", prompt)
+        self.assertNotIn("If the skill is unavailable", prompt)
 
 
 class TestValidateSuggestionItems(SimpleTestCase):
@@ -261,6 +295,14 @@ class TestSuggestionPersistence(BaseTest):
         visible = visible_items(row, enabled_skill_names={"signals-scout-error-tracking"})
         self.assertEqual([record["skill_name"] for record in visible], ["signals-scout-checkout-drop"])
 
+    @parameterized.expand([("authoring-scouts",), ("exploring-replay-vision-observations",)])
+    def test_companion_skills_are_never_offered_as_picks(self, companion):
+        self.assertNotIn(companion, {name for name, _ in fleet_context(self.team.id).available_canonical})
+        row = persist_suggestion_batch(
+            self.team.id, [_item(skill_name=companion), _custom()], task_run_id=None, model=None, fleet_snapshot=[]
+        )
+        self.assertEqual([record["skill_name"] for record in visible_items(row)], ["signals-scout-checkout-drop"])
+
     def test_failed_generation_keeps_prior_items_and_counts_toward_breaker(self):
         persist_suggestion_batch(self.team.id, [_item()], task_run_id=None, model=None, fleet_snapshot=[])
         row = mark_generation_failed(self.team.id, task_run_id=None)
@@ -332,6 +374,45 @@ class TestPlanSuggestionRuns(BaseTest):
 
         tier_one_only = plan_suggestion_runs(SuggestionSettings(enabled=True, eligibility_tier=1), self.now)
         self.assertEqual([run.team_id for run in tier_one_only], [engaged_overdue.id])
+
+    @parameterized.expand(
+        [
+            ("background_only", [("signals-scout-general", True)], False),
+            ("operational_only", [("signals-scout-inbox-validation", False)], False),
+            (
+                "background_plus_seeded_operational",
+                [("signals-scout-general", True), ("signals-scout-inbox-validation", False)],
+                False,
+            ),
+            ("person_enabled_specialist", [("signals-scout-general", False)], True),
+            (
+                "person_enabled_specialist_plus_operational",
+                [("signals-scout-apm", False), ("signals-scout-inbox-validation", False)],
+                True,
+            ),
+            ("team_skill_under_operational_name", [("signals-scout-inbox-validation", False)], True, False),
+        ]
+    )
+    def test_set_up_ignores_background_and_operational_scouts(
+        self, _name, scouts, expected_set_up, operational_seeded=True
+    ):
+        team = self._team("candidate")
+        LLMSkill.objects.create(
+            team=team,
+            name="signals-scout-inbox-validation",
+            description="d",
+            body="b",
+            metadata={"seeded_by": HARNESS_SEEDED_BY} if operational_seeded else {},
+        )
+        for skill_name, background in scouts:
+            SignalScoutConfig.objects.create(
+                team=team,
+                skill_name=skill_name,
+                enabled=True,
+                managed_by=SignalScoutConfig.ManagedBy.BACKGROUND if background else SignalScoutConfig.ManagedBy.TEAM,
+            )
+
+        self.assertEqual(Team.objects.filter(set_up_team_q(), id=team.id).exists(), expected_set_up)
 
     def test_a_scout_a_person_created_counts_as_engagement(self):
         # Creation stamps `created_by` but no status transition, so `status_changed_by` stays
@@ -665,6 +746,28 @@ class TestSelectTeamsToScan(BaseTest):
         self.assertEqual(selection.skipped_team_ids, ())
         self.assertIsNone(self._status(self.quiet))
 
+    def test_each_read_outcome_is_counted(self):
+        broken = self._team("broken-read")
+        reads = {
+            self.quiet.id: TeamActivity(event_count=12, active_days=1, capped=False),
+            self.busy.id: TeamActivity(event_count=ACTIVITY_READ_MAX_ROWS, active_days=0, capped=True),
+        }
+
+        def _read(team_id, **_):
+            if team_id == broken.id:
+                raise Exception("clickhouse is down")
+            return reads[team_id]
+
+        with patch("products.signals.backend.scout_harness.suggestions.read_team_activity", side_effect=_read):
+            selection = select_teams_to_scan(
+                self._planned(self.quiet, self.busy, broken), self.suggestion_settings, limit=10
+            )
+
+        self.assertEqual(
+            (selection.reads_answered, selection.reads_capped, selection.reads_failed),
+            (1, 1, 1),
+        )
+
 
 class TestReadTeamActivity(ClickhouseTestMixin, BaseTest):
     def test_counts_the_project_and_its_environments_inside_the_window(self):
@@ -698,6 +801,8 @@ class TestReadTeamActivity(ClickhouseTestMixin, BaseTest):
         self.assertEqual(kwargs["workload"], Workload.OFFLINE)
         self.assertGreater(kwargs["settings"]["max_execution_time"], 0)
         self.assertEqual(kwargs["settings"]["timeout_overflow_mode"], "throw")
+        self.assertEqual(kwargs["settings"]["max_rows_to_read"], ACTIVITY_READ_MAX_ROWS_READ)
+        self.assertGreater(ACTIVITY_READ_MAX_ROWS_READ, ACTIVITY_READ_MAX_ROWS)
 
     def test_the_read_is_attributed_to_the_product(self):
         seen: list[QueryTags] = []
@@ -778,8 +883,8 @@ async def asuggestion_team():
     )
     with team_scope(team.id, canonical=True):
         yield team
-    await sync_to_async(team.delete)()
-    await sync_to_async(organization.delete)()
+    await sync_to_async(delete_skipping_empty_tables)(team)
+    await sync_to_async(delete_skipping_empty_tables)(organization)
 
 
 def _fake_session() -> MagicMock:
@@ -856,6 +961,7 @@ async def test_runner_fails_a_batch_that_validates_down_to_nothing(asuggestion_t
     # The TaskRun must not read as completed when nothing was stored: triage reads its status.
     session.end.assert_awaited_once()
     assert session.end.await_args.kwargs["status"] == "failed"
+    assert session.end.await_args.kwargs["error_type"] == "output_parse_failed"
 
 
 @pytest.mark.asyncio
@@ -1252,11 +1358,11 @@ class TestScoutSuggestionsResourceLevelAccess(APIBaseTest):
 class TestSuggestionScanGitHubPosture(BaseTest):
     @parameterized.expand(
         [
-            ("suggestion_scan", Task.OriginProduct.SIGNALS_SCOUT_SUGGESTIONS, None),
-            ("scout_run", Task.OriginProduct.SIGNALS_SCOUT, "posthog/posthog"),
+            ("suggestion_scan", "signals.scout_suggestions", None),
+            ("scout_run", "signals.scout", "posthog/posthog"),
         ]
     )
-    def test_only_a_repo_less_suggestion_scan_gets_no_github_integration(self, _name, origin_product, expected_repo):
+    def test_only_a_repo_less_suggestion_scan_gets_no_github_integration(self, _name, profile_key, expected_repo):
         # `github_read_access=False` downscopes nothing on its own: it selects the read-only branch
         # in credential refresh, so leaving the integration attached hands the scan the ordinary
         # write-capable token. The scan must carry no integration at all.
@@ -1266,7 +1372,7 @@ class TestSuggestionScanGitHubPosture(BaseTest):
             team=self.team,
             title="t",
             description="d",
-            origin_product=origin_product,
+            profile=get_task_profile(profile_key),
             user_id=self.user.id,
             repository=expected_repo,
         )
@@ -1284,7 +1390,7 @@ class TestSuggestionScanGitHubPosture(BaseTest):
                 team=self.team,
                 title="t",
                 description="d",
-                origin_product=Task.OriginProduct.SIGNALS_SCOUT_SUGGESTIONS,
+                profile=SCOUT_SUGGESTIONS_PROFILE,
                 user_id=self.user.id,
                 repository=None,
             )

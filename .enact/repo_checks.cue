@@ -54,7 +54,7 @@ pipeline: components: {
 		technology:      "python"
 		root:            "."
 		depends_on:      ["py-root"]
-		workspace_scope: include: ["products", "services/mcp/schema"]
+		workspace_scope: include: ["products", "services/mcp/schema", "nodejs/src/ingestion/pipelines/ai/costs/providers/llm-costs.json"]
 		watch_paths: [
 			"products/*/skills/**",
 			"products/*/backend/max_tools.py",
@@ -95,28 +95,33 @@ pipeline: components: {
 _dockerfiles: ["Dockerfile", "Dockerfile.*", "{livestream,products,rust,services}/**/Dockerfile", "{livestream,products,rust,services}/**/*.Dockerfile", "{livestream,products,rust,services}/**/Dockerfile.*"]
 
 _agentDocDirs: [
-	"", "common/", "ee/hogai/eval/", "frontend/src/", "frontend/src/layout/scenes/",
-	"frontend/src/scenes/max/", "packages/quill/", "packages/quill/packages/blocks/",
-	"packages/quill/packages/charts/", "packages/quill/packages/components/",
-	"packages/quill/packages/primitives/", "packages/quill/packages/tokens/",
-	"posthog/clickhouse/client/", "posthog/clickhouse/migrations/", "posthog/egress/",
-	"posthog/hogql/database/schema/", "posthog/ingress/", "posthog/temporal/",
-	"posthog/temporal/data_modeling/", "posthog/test/", "products/ai_observability/",
-	"products/ai_observability/fixtures/sample_traces/", "products/alerts/",
-	"products/autoresearch/", "products/autoresearch/backend/dataset/",
+	"", "common/", "ee/", "ee/hogai/eval/", "frontend/src/",
+	"frontend/src/layout/navigation-3000/sidepanel/", "frontend/src/layout/scenes/",
+	"frontend/src/layout/today/", "frontend/src/scenes/max/", "hog/", "packages/quill/",
+	"packages/quill/packages/blocks/", "packages/quill/packages/charts/",
+	"packages/quill/packages/components/", "packages/quill/packages/primitives/",
+	"packages/quill/packages/tokens/", "posthog/admin/console/", "posthog/clickhouse/client/",
+	"posthog/clickhouse/migrations/", "posthog/egress/", "posthog/hogql/database/schema/",
+	"posthog/ingress/", "posthog/integrations/", "posthog/tasks/alerts/detectors/",
+	"posthog/temporal/", "posthog/temporal/data_modeling/", "posthog/test/",
+	"products/ai_observability/", "products/ai_observability/fixtures/sample_traces/",
+	"products/alerts/", "products/autoresearch/", "products/autoresearch/backend/dataset/",
 	"products/autoresearch/backend/evaluation/", "products/autoresearch/backend/inference/",
 	"products/autoresearch/backend/management/", "products/autoresearch/backend/presentation/",
 	"products/autoresearch/backend/temporal/", "products/autoresearch/backend/training/",
 	"products/autoresearch/frontend/", "products/autoresearch/mcp/",
 	"products/customer_analytics/backend/", "products/customer_analytics/frontend/components/Accounts/",
-	"products/dashboards/", "products/desktop/", "products/desktop/packages/ui/src/features/browser-tabs/",
+	"products/dashboards/", "products/data_modeling/backend/temporal/", "products/desktop/",
+	"products/desktop/packages/ui/src/features/browser-tabs/",
 	"products/desktop/packages/ui/src/features/canvas/", "products/desktop/packages/ui/src/features/inbox/",
 	"products/engineering_analytics/", "products/engineering_analytics/frontend/",
-	"products/posthog_ai/eval_harness/harness/", "products/posthog_ai/evals/",
-	"products/posthog_ai/frontend/", "products/product_analytics/",
+	"products/knowledge_writer/", "products/mobile/", "products/posthog_ai/eval_harness/harness/",
+	"products/posthog_ai/evals/", "products/posthog_ai/frontend/", "products/product_analytics/",
 	"products/signals/backend/emission/", "products/signals/backend/management/",
 	"products/signals/backend/report_generation/", "products/signals/backend/scout_harness/",
-	"products/signals/dags/inbox_ranking/", "products/signals/eval/", "products/signals/skills/",
-	"products/stamphog/", "products/support/scripts/", "proto/", "rust/",
+	"products/signals/dags/inbox_ranking/", "products/signals/eval/", "products/signals/frontend/",
+	"products/signals/skills/", "products/stamphog/", "products/support/scripts/", "products/today/",
+	"products/warehouse_sources/backend/temporal/data_imports/sources/",
+	"products/warehouse_sources/sources/", "proto/", "rust/", "rust/cyclotron-node-migrations/",
 	"rust/personhog-replica/", "rust/personhog-router/", "services/mcp/", "tools/hogli/",
 ]

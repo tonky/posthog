@@ -88,10 +88,14 @@ Run separately for each model. Available models: `'text-embedding-3-small-1536'`
 
 Use `embedText(text, model_name)` and `cosineDistance()` for semantic search. See the `signals` skill for detailed query patterns around the signals product specifically, including required deduplication and metadata extraction.
 
-For a named business or operational measure, look it up in the data catalog (`system.information_schema.metrics`) before any schema discovery.
+For a named business or operational measure, look it up in the data catalog with `metric-list` before any schema discovery.
+Do not query `system.information_schema.metrics` with SQL for this lookup.
+Use `metric-describe` to read a candidate's full definition.
 Run an approved, non-drifted match with `data-catalog-metric-run` instead of deriving it.
 Every other outcome means there is no canonical definition to reuse — no match, a drifted match, or a match that is not approved: derive the measure with the schema workflow below and label the result noncanonical.
-A project without the data catalog has neither that table nor that tool, so an unknown-table error is that case too, and it holds for the rest of the session: stop checking.
+If these tools are not available, this connection cannot check the catalog, because of a missing `data_catalog:read` scope or a client filter.
+That does not mean the project has no catalog.
+Tell the user once that you could not check the catalog, then treat it as the no-match case for the rest of the session.
 Everything else starts with that workflow.
 
 #### Schema discovery (information_schema)
@@ -99,7 +103,7 @@ Everything else starts with that workflow.
 Don't guess table or column names — they differ per entity and drift over time. Discover the live schema for **every** data group above (system, captured, and data-warehouse tables) by querying `system.information_schema` via `execute-sql`. Four virtual tables carry the schema itself, and each one holds a different set of fields — project a field on the surface that owns it, or the query fails:
 
 - `tables` — one row per table. Fields: table_catalog, table_schema, table_name, table_type, description, row_count, certification. table_type is one of system, data_warehouse, view, posthog (built-in analytics tables like events / persons), or information_schema. `certification` is the settled trust mark (`certified` / `deprecated`) and lives **only** here, not on `columns`.
-- `columns` — one row per column. Fields: table_schema, table_name, column_name, ordinal_position, data_type, is_nullable, is_array, field_kind, description, null_fraction, min_value, max_value. The last three are profiling statistics and are filled in for data-warehouse columns only.
+- `columns` — one row per column. Fields: table_schema, table_name, column_name, ordinal_position, data_type, is_nullable, is_array, field_kind, description, null_fraction, min_value, max_value, sensitivity. null_fraction, min_value and max_value are profiling statistics and are filled in for data-warehouse columns only. `sensitivity` names the kind of personal or secret data a synced data-warehouse column likely holds (`email`, `phone`, `name`, `address`, `date_of_birth`, `ip_address`, `token`, `secret`, `card_number`), or NULL. Leave flagged columns out of a query unless the question needs them.
 - `relationships` — one row per joinable relationship. Fields: source_table, source_column, target_table, target_column, relationship_kind, via, confidence, reasoning.
 - `data_types` — one row per HogQL type. Fields: type_name, description.
 
@@ -107,7 +111,7 @@ Don't guess table or column names — they differ per entity and drift over time
 
 The two surfaces differ in what else a NULL means. On `tables`, `certification` reads NULL for a table nobody marked. On `relationships`, `confidence` and `reasoning` hold the review evidence of an accepted relationship proposal. Only a data warehouse join that still matches its proposal carries that evidence. Every built-in join and every field traverser reads NULL for both fields, even on a project with full catalog access. A NULL there means no review evidence, not a broken join: read `source_column` and `target_column`, and use the join.
 
-The same namespace carries six more catalog surfaces, each about project state rather than schema: `metrics`, `certifications` (the full trust-mark review queue, as opposed to the settled `tables.certification` mark), `relationship_proposals`, `data_quality_checks`, `data_quality_check_runs`, and `data_quality_health`. The project serves the three data-quality surfaces only while data quality checks are on for it.
+The same namespace carries six more catalog surfaces, each about project state rather than schema: `metrics`, `certifications` (the full trust-mark review queue, as opposed to the settled `tables.certification` mark), `relationship_proposals`, `data_quality_checks`, `data_quality_check_runs`, and `data_quality_health`. The project serves the three data-quality surfaces only while data quality checks are on for it. To find or read metrics, use `metric-list` and `metric-describe`, not SQL over `metrics`.
 
 A direct connection queried with `connectionId` is the runtime that drops surfaces. It serves `tables`, `columns`, and `data_types` only, and its `tables` has no `certification`. Leave `certification` out of a `connectionId` query. Do not read `relationships` there before a join, because the surface is absent and the query fails on an unknown table.
 
@@ -147,7 +151,7 @@ FROM system.information_schema.columns
 WHERE table_name = 'events'
 ```
 
-This works for `system.*` entity tables too — query them by full name, e.g. `WHERE table_name = 'system.insights'`. Their column sets differ per entity, so confirm columns before projecting them.
+This works for `system.*` entity tables too — query them by full name, e.g. `WHERE table_name = 'system.insights'`. Their column sets differ per entity and from REST/tool response fields, so confirm columns before projecting them. If a required field is absent, use a tool that exposes it or explain the limitation; do not remove the filter or substitute a different field just to make the query succeed.
 
 **Discover how a table joins to others:**
 
@@ -166,6 +170,17 @@ SELECT type_name, description FROM system.information_schema.data_types
 ```
 
 `information_schema` covers table and column **structure**. To verify which events, properties, and property values actually exist in captured data, use `read-data-schema` (see **Schema verification** below).
+
+#### Late materialized views
+
+A materialized view stores its result and refreshes on a schedule, so a query reads the stored result, not the view's sources. A `certified` mark says that a table or view is correct. It does not say that the data is current.
+
+When a materialized view is well behind its refresh schedule, or its latest refresh failed, the query result carries a `warehouse_sync` warning. The warning names the view and gives its last successful refresh. The rules below apply to every materialized view. A late `certified` view stays certified, so do not drop it for that reason alone:
+
+- Treat the day of the last refresh as incomplete. The refresh ran partway through that day.
+- If the question covers a period that ends before the day of the last refresh, use the view.
+- If the question needs data from the day of the last refresh or later, tell the user. Query the view's sources instead when the user needs current numbers.
+- In both cases, tell the user when the view last refreshed, for example "last refreshed 3 days ago". For a `certified` view, say that it is certified too.
 
 #### Querying guidelines
 
@@ -221,13 +236,30 @@ This prevents wasted API calls and gives users immediate feedback when the data 
 
 ##### Progressive exploration
 
-For unfamiliar or potentially large datasets, probe cheaply before running the expensive aggregation. Widen only if the cheap step looks reasonable:
+For unfamiliar or potentially large datasets, use a short timestamp window to check the data and intended query shape before widening it:
 
 1. **Count first** — `SELECT count() FROM events WHERE timestamp >= now() - INTERVAL 1 DAY AND event = 'foo'`. Confirms the data exists and gives a sense of volume.
 2. **Small sample** — inspect a handful of rows (`LIMIT 10`) to verify property shapes and values match expectations.
-3. **Full query** — run the real aggregation with a time range and `LIMIT`, having confirmed it won't scan needlessly or return empty.
+3. **Aggregation**: test the intended aggregation over that short window before widening it. Keep `LIMIT` to bound the output.
 
-This is faster than discovering an empty result or a mis-shaped property after the full aggregation, and it costs less.
+Counts and samples check volume and property shapes; they do not prove a join or aggregation will fit in memory.
+`LIMIT` bounds returned rows. Joins and aggregations can still process the full input before applying it.
+
+##### Recovering from memory failures
+
+Follow the error's advice: wait and retry once when it reports temporary server capacity.
+The `memory_limit` category alone cannot distinguish server pressure from a per-query limit.
+
+If the error says the query itself ran out of memory, shorten the time range in `WHERE` and test one adjusted query before running more windows.
+Avoid parallel retries of the same failing query shape. Even a query filtered by time or person can be too large.
+If the smaller window still fails, reduce join inputs or grouping cardinality only where that preserves the requested calculation.
+
+When splitting a requested range, use non-overlapping windows such as `timestamp >= start AND timestamp < end` with the same filters.
+Split only when each window can be computed independently without changing the calculation.
+Combine complete counts and sums by adding them, and compute averages from totals and counts.
+Do not sum distinct counts or combine per-window quantiles, funnels, or retention results as if they covered the full range.
+Rows cut off by `LIMIT` or truncation are incomplete.
+Track which windows succeeded and disclose missing windows or reduced scope; do not present partial coverage as the full answer.
 
 ##### Skipping index
 
@@ -320,7 +352,8 @@ WHERE g.event = '$ai_generation'
 
 ##### Other constraints
 
-- Your query results are capped at 100 rows by default. You can request up to 500 rows using a LIMIT clause. If you need more data, paginate using LIMIT and OFFSET in subsequent queries.
+- Your query results are capped at 100 rows by default. You can request up to 500 rows using a LIMIT clause. If you need more data, page with keyset pagination: order by `timestamp` and a unique column such as `uuid`, and filter past the last pair you saw (`WHERE (timestamp, uuid) > ('<last timestamp>', '<last uuid>') ORDER BY timestamp, uuid LIMIT 500`). The unique column keeps rows that share a timestamp at a page boundary. Keyset pagination stays fast on large tables. Never put OFFSET in SQL that code sends to `/api/projects/:id/query/`, because that API rejects it with HTTP 400 for personal API keys. Code that needs to page through results should call a HogQL endpoint and pass `limit` and `offset` in the run request body.
+- A saved SQL insight also returns only 100 rows when its query has no LIMIT, and its chart draws only those rows. Before you save one, add a LIMIT that is more than the number of rows the query can return, up to 50000.
 - You should cherry-pick `properties` of events, persons, or groups, so we don't get OOMs. **Never select the full `properties` object** (e.g., `SELECT properties FROM events`) and dump it into the conversation output. Instead, select only the specific properties you need (e.g., `properties.$browser`, `properties.$os`). If you must inspect the full properties object, dump the query results to a file and use bash commands to explore it.
 - When query results contain large JSON blobs (e.g., AI trace inputs/outputs, full property objects), always dump them to a file rather than outputting them directly. Use bash commands to process the file.
 
@@ -339,7 +372,7 @@ properties.foo['bar-baz']
 ##### Unsupported/changed functions
 
 Don't use | Use instead
-`toFloat64OrNull()`, `toFloat64()` | `toFloat()`
+`toInt32()`, `toUInt8()`, `toFloat32()` and other non-64-bit widths | `toInt()`, `toFloat()` (`toInt64()` and `toFloat64()` work as aliases)
 `toDateOrNull(timestamp)` | `toDate(timestamp)`
 `LAG()`, `LEAD()` | `lagInFrame()`, `leadInFrame()` with `ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING`
 `count(*)` | `count()`
@@ -364,6 +397,7 @@ Find the reference for [Sparkline, SemVer, Session replays, Actions, Translation
 
 ##### Other rules
 
+- Use explicit `AS` and descriptive column aliases: `min(timestamp) AS first_seen_at` instead of `min(timestamp) first`. Some short names, such as `fn`, are reserved even after `AS`; use a descriptive name or backtick-quote the alias and its references.
 - WHERE clause must come after all JOINs
 - No semicolons at end of queries
 - `toStartOfWeek(timestamp, 1)` for Monday start (numeric, not string)

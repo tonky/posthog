@@ -349,6 +349,14 @@ describe('URL Routing', () => {
     })
 
     describe('excludeTools parsing', () => {
+        it.each(['linear__CreateIssue', `linear__${'a'.repeat(80)}`, 'linear__issues.create'])(
+            'preserves connected tool name %s',
+            (name) => {
+                const request = new Request(`https://example.com/mcp?exclude_tools=${encodeURIComponent(name)}`)
+                expect(parseRequestProperties(request, {}).excludeTools).toEqual([name])
+            }
+        )
+
         it('parses x-posthog-exclude-tools and drops duplicates and invalid names', () => {
             const request = new Request('https://example.com/mcp', {
                 headers: {
@@ -375,6 +383,23 @@ describe('URL Routing', () => {
                 },
             })
             expect(parseRequestProperties(request, {}).excludeTools).toHaveLength(32)
+        })
+    })
+
+    describe('resources parsing', () => {
+        it.each([
+            ['?resources=none', {}, ['none']],
+            ['?resources=Feature_Flags, docs,,docs', {}, ['feature-flags', 'docs']],
+            ['?resources=docs', { 'x-posthog-mcp-resources': 'apps' }, ['apps']],
+            ['?resources=nope!,docs', {}, ['docs']],
+            ['?resources=posthog://skills/logs', {}, []],
+            ['?resources=%20', {}, []],
+            ['?resources=,,', {}, undefined],
+            ['?resources=', {}, undefined],
+            ['', {}, undefined],
+        ])('parses %s with headers %j as %j', (search, headers, expected) => {
+            const request = new Request(`https://example.com/mcp${search}`, { headers })
+            expect(parseRequestProperties(request, {}).resources).toEqual(expected)
         })
     })
 })

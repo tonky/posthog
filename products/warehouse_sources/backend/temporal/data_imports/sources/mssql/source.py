@@ -4,14 +4,18 @@ from sshtunnel import BaseSSHTunnelForwarderError
 
 from posthog.exceptions_capture import capture_exception
 
+from products.warehouse_sources.backend.facade.codebase_detection import detect
 from products.warehouse_sources.backend.facade.source_config import (
     DataWarehouseSourceCategory,
     SourceConfig,
     SourceFieldInputConfig,
     SourceFieldInputConfigType,
+    SourceFieldSelectConfig,
+    SourceFieldSelectConfigConverter,
+    SourceFieldSelectConfigOption,
     SourceFieldSSHTunnelConfig,
 )
-from products.warehouse_sources.backend.temporal.data_imports.sources.common.base import FieldType
+from products.warehouse_sources.backend.temporal.data_imports.sources.common.base import FieldType, ResumableSource
 from products.warehouse_sources.backend.temporal.data_imports.sources.common.mixins import (
     HostNotAllowedError,
     SSHTunnelMixin,
@@ -19,14 +23,25 @@ from products.warehouse_sources.backend.temporal.data_imports.sources.common.mix
     ValidateDatabaseHostMixin,
 )
 from products.warehouse_sources.backend.temporal.data_imports.sources.common.registry import SourceRegistry
+from products.warehouse_sources.backend.temporal.data_imports.sources.common.resumable import ResumableSourceManager
 from products.warehouse_sources.backend.temporal.data_imports.sources.common.schema import SourceSchema
 from products.warehouse_sources.backend.temporal.data_imports.sources.common.sql.base import SQLSource
+from products.warehouse_sources.backend.temporal.data_imports.sources.common.typings import SourceInputs, SourceResponse
 from products.warehouse_sources.backend.temporal.data_imports.sources.generated_configs.mssql import MSSQLSourceConfig
 from products.warehouse_sources.backend.temporal.data_imports.sources.mssql.mssql import (
+    _DEAD_CONNECTION_ERROR,
+    _DEADLOCK_VICTIM_ERROR,
     _SSH_HANDSHAKE_EOF_ERROR,
     _TABLE_NOT_FOUND_ERROR,
+    _TRANSIENT_CONNECTION_ERROR,
+    MSSQL_METADATA_TIMEOUT_ERROR,
+    MSSQL_ROW_READ_TIMEOUT_ERROR,
+    MSSQL_SCHEMA_DISCOVERY_DEADLINE_SECONDS,
     MSSQLImplementation,
+    MSSQLMetadataTimeoutError,
+    MSSQLResumeState,
     retry_on_transient_connection_error,
+    run_metadata_with_deadline,
 )
 from products.warehouse_sources.backend.types import ExternalDataSourceType
 
@@ -50,6 +65,34 @@ _CONNECTION_TIMED_OUT_ERROR = (
     "publicly, use the SSH tunnel option."
 )
 
+_GENERIC_CONNECTION_ERROR = "Could not connect to MS SQL. Please check all connection details are valid."
+
+# DB-Lib error 20002 at setup, usually paired with 20017 ("Unexpected EOF from the server"): the server
+# dropped the connection mid-handshake. Mirrors the Postgres source's wording for the same failure.
+_CONNECTION_DROPPED_ERROR = (
+    "Your SQL Server closed the connection while PostHog was connecting. Check your host, port, and "
+    "encryption settings, and that no firewall or SSH tunnel is dropping the connection."
+)
+
+# SQL Server error 1105 in tempdb. tempdb is shared across sessions, so a concurrent workload that
+# filled it can release it; scoped to tempdb so a customer database genuinely out of disk isn't matched.
+_TEMPDB_ALLOCATION_FAILED_ERROR = "in database 'tempdb' because the '"
+_TEMPDB_ALLOCATION_FAILED_EXHAUSTED_MESSAGE = (
+    "Your SQL Server's tempdb ran out of space while sorting rows for this sync (SQL Server error "
+    "1105), and it was still out of space after every retry. tempdb is shared across all sessions on "
+    "your server, so another workload may be holding the space — check tempdb's free space and "
+    "autogrowth settings. This sync is still enabled and will run again on its next schedule."
+)
+
+# SQL Server error 1222 — the same transient, customer-side lock contention `get_retryable_errors`
+# in mssql.py treats as retryable during a sync. `validate_credentials` doesn't go through that
+# classification, so without a mapping here it falls through to `capture_exception` as noise.
+_LOCK_TIMEOUT_VALIDATION_ERROR = (
+    "SQL Server is waiting on a lock held by another session on your database, and the wait timed "
+    "out (SQL Server error 1222). This is usually temporary — wait for the other session to finish, "
+    "then try again."
+)
+
 MSSQLErrors = {
     # SQL Server error 18456 is an authentication failure (wrong username/password, or the login is
     # disabled), not a problem with the database field. Surface the same wording the sibling SQL
@@ -60,16 +103,57 @@ MSSQLErrors = {
     # message echoes the server name and client IP, so match the stable, distinctive phrase instead.
     "is not allowed to access the server": _FIREWALL_BLOCKED_ERROR,
     "connection timed out": _CONNECTION_TIMED_OUT_ERROR,
+    # DB-Lib error 20002, the generic connect-time failure `get_non_retryable_errors` below also
+    # matches (and leaves unmapped there since the cause varies). Map it here too so a credential
+    # check that hits it names the likely causes instead of falling through to `capture_exception`.
+    "Adaptive Server connection failed": _CONNECTION_DROPPED_ERROR,
+    # pymssql raises this as an `InterfaceError`, not an `OperationalError`, when the login itself
+    # succeeded but the driver's post-connect `SET` batch then fails outright (`db_sqlexec` returns
+    # FAIL in `_mssql.pyx`) — the same mid-handshake drop class as "Adaptive Server connection
+    # failed" above, just surfacing one step later. Unlike that entry, a sync hitting this is kept
+    # retryable (see `get_retryable_errors` below) rather than disabled outright.
+    "Could not set connection properties": _CONNECTION_DROPPED_ERROR,
+    "Lock request time out period exceeded": _LOCK_TIMEOUT_VALIDATION_ERROR,
 }
 
 _MSSQL_IMPLEMENTATION = MSSQLImplementation()
 
 
 @SourceRegistry.register
-class MSSQLSource(SQLSource[MSSQLSourceConfig], SSHTunnelMixin, ValidateDatabaseHostMixin):
+class MSSQLSource(
+    SQLSource[MSSQLSourceConfig],
+    ResumableSource[MSSQLSourceConfig, MSSQLResumeState],
+    SSHTunnelMixin,
+    ValidateDatabaseHostMixin,
+):
+    codebase_detection = detect(
+        env=("^MSSQL_",),
+        npm=("mssql", "tedious"),
+        pypi=("pymssql", "mssql-python", "mssql-django"),
+        cargo=("tiberius",),
+        go=("github.com/microsoft/go-mssqldb", "github.com/denisenkom/go-mssqldb"),
+        hex=("tds",),
+        maven=("com.microsoft.sqlserver:mssql-jdbc", "com.microsoft.sqlserver:mssql-jdbc_auth"),
+        rubygems=("tiny_tds", "activerecord-sqlserver-adapter"),
+    )
+
     @property
     def get_implementation(self) -> MSSQLImplementation:
         return _MSSQL_IMPLEMENTATION
+
+    def get_resumable_source_manager(self, inputs: SourceInputs) -> ResumableSourceManager[MSSQLResumeState]:
+        return ResumableSourceManager[MSSQLResumeState](inputs, MSSQLResumeState)
+
+    def source_for_pipeline(  # type: ignore[override]
+        self,
+        config: MSSQLSourceConfig,
+        resumable_source_manager: ResumableSourceManager[MSSQLResumeState],
+        inputs: SourceInputs,
+    ) -> SourceResponse:
+        # A reset must not continue from a checkpoint. The read starts from the first row.
+        if inputs.reset_pipeline:
+            resumable_source_manager.clear_state()
+        return self.get_implementation.build_pipeline(config, inputs, resumable_source_manager=resumable_source_manager)
 
     @property
     def source_type(self) -> ExternalDataSourceType:
@@ -88,7 +172,44 @@ class MSSQLSource(SQLSource[MSSQLSourceConfig], SSHTunnelMixin, ValidateDatabase
             # 20017 case above — the driver's own retry loop tried to reuse a connection that
             # died between opening and the query running — just surfaced through a different
             # internal code path. A fresh connection from the next Temporal retry resolves it.
-            "Not connected to any MS SQL server",
+            # Also matched by `_is_transient_connection_error` so schema discovery (and
+            # `validate_credentials`, which shares it) retries in-process instead of surfacing
+            # this as captured error-tracking noise.
+            _DEAD_CONNECTION_ERROR,
+            # DB-Lib error 20047, the same DBPROCESS-death class raised directly (see
+            # `_is_transient_connection_error` in mssql.py): the TDS connection died mid-stream
+            # during the row read itself, past the point `retry_on_transient_connection_error`
+            # covers (that helper only wraps schema discovery). A fresh connection from the next
+            # Temporal retry resolves it.
+            _TRANSIENT_CONNECTION_ERROR,
+            # pymssql's `connect()` wraps this as an `InterfaceError` when the login itself
+            # succeeded but the driver's post-connect `SET` batch then fails outright
+            # (`db_sqlexec` returns FAIL in `_mssql.pyx`) — the same connection-death class as
+            # "Not connected to any MS SQL server" above, just surfacing one step earlier in the
+            # handshake. A fresh connection from the next Temporal retry resolves it.
+            "Could not set connection properties",
+            # SQL Server error 1222. A metadata statement waited longer than the `SET LOCK_TIMEOUT`
+            # that `MSSQLImplementation.connect` sets, because another session held a lock on the
+            # catalog or on the table. The lock belongs to the customer's own workload and goes
+            # away when that transaction ends.
+            "Lock request time out period exceeded",
+            # The client-side limit on the wait for one batch of rows. The server was reachable
+            # and then sent nothing, so the next attempt, which continues from the last
+            # checkpoint where the read has one, can succeed.
+            MSSQL_ROW_READ_TIMEOUT_ERROR,
+            _TEMPDB_ALLOCATION_FAILED_ERROR,
+            # SQL Server error 1205. `retry_on_deadlock` already reruns the dispatching query
+            # in-process, but a deadlock chosen mid-stream — while `cursor.fetchmany` is pulling
+            # later batches of an already-executing read — can't be retried the same way: the
+            # cursor's result set is gone, and re-running the query would re-yield rows already
+            # handed to the pipeline. That case surfaces here instead, and a fresh attempt from
+            # the next Temporal retry (or checkpoint, where the read supports one) recovers it.
+            _DEADLOCK_VICTIM_ERROR,
+        }
+
+    def get_retry_exhausted_errors(self) -> dict[str, str]:
+        return {
+            _TEMPDB_ALLOCATION_FAILED_ERROR: _TEMPDB_ALLOCATION_FAILED_EXHAUSTED_MESSAGE,
         }
 
     def get_non_retryable_errors(self) -> dict[str, str | None]:
@@ -185,6 +306,12 @@ class MSSQLSource(SQLSource[MSSQLSourceConfig], SSHTunnelMixin, ValidateDatabase
             # (SQL Server error 208): the lookup returns an empty result set rather than erroring, so
             # our own guard fires before the SELECT. The table is gone from the source, so retrying
             # replays the identical empty lookup. Match the stable prefix, not the schema/table name.
+            # Raised by `run_metadata_with_deadline` when the connect or a metadata query gives no
+            # answer at all. The next attempt opens the same connection and waits the same time, so
+            # a retry inside the job only holds a worker for longer. `handle_non_retryable_error`
+            # still tries again on a few later runs before it gives up, which covers a server that
+            # was briefly unreachable.
+            MSSQL_METADATA_TIMEOUT_ERROR: "Your SQL Server did not answer PostHog's connection or metadata queries in time. Check that the server is running and reachable, including through the SSH tunnel if you use one, and that no long-running transaction is holding locks on the tables being synced.",
             _TABLE_NOT_FOUND_ERROR: "One of the tables you're syncing no longer exists in your SQL Server — it was likely dropped or renamed after it was first discovered. Remove it from the sync or restore it at the source, then re-enable the sync.",
         }
 
@@ -212,7 +339,11 @@ class MSSQLSource(SQLSource[MSSQLSourceConfig], SSHTunnelMixin, ValidateDatabase
                 api_version=api_version,
             )
 
-        return retry_on_transient_connection_error(discover)
+        return run_metadata_with_deadline(
+            lambda: retry_on_transient_connection_error(discover),
+            action="listed the tables",
+            timeout_seconds=MSSQL_SCHEMA_DISCOVERY_DEADLINE_SECONDS,
+        )
 
     @property
     def get_source_config(self) -> SourceConfig:
@@ -285,11 +416,27 @@ class MSSQLSource(SQLSource[MSSQLSourceConfig], SSHTunnelMixin, ValidateDatabase
                     ),
                     SourceFieldInputConfig(
                         name="schema",
+                        sync_setting=True,
                         label="Schema",
                         type=SourceFieldInputConfigType.TEXT,
                         required=False,
                         placeholder="Leave blank to import all schemas",
                         secret=False,
+                    ),
+                    SourceFieldSelectConfig(
+                        name="require_encryption",
+                        label="Require encryption?",
+                        required=True,
+                        defaultValue="false",
+                        converter=SourceFieldSelectConfigConverter.STR_TO_BOOL,
+                        caption=(
+                            "Refuse to connect unless the connection to your database is encrypted. "
+                            "PostHog does not verify the SQL Server certificate."
+                        ),
+                        options=[
+                            SourceFieldSelectConfigOption(label="Yes", value="true"),
+                            SourceFieldSelectConfigOption(label="No", value="false"),
+                        ],
                     ),
                     SourceFieldSSHTunnelConfig(name="ssh_tunnel", label="Use SSH tunnel?"),
                 ],
@@ -299,7 +446,7 @@ class MSSQLSource(SQLSource[MSSQLSourceConfig], SSHTunnelMixin, ValidateDatabase
     def validate_credentials(
         self, config: MSSQLSourceConfig, team_id: int, schema_name: Optional[str] = None, api_version: str | None = None
     ) -> tuple[bool, str | None]:
-        from pymssql import OperationalError
+        from pymssql import InterfaceError, OperationalError
 
         is_ssh_valid, ssh_valid_errors = self.ssh_tunnel_is_valid(config, team_id)
         if not is_ssh_valid:
@@ -313,18 +460,24 @@ class MSSQLSource(SQLSource[MSSQLSourceConfig], SSHTunnelMixin, ValidateDatabase
 
         try:
             self.get_schemas(config, team_id, api_version=api_version)
+        except MSSQLMetadataTimeoutError:
+            return False, _CONNECTION_TIMED_OUT_ERROR
         except (HostNotAllowedError, TemporaryHostResolutionError) as e:
             # The host policy refused the host, or its lookup never answered. Both carry their own
             # user-facing wording and neither is a PostHog defect, so they are not captured.
             return False, str(e)
-        except OperationalError as e:
+        except (OperationalError, InterfaceError) as e:
+            # pymssql's own `connect()` wraps a driver-level connect failure (e.g. "Could not set
+            # connection properties") as `InterfaceError` rather than `OperationalError`, so both
+            # need the same `MSSQLErrors` lookup rather than just one falling through to
+            # `capture_exception` below as unclassified noise.
             error_msg = " ".join(str(n) for n in e.args)
             for key, value in MSSQLErrors.items():
                 if key in error_msg:
                     return False, value
 
             capture_exception(e)
-            return False, "Could not connect to MS SQL. Please check all connection details are valid."
+            return False, _GENERIC_CONNECTION_ERROR
         except BaseSSHTunnelForwarderError as e:
             return (
                 False,
@@ -333,6 +486,6 @@ class MSSQLSource(SQLSource[MSSQLSourceConfig], SSHTunnelMixin, ValidateDatabase
             )
         except Exception as e:
             capture_exception(e)
-            return False, "Could not connect to MS SQL. Please check all connection details are valid."
+            return False, _GENERIC_CONNECTION_ERROR
 
         return True, None

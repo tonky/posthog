@@ -18,7 +18,7 @@ from products.exports.backend.models.exported_asset import ExportedAsset
 from products.replay_vision.backend.models.replay_observation import ReplayObservation
 from products.replay_vision.backend.models.replay_observation_media import ReplayObservationMedia
 from products.replay_vision.backend.models.replay_scanner import ReplayScanner, ScannerType
-from products.replay_vision.backend.tests.helpers import create_experiment, snapshot_for
+from products.replay_vision.backend.tests.helpers import create_experiment, snapshot_for, update_experiment
 from products.replay_vision.backend.tests.test_api import _VisionAPITestCase
 
 
@@ -259,6 +259,28 @@ class TestReplayScannerAccessControl(_AccessControlTestCase):
         resp = self.client.get(f"{self.scanners_url}{scanner.id}/")
         self.assertEqual(resp.json()["experiment_targeting"], targeting)
 
+    @parameterized.expand([("column",), ("config",)])
+    def test_list_hides_only_the_experiments_the_viewer_cannot_access(self, location: str) -> None:
+        allowed = create_experiment(self.team, "allowed-flag", created_by=self.user)
+        denied = create_experiment(self.team, "denied-flag", created_by=self.user)
+        self._create_experiment_scoped_scanner("allowed", allowed.id, location)
+        self._create_experiment_scoped_scanner("denied", denied.id, location)
+        self._set_resource_default("replay_scanner", "viewer")
+        self._grant_object_access(self.other_user, "experiment", str(denied.id), "none")
+
+        self.client.force_login(self.other_user)
+        resp = self.client.get(self.scanners_url)
+        self.assertEqual(resp.status_code, 200, resp.json())
+        rows = {row["name"]: row for row in resp.json()["results"]}
+
+        def shown_experiment_id(row: dict) -> int | None:
+            if location == "column":
+                return (row["experiment_targeting"] or {}).get("experiment_id")
+            return row["scanner_config"].get("experiment_id")
+
+        self.assertEqual(shown_experiment_id(rows["allowed"]), allowed.id)
+        self.assertIsNone(shown_experiment_id(rows["denied"]))
+
     def test_save_by_a_viewer_denied_the_experiment_keeps_the_targeting(self) -> None:
         # The API redacts experiment_targeting to null for such an editor, and the editor form
         # writes the whole object back on save. Without the write-side guard, renaming the scanner
@@ -482,8 +504,7 @@ class TestReplayScannerAccessControl(_AccessControlTestCase):
         # returns. Both sides of the end must answer the same not-found.
         experiment = create_experiment(self.team, "hidden-flag", launched=True)
         ended_at = timezone.now() - dt.timedelta(days=3)
-        experiment.end_date = ended_at
-        experiment.save()
+        update_experiment(experiment, end_date=ended_at)
         self._set_resource_default("replay_scanner", "editor")
         self._set_resource_default("session_recording", "editor")
         self._set_resource_default("experiment", "none")
@@ -556,6 +577,31 @@ class TestReplayScannerAccessControl(_AccessControlTestCase):
         dock_resp = self.client.get(f"{dock_url}?session_id=restricted-sess")
         self.assertEqual(dock_resp.status_code, 200, dock_resp.json())
         self.assertEqual(dock_resp.json()["results"], [])
+
+    def test_a_snapshot_whose_stores_name_two_experiments_needs_both_readable(self) -> None:
+        # The three stores can disagree on a row the mirror has not caught up with.
+        readable = create_experiment(self.team, "readable-flag")
+        restricted = create_experiment(self.team, "restricted-flag")
+        self._set_resource_default("replay_scanner", "editor")
+        self._set_resource_default("session_recording", "editor")
+        self._set_resource_default("experiment", "none")
+        self._grant_object_access(self.other_user, "experiment", str(readable.id), "editor")
+        self._grant_object_access(self.other_user, "experiment", str(restricted.id), "none")
+
+        # The scanner itself watches the readable experiment, so the scanner-level gate admits it.
+        # Only its frozen snapshot disagrees, which is what the row-level gate has to catch.
+        scanner = self._create_scanner(name="disagreeing", experiment_targeting={"experiment_id": readable.id})
+        snapshot = {
+            **snapshot_for(scanner),
+            "scope": {"kind": "experiment", "experiment_id": readable.id},
+            "experiment_targeting": {"experiment_id": restricted.id},
+        }
+        ReplayObservation.objects.create(scanner=scanner, session_id="disagreeing-sess", scanner_snapshot=snapshot)
+
+        self.client.force_login(self.other_user)
+        resp = self.client.get(self.observations_url(str(scanner.id)))
+        self.assertEqual(resp.status_code, 200, resp.json())
+        self.assertEqual(resp.json()["results"], [])
 
     def test_dock_experiment_access_check_does_not_scale_per_scanner(self) -> None:
         # The dock's readable-scanner filter must batch the experiment-access lookup, not run one

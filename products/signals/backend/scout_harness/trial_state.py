@@ -13,12 +13,15 @@ from pydantic import BaseModel, Field, JsonValue, TypeAdapter
 
 from posthog.dataclasses import frozen
 
+from products.signals.backend.artefact_schemas import ActionabilityAssessment, ActionabilityChoice
 from products.signals.backend.models import SignalScoutRun
 from products.signals.backend.scout_harness.limits import SCOUT_TRIAL_METADATA_KEY as SCOUT_TRIAL_METADATA_KEY
 from products.signals.backend.scout_harness.tools.runs import _build_task_url
 from products.signals.backend.scout_harness.tools.scratchpad import (
     DEFAULT_SCRATCHPAD_SEARCH_LIMIT,
+    ScratchpadConflictError,
     ScratchpadEntry,
+    ScratchpadRevivedExpiry,
     _clamp_search_limit,
     _project_content,
     _validate_entry,
@@ -27,7 +30,6 @@ from products.signals.backend.scout_harness.tools.scratchpad import (
 if TYPE_CHECKING:
     from uuid import UUID
 
-SCOUT_TRIAL_STATE_KEY = "scout_trial_private"
 MAX_SCOUT_TRIAL_STATE_BYTES = 2 * 1024 * 1024
 
 _MEMORY_ADAPTER = TypeAdapter(list[ScratchpadEntry])
@@ -50,6 +52,19 @@ class TrialReport(BaseModel):
     content_revision_count: int = 0
     corroboration_count: int = 0
 
+    @staticmethod
+    def apply_actionability(document: dict[str, JsonValue], assessment: ActionabilityAssessment) -> None:
+        document["actionability"] = assessment.actionability.value
+        document["already_addressed"] = assessment.already_addressed
+        if document.get("status") != "suppressed":
+            document["suppression_source"] = None
+            document["suppression_explanation"] = None
+        elif document.get("suppression_source") not in ("dismissed", "safety_judge"):
+            # Private decisions cannot override a human dismissal or the safety judge.
+            not_actionable = assessment.actionability == ActionabilityChoice.NOT_ACTIONABLE
+            document["suppression_source"] = "not_actionable" if not_actionable else "system"
+            document["suppression_explanation"] = (assessment.explanation or None) if not_actionable else None
+
 
 class _TrialState(BaseModel):
     memory: dict[str, ScratchpadEntry | None] = Field(default_factory=dict)
@@ -71,6 +86,10 @@ def initial_trial_state() -> dict[str, JsonValue]:
 def is_scout_trial(run: SignalScoutRun) -> bool:
     marker = (run.metadata or {}).get(SCOUT_TRIAL_METADATA_KEY)
     return isinstance(marker, dict) and marker.get("version") == 1
+
+
+def _is_expired(entry: ScratchpadEntry, now: datetime) -> bool:
+    return entry.expires_at is not None and datetime.fromisoformat(entry.expires_at) <= now
 
 
 def memory_snapshot(entries: Sequence[ScratchpadEntry]) -> list[dict[str, JsonValue]]:
@@ -106,34 +125,38 @@ class ScoutTrialStore:
         row = (
             SignalScoutRun.objects.for_team(self.run.team_id)
             .filter(pk=self.run.pk, task_run_id=self.run.task_run_id)
-            .values("metadata", "task_run__state")
+            .values("metadata", "trial_state")
             .first()
         )
         if row is None:
             raise ScoutTrialStateError("The scout run has no private state.")
         marker = (row["metadata"] or {}).get(SCOUT_TRIAL_METADATA_KEY)
-        if not isinstance(marker, dict) or marker.get("version") != 1:
+        state = row["trial_state"]
+        if not isinstance(marker, dict) or marker.get("version") != 1 or not isinstance(state, dict):
             raise ScoutTrialStateError("The scout run has no private state.")
-        state = row["task_run__state"] or {}
-        return _TrialState.model_validate(state.get(SCOUT_TRIAL_STATE_KEY, {}))
+        return _TrialState.model_validate(state)
 
     def _mutate(
         self, change: Callable[[_TrialState], _Result], *, allow_terminal: bool = False, allow_invalid: bool = False
     ) -> _Result:
         invalid_reason: str | None = None
         with transaction.atomic():
-            locked = (
+            runs = (
                 SignalScoutRun.objects.for_team(self.run.team_id)
                 .select_related("task_run")
-                .select_for_update(of=("task_run",))
-                .get(pk=self.run.pk, task_run_id=self.run.task_run_id)
+                .filter(pk=self.run.pk, task_run_id=self.run.task_run_id)
             )
+            # Gateway accounting locks the task run before updating scout totals; match its order to avoid deadlocks.
+            runs.select_for_update(of=("task_run",)).get()
+            locked = runs.select_for_update(of=("self",)).get()
             if not is_scout_trial(locked) or locked.task_run.team_id != self.run.team_id:
                 raise ScoutTrialStateError("The scout run has no private state.")
             if not allow_terminal and locked.task_run.status != "in_progress":
                 raise ScoutTrialStateError("The scout run is no longer in progress.")
-            state = dict(locked.task_run.state or {})
-            private = _TrialState.model_validate(state.get(SCOUT_TRIAL_STATE_KEY, {}))
+            state = locked.trial_state
+            if not isinstance(state, dict):
+                raise ScoutTrialStateError("The scout run has no private state.")
+            private = _TrialState.model_validate(state)
             if private.invalid_reason and not allow_invalid:
                 raise ScoutTrialStateError(private.invalid_reason)
             updated = private.model_copy(deep=True)
@@ -147,9 +170,8 @@ class ScoutTrialStore:
                 invalid_reason = "The scout run exceeded its private state limit and cannot be compared."
                 private.invalid_reason = invalid_reason
                 payload = private.model_dump(mode="json")
-            state[SCOUT_TRIAL_STATE_KEY] = payload
-            locked.task_run.state = state
-            locked.task_run.save(update_fields=["state", "updated_at"])
+            locked.trial_state = payload
+            locked.save(update_fields=["trial_state"])
         if invalid_reason:
             raise ScoutTrialStateError(invalid_reason)
         return result
@@ -182,6 +204,8 @@ class ScoutTrialStore:
         *,
         text: str | None = None,
         key: str | None = None,
+        key_prefix: str | None = None,
+        skill_name: str | None = None,
         date_from: datetime | None = None,
         date_to: datetime | None = None,
         limit: int = DEFAULT_SCRATCHPAD_SEARCH_LIMIT,
@@ -195,14 +219,21 @@ class ScoutTrialStore:
         for entry in entries:
             if key and entry.key != key:
                 continue
-            if text and text.casefold() not in entry.key.casefold() and text.casefold() not in entry.content.casefold():
+            if key_prefix and not entry.key.startswith(key_prefix):
                 continue
-            if not include_expired and entry.expires_at and datetime.fromisoformat(entry.expires_at) <= now:
+            if skill_name and entry.created_by_skill != skill_name:
+                continue
+            if text and text.casefold() not in entry.key.casefold() and text.casefold() not in entry.content.casefold():
                 continue
             updated_at = datetime.fromisoformat(entry.updated_at) if entry.updated_at else None
             if date_from is not None and (updated_at is None or updated_at < date_from):
                 continue
             if date_to is not None and (updated_at is None or updated_at >= date_to):
+                continue
+            if not include_expired and _is_expired(entry, now):
+                # The same marker `search_scratchpad` returns. Trial memory keeps no revisions, so it names no writer.
+                if key:
+                    result.append(replace(entry, content="", expired=True))
                 continue
             result.append(entry)
         result.sort(key=lambda entry: (entry.updated_at or "", entry.key), reverse=True)
@@ -214,13 +245,37 @@ class ScoutTrialStore:
             for entry in result[: _clamp_search_limit(limit)]
         ]
 
-    def remember(self, *, key: str, content: str, expires_at: datetime | None = None) -> ScratchpadEntry:
+    def remember(
+        self,
+        *,
+        key: str,
+        content: str,
+        expires_at: datetime | None = None,
+        if_updated_at: datetime | None = None,
+    ) -> ScratchpadEntry:
         _validate_entry(key=key, content=content, expires_at=expires_at)
         snapshot = self._memory_snapshot()
 
         def change(state: _TrialState) -> ScratchpadEntry:
             existing = self._merge_memory(snapshot, state).get(key)
-            now = timezone.now().isoformat()
+            if if_updated_at is not None and (
+                existing is None
+                or existing.updated_at is None
+                or datetime.fromisoformat(existing.updated_at) != if_updated_at
+            ):
+                raise ScratchpadConflictError(
+                    key=key, current_updated_at=existing.updated_at if existing is not None else None
+                )
+            written_at = timezone.now()
+            revived_expiry = None
+            if (
+                existing is not None
+                and existing.expires_at is not None
+                and _is_expired(existing, written_at)
+                and (expires_at is None or expires_at > written_at)
+            ):
+                revived_expiry = ScratchpadRevivedExpiry(expires_at=existing.expires_at)
+            now = written_at.isoformat()
             entry = (
                 replace(
                     existing, content=content, expires_at=expires_at.isoformat() if expires_at else None, updated_at=now
@@ -242,7 +297,7 @@ class ScoutTrialStore:
                 )
             )
             state.memory[key] = entry
-            return entry
+            return replace(entry, revived_expiry=revived_expiry)
 
         return self._mutate(change)
 

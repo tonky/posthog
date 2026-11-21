@@ -154,9 +154,8 @@ class TestEnrichmentScoreApplication(BaseTest):
                 )
             return OrganizationBridgeInputs()
 
-        with (
-            patch("products.growth.backend.enrichment.core.read_organization_bridge_inputs", side_effect=bridge_inputs),
-            patch("products.growth.backend.enrichment.core.get_person_by_distinct_id", return_value=None),
+        with patch(
+            "products.growth.backend.enrichment.core.read_organization_bridge_inputs", side_effect=bridge_inputs
         ):
             outcome = async_to_sync(enrich_organization)(
                 EnrichmentContext(
@@ -179,6 +178,8 @@ class TestEnrichmentScoreApplication(BaseTest):
         clients = []
         session = MagicMock()
         session.post.return_value.status_code = 200
+        session.post.return_value.headers = {}
+        session.post.return_value.json.return_value = {"results": {}}
         if timed_out:
             session.post.side_effect = Timeout("synthetic delivery timeout")
 
@@ -199,7 +200,7 @@ class TestEnrichmentScoreApplication(BaseTest):
                 "products.growth.backend.enrichment.fit_recomputation.read_organization_bridge_inputs",
                 return_value=OrganizationBridgeInputs(),
             ),
-            patch("posthoganalytics.request._get_session", return_value=session),
+            patch("posthoganalytics.capture_send._get_capture_session", return_value=session),
         ):
             if timed_out:
                 with self.assertRaises(RuntimeError):
@@ -294,7 +295,7 @@ class TestEnrichmentScoreApplication(BaseTest):
                 return_value=OrganizationBridgeInputs(),
             ),
             patch(
-                "products.growth.backend.management.commands.enrichment_label_batch.get_llm_client",
+                "products.growth.backend.management.commands.enrichment_label_batch.build_openai_client",
                 return_value=gateway,
             ),
         ):
@@ -357,7 +358,7 @@ class TestEnrichmentScoreApplication(BaseTest):
                 return_value=OrganizationBridgeInputs(),
             ),
             patch(
-                "products.growth.backend.management.commands.enrichment_label_batch.get_llm_client",
+                "products.growth.backend.management.commands.enrichment_label_batch.build_openai_client",
                 return_value=gateway,
             ),
             patch(
@@ -499,7 +500,7 @@ class TestEnrichmentScoreApplication(BaseTest):
                 return_value=OrganizationBridgeInputs(),
             ),
             patch(
-                "products.growth.backend.management.commands.enrichment_label_batch.get_llm_client",
+                "products.growth.backend.management.commands.enrichment_label_batch.build_openai_client",
                 return_value=gateway,
             ),
         ):
@@ -547,7 +548,7 @@ class TestEnrichmentScoreApplication(BaseTest):
                 return_value=OrganizationBridgeInputs(),
             ),
             patch(
-                "products.growth.backend.management.commands.enrichment_label_batch.get_llm_client",
+                "products.growth.backend.management.commands.enrichment_label_batch.build_openai_client",
                 return_value=gateway,
             ),
             patch("products.growth.backend.management.commands.enrichment_label_batch._ID_BATCH_SIZE", 1),
@@ -599,7 +600,7 @@ class TestEnrichmentScoreApplication(BaseTest):
                 return_value=OrganizationBridgeInputs(),
             ),
             patch(
-                "products.growth.backend.management.commands.enrichment_label_batch.get_llm_client",
+                "products.growth.backend.management.commands.enrichment_label_batch.build_openai_client",
                 return_value=gateway,
             ),
             patch("products.growth.backend.management.commands.enrichment_label_batch._ID_BATCH_SIZE", 1),

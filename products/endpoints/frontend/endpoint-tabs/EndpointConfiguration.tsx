@@ -1,7 +1,7 @@
 import { useActions, useValues } from 'kea'
 import { useState } from 'react'
 
-import { IconBrackets, IconClock, IconDatabase, IconInfo, IconList, IconRefresh, IconSparkles } from '@posthog/icons'
+import { IconBrackets, IconClock, IconDatabase, IconInfo, IconList, IconRefresh } from '@posthog/icons'
 import {
     LemonBanner,
     LemonButton,
@@ -16,16 +16,19 @@ import {
 
 import { AccessControlAction } from 'lib/components/AccessControlAction'
 import { CodeSnippet, Language } from 'lib/components/CodeSnippet'
-import { useFeatureFlag } from 'lib/hooks/useFeatureFlag'
 import { LemonField } from 'lib/lemon-ui/LemonField'
 import { MaterializationStatusModal } from 'scenes/data-warehouse/saved_queries/MaterializationStatusModal'
+import { SyncFrequencySelect } from 'scenes/data-warehouse/saved_queries/SyncFrequencySelect'
 
-import { NodeKind } from '~/queries/schema/schema-general'
 import { AccessControlLevel, AccessControlResourceType } from '~/types'
 
 import { endpointLogic } from '../endpointLogic'
+import {
+    cadenceForDataFreshness,
+    dataFreshnessForCadence,
+    endpointSyncFrequencyBounds,
+} from '../endpointRefreshCadence'
 import { endpointSceneLogic, extractBreakdownPropertyNames, MaterializationPreview } from '../endpointSceneLogic'
-import { MaterializationSuggestionModal } from '../MaterializationSuggestionModal'
 
 // Names where flipping a breakdown to optional is most likely a customer-data leak — show
 // a soft warning when the user does so. Not a hard block; the author may have legitimate
@@ -37,16 +40,6 @@ function isSensitiveBreakdownName(name: string): boolean {
     const lower = name.toLowerCase()
     return SENSITIVE_BREAKDOWN_NAME_PATTERNS.some((p) => lower.includes(p))
 }
-
-const DATA_FRESHNESS_OPTIONS: { value: number; label: string }[] = [
-    { value: 900, label: '15 minutes' },
-    { value: 1800, label: '30 minutes' },
-    { value: 3600, label: '1 hour' },
-    { value: 21600, label: '6 hours' },
-    { value: 43200, label: '12 hours' },
-    { value: 86400, label: '1 day (default)' },
-    { value: 604800, label: '7 days' },
-]
 
 const BUCKET_OPTIONS: { value: string; label: string }[] = [
     { value: 'hour', label: 'Hour' },
@@ -101,6 +94,9 @@ export function EndpointConfiguration(): JSX.Element {
         dataFreshness ?? viewingVersion?.data_freshness_seconds ?? endpoint.data_freshness_seconds ?? 86400
     const baseIsMaterialized = viewingVersion?.is_materialized ?? endpoint.is_materialized
     const isMaterialized = localIsMaterialized ?? baseIsMaterialized
+    // The plan floor limits how often a materialized endpoint refreshes; a direct endpoint only caches.
+    const planRefreshFloorSeconds = isMaterialized ? endpoint.plan_refresh_floor_seconds : null
+    const refreshBounds = endpointSyncFrequencyBounds(planRefreshFloorSeconds)
     const materializationExpanded = leftActiveKeys.includes('materialization')
 
     const breakdownProperties = extractBreakdownPropertyNames(currentQuery)
@@ -148,10 +144,18 @@ export function EndpointConfiguration(): JSX.Element {
                                         resourceType={AccessControlResourceType.Endpoint}
                                         minAccessLevel={AccessControlLevel.Editor}
                                     >
-                                        <LemonSelect
-                                            value={effectiveDataFreshness}
-                                            onChange={setDataFreshness}
-                                            options={DATA_FRESHNESS_OPTIONS}
+                                        <SyncFrequencySelect
+                                            bounds={refreshBounds}
+                                            value={cadenceForDataFreshness(effectiveDataFreshness)}
+                                            onChange={(cadence) => {
+                                                const seconds = dataFreshnessForCadence(cadence)
+                                                if (seconds !== null) {
+                                                    setDataFreshness(seconds)
+                                                }
+                                            }}
+                                            label="Refresh every"
+                                            help="A materialized endpoint refreshes its stored results this often. A direct endpoint caches each response for this long."
+                                            data-attr="endpoint-data-freshness"
                                         />
                                     </AccessControlAction>
                                 </div>
@@ -329,16 +333,14 @@ function MaterializationContent(): JSX.Element {
         materializationStatus: loadedMaterializationStatus,
         materializationStatusLoading,
     } = useValues(endpointLogic)
-    const { setIsMaterialized, setBucketOverride, openMaterializationSuggestionModal } = useActions(endpointSceneLogic)
+    const { setIsMaterialized, setBucketOverride } = useActions(endpointSceneLogic)
     const {
         isMaterialized: localIsMaterialized,
         viewingVersion,
         materializationPreview,
         bucketOverrides,
-        localQuery,
     } = useValues(endpointSceneLogic)
     const [runsModalOpen, setRunsModalOpen] = useState(false)
-    const materializationFixFlagEnabled = useFeatureFlag('ENDPOINTS_AI_MATERIALIZATION_FIX')
 
     if (!endpoint) {
         return <></>
@@ -377,15 +379,6 @@ function MaterializationContent(): JSX.Element {
         setIsMaterialized(!isMaterialized)
     }
 
-    // Offer an AI rewrite only where it can help: a SQL endpoint, on its latest version,
-    // whose live checks reject the query.
-    const isLatestVersion = !viewingVersion || viewingVersion.version === endpoint.current_version
-    const showOptimizeWithAI =
-        materializationFixFlagEnabled &&
-        isLatestVersion &&
-        endpoint.query?.kind === NodeKind.HogQLQuery &&
-        !isMaterialized
-
     const rangePairs = materializationPreview?.range_pairs ?? []
 
     return (
@@ -406,22 +399,6 @@ function MaterializationContent(): JSX.Element {
                             <span className="font-normal">Reason: {cannotMaterializeReason}</span>
                         </div>
                     </LemonBanner>
-                    {showOptimizeWithAI && (
-                        <LemonButton
-                            type="secondary"
-                            icon={<IconSparkles />}
-                            onClick={openMaterializationSuggestionModal}
-                            disabledReason={
-                                localQuery
-                                    ? 'Save or discard your query changes first — the AI rewrites the saved query'
-                                    : undefined
-                            }
-                            tooltip="AI rewrites the query into an equivalent form that passes our materialization checks. You review the suggested change in the SQL editor before anything is saved."
-                            data-attr="endpoint-optimize-with-ai"
-                        >
-                            Optimize with AI
-                        </LemonButton>
-                    )}
                 </div>
             )}
 
@@ -541,7 +518,6 @@ function MaterializationContent(): JSX.Element {
                 viewName={endpoint.name}
                 kind="endpoint"
             />
-            <MaterializationSuggestionModal />
         </div>
     )
 }

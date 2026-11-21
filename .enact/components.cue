@@ -43,6 +43,7 @@ _liveIngestionNode: [
 	"common/replay-headless/src/**", "common/replay-headless/{package.json,tsconfig.json,build.mjs}",
 	"common/replay-shared/src/**", "common/replay-shared/package.json",
 	"rust/common/hogvm/**", "rust/replay-anonymizer/**", "rust/replay-anonymizer-node/**",
+	"rust/ai-research/replay-core-v4/**", "rust/ai-research/replay-core-v4-node/**",
 ]
 _liveIngestionNodeTests: [
 	"nodejs/src/**/*.test.ts", "nodejs/src/**/__snapshots__/**", "nodejs/src/**/__tests__/**",
@@ -74,8 +75,10 @@ _py_cone: list.Concat([_djangoTree, [
 	".semgrep/rules/devex", ".stamphog", "docker/clickhouse/user_defined_function.xml",
 	"frontend/src/lib/constants.tsx", "frontend/src/queries/schema.json",
 	"frontend/src/taxonomy/core-filter-definitions-by-group.json", "livestream/bot",
+	"nodejs/src/ingestion/pipelines/ai/costs/providers/llm-costs.json",
+	"rust/capture-logs/src/metrics_avro_schema.rs",
 	"rust/feature-flags/src/properties", "rust/feature-flags/tests/fixtures",
-	"services/hogql-language-service/internal/completion", "services/mcp/schema", "services/mcp/src/templates",
+	"services/mcp/schema", "services/mcp/src/templates",
 ]])
 
 _python_monolith_include: list.Concat([_djangoTree, [
@@ -83,19 +86,23 @@ _python_monolith_include: list.Concat([_djangoTree, [
 	".github/scripts", ".github/workflows/ci-python.yml",
 	".semgrep/rules/devex", ".semgrep/rules/security", ".stamphog", "AGENTS.md", "docker",
 	"docker-compose.base.yml", "docker-compose.dev.yml", "docker-compose.profiles.yml",
+	"frontend/public/admin-console/console.css", "frontend/public/message-preferences.css",
 	"frontend/src/lib/agentScopes.generated.ts",
 	"frontend/src/lib/components/AgentObjectTags/objectKinds.generated.ts",
 	"frontend/src/lib/components/DomainConnect/templates",
 	"frontend/src/products.json", "frontend/src/queries/schema.json",
 	"frontend/src/taxonomy/core-filter-definitions-by-group.json",
 	"infra", "livestream/bot",
+	"nodejs/src/ingestion/pipelines/ai/costs/providers/llm-costs.json",
+	"nodejs/src/logs/parity/fixtures/modules/internal_verify.json",
+	"tools/change-prover/issuer.yml",
 	"packages/agent/packages/agent-contracts/src/model-catalog.generated.ts",
 	"packages/agent/packages/agent-contracts/src/objectTagKinds.generated.ts",
 	"packages/agent/packages/agent/src/utils/gateway-routing-cases.json",
+	"rust/capture-logs/src/metrics_avro_schema.rs",
 	"rust/common/ingestion_warnings/warning_types.generated.json",
 	"rust/feature-flags/src/properties", "rust/feature-flags/tests/fixtures",
 	"rust/persons_migrations",
-	"services/hogql-language-service/internal/completion",
 	"services/mcp/schema", "services/mcp/scripts/build-cli-agent-scopes.ts",
 	"services/mcp/scripts/generate-ui-apps.ts",
 	"services/mcp/src/lib/oauth-scopes.generated.ts",
@@ -272,6 +279,7 @@ pipeline: schema.#Pipeline & {
 			".flox/**", ".git-blame-ignore-revs", ".github/ISSUE_TEMPLATE/**", ".github/upstream-workflows/**", ".husky/**",
 			".idea/**", ".run/**", ".trunk/**", "**/.vscode/**", ".watchmanconfig",
 			".worktreeinclude", ".worktreelink", ".zed/**",
+			".emdash.json", ".superset/**", "orca.yaml", "t3.json",
 		]
 	}
 	triggers: {
@@ -396,8 +404,9 @@ pipeline: schema.#Pipeline & {
 			recorder:         "trace"
 			record_resources: _recordPy
 			target_scope: {
-				tests:          ["showcase/scripts/tests/test_*.py"]
-				default_target: "discover -s showcase/scripts/tests -t showcase/scripts/tests"
+				incidental_reads: ["nodejs/**"]
+				tests:            ["showcase/scripts/tests/test_*.py"]
+				default_target:   "discover -s showcase/scripts/tests -t showcase/scripts/tests"
 			}
 		}
 		"base": _djangoSuite & {
@@ -407,7 +416,8 @@ pipeline: schema.#Pipeline & {
 			depends_on:  ["py-root", "pytest_plugins", "pytest_runner", "test_env", "build_once", "plugin_transpiler"]
 			tags:        ["backend", "django", "api"]
 			// ee/hogai/test/test_llm.py reads the settings scene's ids (SETTINGS_MAP_PATH).
-			workspace_scope: {include_dependencies: false, include: list.Concat([_python_monolith_include, ["frontend/src/scenes/settings/SettingsMap.tsx"]])}
+			// posthog/test/repo_invariants/test_oob_denylist_coverage.py scans nodejs/src and rust.
+			workspace_scope: {include_dependencies: false, include: list.Concat([_python_monolith_include, ["frontend/src/scenes/settings/SettingsMap.tsx", "nodejs/src", "rust"]])}
 			watch_paths: list.Concat([[
 				"posthog/[!d]*/**", "posthog/d[!a]*/**", "posthog/*", "ee/**", "manage.py", "common/__init__.py",
 				"common/hogql_parser/**", "common/migration_utils/**",
@@ -465,6 +475,13 @@ pipeline: schema.#Pipeline & {
 				service_markers: ["django_db", "BaseTest", "APITestCase", "ClickhouseTestMixin", "NonDeterministicDatabaseTestMixin", "posthog.test"]
 			}
 			target_scope: {
+				not_run: [{
+					tests: [
+						"posthog/clickhouse/test/test_cluster.py",
+						"posthog/hogql/test/test_property_skip_indexes.py",
+					]
+					reason: "O1 pin cb94c35517cf: 1/351 (test_exception_summary) and 1/110 (test_mat_col_non_nullable_bloom_filter_3_lt) fail deterministically under rootless ClickHouse 26.9.5.2; revisit on next pin bump (usecases/posthog/LEARNINGS.md)"
+				}]
 				rules: [
 					{match: ["posthog/dags/**", "products/*/dags/**"], action: "ignore"},
 					{
@@ -500,7 +517,8 @@ pipeline: schema.#Pipeline & {
 				"products/*.py", "products/ruff.toml", "products/*/*.py", "products/*/backend/**",
 				"products/*/{dags,eval,evals,eval_harness,stats,fixtures,management,opensearch,observability,plan,adr,shared,scout,agent}/**",
 				"products/{data_catalog,posthog_ai,support,tasks,web_analytics}/scripts/**",
-				"products/stamphog/packages/**", "packages/agent/agent-shadow/**",
+				"products/stamphog/packages/**", "products/knowledge_writer/merge_check/**",
+				"packages/agent/agent-shadow/**",
 				".stamphog/**", "dagster_cloud.yaml", ".dagster_home/**",
 			]
 			jobs: typecheck: {
@@ -542,18 +560,71 @@ pipeline: schema.#Pipeline & {
 					},
 				]
 				tests: [for f in _pytestFiles {"products/*/backend/**/\(f)"}]
-				not_run: [{
-					tests: [
-						"products/warehouse_sources/backend/temporal/data_imports/tests/e2e/test_end_to_end.py",
-						"products/warehouse_sources/backend/temporal/data_imports/tests/e2e/test_mysql_source.py",
-					]
-					reason: "uses docker-py / Testcontainers (`DockerException`); enact CI is daemonless and zero-Docker"
-				}]
+				not_run: [
+					{
+						tests: [
+							"products/warehouse_sources/backend/temporal/data_imports/tests/e2e/test_end_to_end.py",
+							"products/warehouse_sources/backend/temporal/data_imports/tests/e2e/test_mysql_source.py",
+						]
+						reason: "uses docker-py / Testcontainers (`DockerException`); enact CI is daemonless and zero-Docker"
+					},
+					{
+						tests: [
+							"products/customer_analytics/backend/test/test_membership_discovery.py",
+							"products/knowledge_writer/backend/tests/test_intake.py",
+							"products/signals/backend/test/test_source_filter_preview.py",
+							"products/warehouse_sources/backend/temporal/data_imports/tests/e2e/github/test_github_integration.py",
+							"products/warehouse_sources/backend/temporal/data_imports/tests/e2e/stripe/test_stripe_source.py",
+						]
+						reason: "O1 pin cb94c35517cf: upstream-failing assertions at pin; revisit on next pin bump (usecases/posthog/LEARNINGS.md)"
+					},
+				]
 			}
 			test: _pytestRunTask & {
 				command: "showcase/scripts/build_once.sh canvas-builder-deps products/canvas/packages/canvas_builder/node_modules/.enact-build-key products/canvas/packages/canvas_builder/package.json products/canvas/packages/canvas_builder/package-lock.json -- npm ci --ignore-scripts --omit=dev --no-audit --no-fund --prefix products/canvas/packages/canvas_builder && bash showcase/scripts/run_sharded_pytest.sh @{targets_file}"
 			}
 			uses: _backendServices
+		}
+		"warehouse_sources": _djangoSuite & {
+			name:            "warehouse_sources"
+			title:           "Warehouse source vendors"
+			description:     "Service-free warehouse source vendor plugins under products/warehouse_sources/sources/ (matches upstream ci-python.yml warehouse-sources)"
+			depends_on:      ["base", "products", "py-root"]
+			workspace_scope: {include_dependencies: false, include: _python_monolith_include}
+			tags:            ["backend", "python", "warehouse_sources"]
+			watch_paths:     ["products/warehouse_sources/sources/**"]
+			max_shards:      8
+			shards:          4
+			shard_groups:    {by: "products/warehouse_sources/sources/*/", overhead_s: 1}
+			resources:       {cpus: 2.0, memory_mb: 4096}
+			record_resources: resources
+			scoping: {
+				domain_roots: ["posthog", "ee", "products"]
+			}
+			target_scope: {
+				rules: [
+					{
+						match: list.Concat([[
+							"products/warehouse_sources/sources/**/*.{py,ambr,json,yaml,yml}",
+							"products/warehouse_sources/backend/**/*.{py,ambr}",
+							"posthog/**/*.py", "ee/**/*.py", "common/**/*.py",
+						], _python_core_paths])
+						engine:      "python"
+						granularity: "file"
+					},
+					{
+						match:  _baseData
+						engine: "reach"
+					},
+				]
+				tests: [for f in _pytestFiles {"products/warehouse_sources/sources/**/\(f)"}]
+			}
+			test: {
+				command:          "bash showcase/scripts/run_sharded_pytest.sh @{targets_file}"
+				timeout:          "30m"
+				error_exit_codes: _pytestErrors
+				services:         []
+			}
 		}
 		"dagster": _djangoSuite & {
 			name:            "dagster"
@@ -616,6 +687,7 @@ pipeline: schema.#Pipeline & {
 				"products/**/*.py", "posthog/**/*.py", "ee/**/*.py", "common/**/*.py",
 				"products/*/product.yaml", "products/isolation_baseline.txt",
 				"products/model_crossing_uses_baseline.txt", "tach.toml", ".importlinter",
+				"hoglint.toml", "hoglint.exceptions.toml", "hoglint.ledger", "tools/hoglint/**",
 			]
 			lint: "uvx tach check --dependencies --exclude 'tests,test,**/test_*.py,**/*_test.py' && uvx tach check --interfaces"
 		}
@@ -789,7 +861,8 @@ pipeline: schema.#Pipeline & {
 				}
 			}
 			target_scope: {
-				fallback: "none"
+				fallback:         "none"
+				incidental_reads: ["**/package.json"]
 				rules: [
 					{
 						match: [
@@ -817,10 +890,16 @@ pipeline: schema.#Pipeline & {
 					},
 				]
 				tests: ["frontend/**/*.test.{ts,tsx,js,jsx}", "products/*/frontend/**/*.test.{ts,tsx,js,jsx}"]
-				not_run: [{
-					tests:  ["products/ai_observability/frontend/evaluations/evaluationBackfillsLogic.test.ts::evaluationBackfillsLogic anchors a relative preset on the project timezone"]
-					reason: "upstream test subtracts 7 days from startOf('day') across the US fall-back DST transition without re-anchoring the pre-transition offset"
-				}]
+				not_run: [
+					{
+						tests:  ["products/ai_observability/frontend/evaluations/evaluationBackfillsLogic.test.ts::evaluationBackfillsLogic anchors a relative preset on the project timezone"]
+						reason: "upstream test subtracts 7 days from startOf('day') across the US fall-back DST transition without re-anchoring the pre-transition offset"
+					},
+					{
+						tests:  ["products/ai_observability/frontend/redesign/trace/components/ToolCallValue.test.tsx"]
+						reason: "O1 pin cb94c35517cf: missing themeLogic mount in Kea store under isolated Jest run; revisit on next pin bump (usecases/posthog/LEARNINGS.md)"
+					},
+				]
 			}
 		}
 		"quill": {
@@ -871,7 +950,7 @@ pipeline: schema.#Pipeline & {
 				name:        "Test"
 				shards:      1
 				resources:   {cpus: 2.0, memory_mb: 6144}
-				recorder:    "trace"
+				recorder:    "own_linux"
 				recorded_by: ["enact-node"]
 				tasks: [
 					{
@@ -1008,14 +1087,10 @@ pipeline: schema.#Pipeline & {
 				recorded_by:      ["enact-node"]
 				tasks: [
 					{name: "Warm jest", command: "pnpm --dir typescript test --listTests --modulePathIgnorePatterns='<rootDir>/[.]turbo(/|$)' >/dev/null"},
-					{name: "Run Tests", command: "pnpm --dir typescript test --testNamePattern='^(?!date-like string grammar an ambiguous local time takes the first of the DST fold$)' ${ENACT_TEST_VERBOSE:+--verbose} {relative_targets} --modulePathIgnorePatterns='<rootDir>/[.]turbo(/|$)'"},
+					{name: "Run Tests", command: "pnpm --dir typescript test ${ENACT_TEST_VERBOSE:+--verbose} {relative_targets} --modulePathIgnorePatterns='<rootDir>/[.]turbo(/|$)'"},
 				]
 				target_scope: {
 					tests: ["common/hogvm/typescript/src/**/*.test.ts"]
-					not_run: [{
-						tests:  ["common/hogvm/typescript/src/__tests__/date.test.ts::date-like string grammar an ambiguous local time takes the first of the DST fold"]
-						reason: "upstream luxon 3.5 resolves an ambiguous local time from the zone's current offset, failing while America/New_York is on EST (Nov–Mar)"
-					}]
 				}
 			}
 		}
@@ -1136,6 +1211,9 @@ pipeline: schema.#Pipeline & {
 				not_run: [{
 					tests:  ["services/mcp/tests/live/**"]
 					reason: "test:live checks the live context-mill manifest over the network (ci-mcp-live-canary.yml, scheduled)"
+				}, {
+					tests:  ["services/mcp/tests/tools/featureFlags.integration.test.ts"]
+					reason: "O1 pin cb94c35517cf: /test_evaluation/ returns 503 without live feature-flags Rust service in mcp_integration harness; revisit on next pin bump (usecases/posthog/LEARNINGS.md)"
 				}]
 			}
 			jobs: {
@@ -1262,7 +1340,7 @@ pipeline: schema.#Pipeline & {
 					}
 					tasks: [{
 						name:    "Build E2E native & Rust services"
-						command: "rm -f nodejs/dist/.enact-build-key && showcase/scripts/build_e2e.sh && bash -c 'source showcase/scripts/live_posthog.sh && live_stage_rust .enact/state/live-bin/e2e capture personhog-replica personhog-router'"
+						command: "rm -f nodejs/dist/.enact-build-key && bash -c 'TURBO_ENV_MODE=loose RUSTFLAGS=\"${RUSTFLAGS:+$RUSTFLAGS }--cfg tokio_unstable --remap-path-prefix=$PWD=.\" showcase/scripts/build_e2e.sh' && bash -c 'source showcase/scripts/live_posthog.sh && live_stage_rust .enact/state/live-bin/e2e capture personhog-replica personhog-router'"
 						timeout: "30m"
 					}]
 				}
@@ -1281,6 +1359,15 @@ pipeline: schema.#Pipeline & {
 					target_scope: {
 						fallback: "all"
 						tests:    ["playwright/e2e/**/*.spec.ts", "products/*/frontend/e2e/**/*.spec.ts"]
+						not_run: [{
+							tests: [
+								"playwright/e2e/ingestion-capture.spec.ts",
+								"playwright/e2e/persons/persons.spec.ts",
+								"products/ai_observability/frontend/e2e/multimodal-trace.spec.ts",
+								"products/messaging/frontend/e2e/message-preferences.spec.ts",
+							]
+							reason: "O1 pin cb94c35517cf: live-stack E2E assertion drift at pin; revisit on next pin bump (usecases/posthog/LEARNINGS.md)"
+						}]
 						rules: [
 							{match: ["posthog/dags/**", "products/*/dags/**", "frontend/snapshots.yml", "playwright/snapshots.yml"], action: "ignore"},
 							{

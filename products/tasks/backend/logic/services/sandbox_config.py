@@ -1,5 +1,16 @@
 from django.conf import settings
 
+
+def agent_egress_staging_environment() -> bool:
+    return (
+        not settings.DEBUG and settings.CLOUD_DEPLOYMENT == "DEV" and str(settings.SANDBOX_PROVIDER).upper() == "MODAL"
+    )
+
+
+def agent_egress_staging_probe_enabled() -> bool:
+    return agent_egress_staging_environment() and bool(settings.AGENT_EGRESS_STAGING_PROBE_RUN_ID)
+
+
 # Production: 6 hours (safety net; workflow inactivity timeout handles cleanup).
 # Tests: 15 min so any sandbox orphaned by a crashed test auto-destroys quickly
 # instead of burning Modal capacity for hours.
@@ -20,4 +31,4 @@ MAX_SANDBOX_MEMORY_GB = 64
 MAX_SANDBOX_TTL_SECONDS = SANDBOX_TTL_SECONDS
 
 DEV_STACK_MEMORY_GB = 64.0
-DEV_STACK_CPU_REQUEST_CORES = 4.0
+DEV_STACK_CPU_REQUEST_CORES = 2.0

@@ -37,6 +37,8 @@ ignored_filter() {
         # token bucket) don't match it, and ci-rust.yml runs none of them.
         cymbal) echo 'test(rate_limiting)' ;;
         usage-ingestion) echo '' ;;
+        cohort-stream-processor) echo 'kind(test)' ;;
+        feature-flags) echo 'binary(stall_recovery)' ;;
         *) return 1 ;;
     esac
 }
@@ -45,6 +47,13 @@ ignored_tests=(
     "rust/usage-ingestion/tests/e2e.rs usage-ingestion::e2e"
     "rust/usage-ingestion/tests/load.rs usage-ingestion::load"
     "rust/usage-ingestion/tests/counters.rs usage-ingestion::counters"
+    "rust/cohort-stream-processor/tests/cascade_consumer.rs cohort-stream-processor::cascade_consumer"
+    "rust/cohort-stream-processor/tests/events_consumer.rs cohort-stream-processor::events_consumer"
+    "rust/cohort-stream-processor/tests/merge_consumer.rs cohort-stream-processor::merge_consumer"
+    "rust/cohort-stream-processor/tests/merge_durability.rs cohort-stream-processor::merge_durability"
+    "rust/cohort-stream-processor/tests/ownership_fence.rs cohort-stream-processor::ownership_fence"
+    "rust/cohort-stream-processor/tests/seed_consumer.rs cohort-stream-processor::seed_consumer"
+    "rust/feature-flags/tests/stall_recovery.rs feature-flags::stall_recovery"
 )
 if [ "$ignored" -eq 1 ] && [ "$#" -eq 0 ]; then
     for row in "${ignored_tests[@]}"; do set -- "$@" "${row%% *}"; done
@@ -55,7 +64,7 @@ source showcase/scripts/test_databases.sh
 
 pg_url="postgres://${PGUSER}:${PGPASSWORD:-posthog}@${PGHOST}:${PGPORT}"
 persons="$pg_url/posthog_persons"
-if [ "$ignored" -eq 0 ]; then
+if [ "$ignored" -eq 0 ] || [[ " $* " == *" rust/feature-flags/"* ]]; then
 # ci-rust.yml's setup_test_environment migrates test_posthog, which feature-flags reads
 # (TEST_DATABASE_URL) and the behavioral cohorts migrate into. Here test_posthog is the
 # backend's template, so the tests get a clone of it.
@@ -67,16 +76,19 @@ if [ "$ignored" -eq 0 ]; then
     export PERSONS_READ_DATABASE_URL="$persons" PERSONS_WRITE_DATABASE_URL="$persons"
     # As ci-rust.yml: the GeoIP database the feature-flags handler tests resolve (share/ is ignored).
     showcase/scripts/exclusive.sh geoip bin/download-mmdb
-elif [[ " $* " == *" rust/usage-ingestion/"* ]]; then
-    # (cymbal's ignored tests need their Redis alone.) usage-ingestion's e2e and load tests read ClickHouse's billing usage records, which its
-    # Kafka engine table consumes from the topic the service produces to. ci-rust.yml's
-    # setup_test_environment creates them in posthog_test, beside the suffixed topics. The jobs
-    # of a run share its ClickHouse and Kafka (the nodejs suite resets posthog_test), so this
-    # job's are a backend shard's: Django suffixes the database and every topic with
-    # PYTEST_XDIST_WORKER (posthog_test_<worker>, <topic>_test_<worker>).
-    worker="$(test_worker_name "${ENACT_COMPONENT:-rust_services}" "${ENACT_JOB:-test_ignored}" 1)"
-    PYTEST_XDIST_WORKER="$worker" TEST=1 uv run --no-sync python manage.py setup_test_environment --only-clickhouse
-    uv run --no-sync python showcase/scripts/create_test_kafka_topics.py --worker "$worker"
+fi
+if [ "$ignored" -ne 0 ]; then
+    if [[ " $* " == *" rust/usage-ingestion/"* ]]; then
+        # (cymbal's ignored tests need their Redis alone.) usage-ingestion's e2e and load tests read ClickHouse's billing usage records, which its
+        # Kafka engine table consumes from the topic the service produces to. ci-rust.yml's
+        # setup_test_environment creates them in posthog_test, beside the suffixed topics. The jobs
+        # of a run share its ClickHouse and Kafka (the nodejs suite resets posthog_test), so this
+        # job's are a backend shard's: Django suffixes the database and every topic with
+        # PYTEST_XDIST_WORKER (posthog_test_<worker>, <topic>_test_<worker>).
+        worker="$(test_worker_name "${ENACT_COMPONENT:-rust_services}" "${ENACT_JOB:-test_ignored}" 1)"
+        PYTEST_XDIST_WORKER="$worker" TEST=1 uv run --no-sync python manage.py setup_test_environment --only-clickhouse
+        uv run --no-sync python showcase/scripts/create_test_kafka_topics.py --worker "$worker"
+    fi
 fi
 # ci-rust.yml's environment: none of the profile's settings (rust_ci_env.sh).
 # shellcheck source=rust_ci_env.sh
@@ -94,6 +106,11 @@ endpoints=(
     TEST_REDIS_URL="redis://127.0.0.1:${ENVE_SERVICE_REDIS_PORT:?redis is not running}/"
     KAFKA_HOSTS="127.0.0.1:${ENVE_SERVICE_KAFKA_PORT:?kafka is not running}"
     OBJECT_STORAGE_ENDPOINT="http://127.0.0.1:${ENVE_SERVICE_SEAWEEDFS_PORT:?seaweedfs is not running}"
+    CHECKPOINT_S3_ENDPOINT="http://127.0.0.1:${ENVE_SERVICE_SEAWEEDFS_PORT:?seaweedfs is not running}"
+    CHECKPOINT_S3_REGION=us-east-1
+    CHECKPOINT_S3_BUCKET=posthog
+    CHECKPOINT_S3_ACCESS_KEY_ID=object_storage_root_user
+    CHECKPOINT_S3_SECRET_ACCESS_KEY=object_storage_root_password
     SEAWEEDFS_ENDPOINT="http://127.0.0.1:${ENVE_SERVICE_SEAWEEDFS_OPEN_PORT:?seaweedfs-open is not running}"
     ETCD_ENDPOINT="http://127.0.0.1:${ENVE_SERVICE_ETCD_PORT:?etcd is not running}"
     # No container runtime: the testcontainers tests (the k3s_integration binaries and
@@ -209,6 +226,9 @@ nextest() {
     case "$ignored:$package" in
         # Its sqlx pool's limit.
         0:property-defs-rs) args+=(--test-threads=4) ;;
+        0:batch-import-worker | 0:cohort-core | 0:common-cohort-team-access)
+            run+=(DATABASE_URL="$TEST_DATABASE_URL")
+            ;;
         # The Postgres and ClickHouse tests, against the Django schema's database and this
         # run's ClickHouse (the seeder's CLICKHOUSE_URL; upstream's is its default
         # localhost:8123).

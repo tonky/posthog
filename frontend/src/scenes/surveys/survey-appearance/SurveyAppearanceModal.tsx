@@ -1,6 +1,5 @@
 import clsx from 'clsx'
 import { useActions, useValues } from 'kea'
-import { getNextSurveyStep } from 'posthog-js/dist/surveys-preview'
 import { useState } from 'react'
 
 import { IconGear } from '@posthog/icons'
@@ -8,6 +7,7 @@ import { LemonButton, LemonDivider, LemonModal, LemonSelect, LemonSwitch, LemonT
 
 import { PayGateMini } from 'lib/components/PayGateMini/PayGateMini'
 import { LemonField } from 'lib/lemon-ui/LemonField'
+import { useQuillSurface } from 'lib/ui/QuillSurface/quillSurfaceContext'
 import { defaultSurveyAppearance } from 'scenes/surveys/constants'
 import {
     SurveyColorsAppearance,
@@ -15,17 +15,38 @@ import {
 } from 'scenes/surveys/survey-appearance/SurveyAppearanceSections'
 import { CommonProps } from 'scenes/surveys/survey-appearance/types'
 
-import { AvailableFeature, SurveyQuestionBranchingType, SurveyType } from '~/types'
+import { AvailableFeature, SurveyType } from '~/types'
 
 import { SurveyAppearancePreview } from '../SurveyAppearancePreview'
+import { getNextPreviewPageIndex } from '../surveyPreviewNavigation'
 import { surveysLogic } from '../surveysLogic'
+import { clampPreviewPageIndex, getIntroScreenPageOptions } from '../utils'
+import { QuillSurveyAppearanceModal } from './QuillSurveyAppearanceModal'
 
-type PreviewScreenSize = 'mobile' | 'tablet' | 'desktop'
+export type PreviewScreenSize = 'mobile' | 'tablet' | 'desktop'
 
-const screenDimensions: Record<PreviewScreenSize, { width: string; height: string; scale?: number }> = {
+export const screenDimensions: Record<PreviewScreenSize, { width: string; height: string; scale?: number }> = {
     mobile: { width: '375px', height: '667px' },
     tablet: { width: '768px', height: '1024px' },
     desktop: { width: '100%', height: '100%' },
+}
+
+export function previewPageOptions(survey: CommonProps['survey']): { label: string; value: number }[] {
+    return [
+        ...getIntroScreenPageOptions(survey),
+        ...survey.questions.map((question, index) => ({
+            label: `${index + 1}. ${question.question || 'Untitled Question'}`,
+            value: index,
+        })),
+        ...(survey.appearance?.displayThankYouMessage
+            ? [
+                  {
+                      label: `${survey.questions.length + 1}. Confirmation`,
+                      value: survey.questions.length,
+                  },
+              ]
+            : []),
+    ]
 }
 
 function SurveyPreview({
@@ -37,6 +58,7 @@ function SurveyPreview({
     const [surveyPreviewBackground, setSurveyPreviewBackground] = useState<'light' | 'dark'>('light')
 
     const currentDimensions = screenDimensions[activeScreenSize]
+    const effectivePageIndex = clampPreviewPageIndex(selectedPageIndex, survey)
     return (
         <div className="flex flex-[1.5] flex-col items-center justify-start rounded overflow-hidden gap-2">
             <LemonTabs
@@ -59,22 +81,9 @@ function SurveyPreview({
                         <LemonSelect
                             onChange={(pageIndex) => setSelectedPageIndex(pageIndex)}
                             className="whitespace-nowrap max-w-fit"
-                            value={selectedPageIndex || 0}
+                            value={effectivePageIndex}
                             id="survey-preview-question-select"
-                            options={[
-                                ...survey.questions.map((question, index) => ({
-                                    label: `${index + 1}. ${question.question || 'Untitled Question'}`,
-                                    value: index,
-                                })),
-                                ...(survey.appearance?.displayThankYouMessage
-                                    ? [
-                                          {
-                                              label: `${survey.questions.length + 1}. Confirmation`,
-                                              value: survey.questions.length,
-                                          },
-                                      ]
-                                    : []),
-                            ]}
+                            options={previewPageOptions(survey)}
                         />
                     </LemonField.Pure>
                 )}
@@ -100,21 +109,15 @@ function SurveyPreview({
             >
                 <SurveyAppearancePreview
                     survey={survey}
-                    previewPageIndex={selectedPageIndex || 0}
+                    previewPageIndex={effectivePageIndex}
                     positionStyles={{
                         position: 'absolute',
                     }}
                     onPreviewSubmit={(response) => {
-                        const nextStep = getNextSurveyStep(survey, selectedPageIndex, response)
-                        if (
-                            nextStep === SurveyQuestionBranchingType.End &&
-                            !survey.appearance?.displayThankYouMessage
-                        ) {
-                            return
+                        const nextPageIndex = getNextPreviewPageIndex(survey, effectivePageIndex, response)
+                        if (nextPageIndex !== null) {
+                            setSelectedPageIndex?.(nextPageIndex)
                         }
-                        setSelectedPageIndex?.(
-                            nextStep === SurveyQuestionBranchingType.End ? survey.questions.length : nextStep
-                        )
                     }}
                 />
             </div>
@@ -150,6 +153,7 @@ export function SurveyAppearanceModal({
 }: CommonProps): JSX.Element | null {
     const { setIsAppearanceModalOpen } = useActions(surveysLogic)
     const { surveysStylingAvailable, isAppearanceModalOpen } = useValues(surveysLogic)
+    const quillSurface = useQuillSurface()
 
     if (survey.type === SurveyType.API || survey.type === SurveyType.ExternalSurvey) {
         return null
@@ -157,6 +161,25 @@ export function SurveyAppearanceModal({
 
     const onClose = (): void => {
         setIsAppearanceModalOpen(false)
+    }
+
+    if (quillSurface) {
+        return (
+            <QuillSurveyAppearanceModal
+                survey={survey}
+                onAppearanceChange={onAppearanceChange}
+                validationErrors={validationErrors}
+                hasRatingButtons={hasRatingButtons}
+                hasPlaceholderText={hasPlaceholderText}
+                selectedPageIndex={selectedPageIndex}
+                setSelectedPageIndex={setSelectedPageIndex}
+                disabledReason={disabledReason}
+                isOpen={isAppearanceModalOpen}
+                surveysStylingAvailable={surveysStylingAvailable}
+                onOpen={() => setIsAppearanceModalOpen(true)}
+                onClose={onClose}
+            />
+        )
     }
 
     return (

@@ -1,5 +1,10 @@
 import { formatResponse } from '@/lib/response'
-import { POSTHOG_FORMATTED_RESULTS_OVERRIDE_KEY, POSTHOG_INFORMATIONAL_RESPONSE_KEY, type Context } from '@/tools/types'
+import {
+    POSTHOG_FORMATTED_RESULTS_OVERRIDE_KEY,
+    POSTHOG_INFORMATIONAL_RESPONSE_KEY,
+    POSTHOG_TEXT_PROJECTION_KEY,
+    type Context,
+} from '@/tools/types'
 
 /**
  * Adds a _posthogUrl field to a result. For object results it's a sibling field; for raw
@@ -29,9 +34,12 @@ export async function withPostHogUrl<T>(context: Context, result: T, path: strin
  * (configured per tool via `agent_note` in the YAML definition). For raw array results the
  * array is wrapped as `{ results, _agentNote }`, mirroring `withPostHogUrl`.
  */
-export type WithAgentNote<T = unknown> = T extends readonly (infer U)[]
-    ? { results: U[]; _agentNote: string }
-    : T & { _agentNote: string }
+export type WithAgentNote<T = unknown, Always extends boolean = true> = T extends readonly (infer U)[]
+    ? { results: U[] } & AgentNote<Always>
+    : T & AgentNote<Always>
+
+// A tool's response hook can drop the note, so its result type can't promise one.
+type AgentNote<Always extends boolean> = Always extends true ? { _agentNote: string } : { _agentNote?: string }
 
 /** Adds `_agentNote` to a result. Wraps raw arrays in `{ results, _agentNote }` (see type above). */
 export function withAgentNote<T>(result: T, note: string): WithAgentNote<T> {
@@ -114,6 +122,7 @@ export function withTextProjection<T>(result: T, fields: string[]): T {
         return result
     }
     const wrappedResult = { ...source }
+    Object.defineProperty(wrappedResult, POSTHOG_TEXT_PROJECTION_KEY, { value: true, enumerable: false })
     let formattedResult: string | undefined
     Object.defineProperty(wrappedResult, POSTHOG_FORMATTED_RESULTS_OVERRIDE_KEY, {
         enumerable: false,

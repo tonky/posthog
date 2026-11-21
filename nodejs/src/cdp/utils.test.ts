@@ -1,10 +1,12 @@
 import { DateTime } from 'luxon'
 
 import { Team } from '../types'
+import { createIncomingEvent } from './_tests/fixtures'
 import { CdpInternalEvent } from './schema'
 import { LogEntry, MinimalLogEntry } from './types'
 import {
     convertInternalEventToHogFunctionInvocationGlobals,
+    convertToHogFunctionInvocationGlobals,
     createAddLogFunction,
     fixLogDeduplication,
     getSensitiveValues,
@@ -55,6 +57,23 @@ describe('Utils', () => {
             })
         }
     )
+
+    test.each([
+        ['$feature_flag_called', '?event=%24feature_flag_called'],
+        ['$pageview', ''],
+    ])('names the event in the event link of %s only when it is a flag call', (eventName, expectedQuery) => {
+        const uuid = '018f0000-0000-7000-8000-000000000002'
+
+        const globals = convertToHogFunctionInvocationGlobals(
+            createIncomingEvent(1, { uuid, event: eventName }),
+            { id: 1, name: 'Test project' } as Team,
+            'https://us.posthog.com'
+        )
+
+        expect(globals.event.url).toBe(
+            `https://us.posthog.com/project/1/events/${uuid}/${encodeURIComponent(globals.event.timestamp)}${expectedQuery}`
+        )
+    })
 
     describe('gzip compressions', () => {
         it("should compress and decompress a string using gzip's sync functions", async () => {
@@ -155,6 +174,13 @@ describe('Utils', () => {
             expect(getSensitiveValues(hogFunction, { connection: value })).toContain('nested-private-key')
         })
 
+        it('masks the bare token of every secret dictionary entry, whatever the header name', () => {
+            const hogFunction: any = { inputs_schema: [{ key: 'secret_headers', type: 'dictionary', secret: true }] }
+            expect(
+                getSensitiveValues(hogFunction, { secret_headers: { 'X-Custom-Auth': 'Bearer sk_live_abc' } })
+            ).toContain('sk_live_abc')
+        })
+
         it('masks a credential-named input that the stored schema leaves non-secret', () => {
             const hogFunction: any = { inputs_schema: [{ key: 'apiKey', type: 'string', secret: false }] }
             expect(getSensitiveValues(hogFunction, { apiKey: 'stale-schema-key' })).toEqual(['stale-schema-key'])
@@ -193,6 +219,20 @@ describe('Utils', () => {
                 '{"key":"***REDACTED***"}',
             ],
             ['a quoted value in an object', [{ key: 'say "hi"' }], ['say "hi"'], '{"key":"***REDACTED***"}'],
+            ['a thrown error with an apostrophe', ["Error('it\\'s')"], ["it's"], "Error('***REDACTED***')"],
+            [
+                'a printed dict with a backslash and an apostrophe',
+                ["{'key': 'a\\\\\\'b'}"],
+                ["a\\'b"],
+                "{'key': '***REDACTED***'}",
+            ],
+            [
+                'a thrown error with a printed dict',
+                ["Error('{\\'key\\': \\'it\\\\'s\\'}')"],
+                ["it's"],
+                "Error('{\\'key\\': \\'***REDACTED***\\'}')",
+            ],
+            ['a thrown error with a JSON-encoded value', ["Error('q\\\"\\'x')"], ['q"\'x'], "Error('***REDACTED***')"],
             [
                 'repeated values that occur inside the marker',
                 [{ key: '*' }],

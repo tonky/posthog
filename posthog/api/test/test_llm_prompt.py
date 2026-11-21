@@ -23,18 +23,23 @@ from posthog.api.llm_prompt_serializers import (
     validate_prompt_label_name_value,
 )
 from posthog.api.services.llm_prompt import MAX_PROMPT_VERSION
+from posthog.auth import DelegatedOAuthAccessTokenAuthentication, ProjectSecretAPIKeyAuthentication
 from posthog.jwt import PosthogJwtAudience, encode_jwt
 from posthog.models import PersonalAPIKey
 from posthog.models.activity_logging.activity_log import ActivityLog
 from posthog.models.oauth import OAuthAccessToken, OAuthApplication
+from posthog.models.organization import OrganizationMembership
 from posthog.models.utils import generate_random_token_personal, hash_key_value
 from posthog.rate_limit import (
     BurstRateThrottle,
+    LLMPromptFetchProjectSecretApiKeyTeamRateThrottle,
     LLMPromptFetchRateThrottle,
     LLMPromptPublishBurstRateThrottle,
     SustainedRateThrottle,
 )
 from posthog.storage.llm_prompt_cache import get_prompt_by_name_from_cache
+from posthog.test.api_keys import create_project_secret_api_key
+from posthog.test.authentication_checks import covers_authentication
 
 from products.ai_observability.backend.models.llm_prompt import LLMPrompt, LLMPromptDependency, LLMPromptLabel
 from products.ai_observability.backend.prompt_references import (
@@ -595,20 +600,30 @@ class TestLLMPromptAPI(APIBaseTest):
         latest = LLMPrompt.objects.get(team=self.team, name="json-edit", version=2, deleted=False)
         assert latest.prompt == {"system": "You are an expert.", "temperature": 0.7}
 
-    def test_update_prompt_by_name_forbidden_for_personal_api_key_auth(self):
+    def test_update_prompt_by_name_personal_api_key_scope_enforcement(self):
         self.create_prompt_version(name="publish-prompt", version=1, is_latest=True, prompt="v1")
-        api_key = self.create_personal_api_key_with_scopes(["llm_prompt:read"])
-        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {api_key}")
 
+        read_key = self.create_personal_api_key_with_scopes(["llm_prompt:read"])
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {read_key}")
         read_response = self.client.get(f"/api/environments/{self.team.id}/llm_prompts/name/publish-prompt/")
-        write_response = self.client.patch(
+        read_scope_write_response = self.client.patch(
+            f"/api/environments/{self.team.id}/llm_prompts/name/publish-prompt/",
+            data={"prompt": "v2", "base_version": 1},
+            format="json",
+        )
+
+        write_key = self.create_personal_api_key_with_scopes(["llm_prompt:write"])
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {write_key}")
+        write_scope_write_response = self.client.patch(
             f"/api/environments/{self.team.id}/llm_prompts/name/publish-prompt/",
             data={"prompt": "v2", "base_version": 1},
             format="json",
         )
 
         assert read_response.status_code == status.HTTP_200_OK
-        assert write_response.status_code == status.HTTP_403_FORBIDDEN
+        assert read_scope_write_response.status_code == status.HTTP_403_FORBIDDEN
+        assert write_scope_write_response.status_code == status.HTTP_200_OK
+        assert write_scope_write_response.json()["version"] == 2
 
     def test_resolve_prompt_by_name_returns_selected_prompt_and_versions(self):
         historical = self.create_prompt_version(name="versions-prompt", version=1, is_latest=False, prompt="v1")
@@ -765,6 +780,109 @@ class TestLLMPromptAPI(APIBaseTest):
         assert invalidated_versions == list(range(1, 101))
         mock_delay.assert_called_once_with(self.team.id, "archive-prompt", 101, 105)
 
+    def test_unarchive_endpoint_restores_archived_versions(self):
+        self.create_prompt_version(name="restore-prompt", version=1, is_latest=False, prompt="v1")
+        self.create_prompt_version(name="restore-prompt", version=2, is_latest=True, prompt="v2")
+
+        premature = self.client.post(f"/api/environments/{self.team.id}/llm_prompts/name/restore-prompt/unarchive/")
+        assert premature.status_code == status.HTTP_404_NOT_FOUND
+
+        archive_response = self.client.post(
+            f"/api/environments/{self.team.id}/llm_prompts/name/restore-prompt/archive/"
+        )
+        assert archive_response.status_code == status.HTTP_204_NO_CONTENT
+
+        archived_list = self.client.get(f"/api/environments/{self.team.id}/llm_prompts/?archived=true")
+        assert archived_list.status_code == status.HTTP_200_OK
+        archived_rows = archived_list.json()["results"]
+        assert [(row["name"], row["version"]) for row in archived_rows] == [("restore-prompt", 2)]
+
+        unarchive_response = self.client.post(
+            f"/api/environments/{self.team.id}/llm_prompts/name/restore-prompt/unarchive/"
+        )
+        assert unarchive_response.status_code == status.HTTP_200_OK
+        assert unarchive_response.json()["version"] == 2
+        assert unarchive_response.json()["is_latest"] is True
+
+        fetched = self.client.get(f"/api/environments/{self.team.id}/llm_prompts/name/restore-prompt/")
+        assert fetched.status_code == status.HTTP_200_OK
+        assert fetched.json()["version"] == 2
+        assert self.client.get(f"/api/environments/{self.team.id}/llm_prompts/?archived=true").json()["results"] == []
+
+    def test_unarchive_endpoint_conflicts_when_active_prompt_holds_the_name(self):
+        self.create_prompt_version(name="reused-name", version=1, is_latest=True, prompt="old")
+        self.client.post(f"/api/environments/{self.team.id}/llm_prompts/name/reused-name/archive/")
+        recreate = self.client.post(
+            f"/api/environments/{self.team.id}/llm_prompts/",
+            data={"name": "reused-name", "prompt": "fresh"},
+            format="json",
+        )
+        assert recreate.status_code == status.HTTP_201_CREATED
+
+        response = self.client.post(f"/api/environments/{self.team.id}/llm_prompts/name/reused-name/unarchive/")
+
+        assert response.status_code == status.HTTP_409_CONFLICT
+        assert LLMPrompt.objects.filter(team=self.team, name="reused-name", deleted=False).count() == 1
+
+    def test_unarchive_endpoint_conflicts_when_name_was_archived_twice(self):
+        self.create_prompt_version(name="twice-archived", version=1, is_latest=False, prompt="gen1-v1")
+        self.create_prompt_version(name="twice-archived", version=2, is_latest=True, prompt="gen1-v2")
+        self.client.post(f"/api/environments/{self.team.id}/llm_prompts/name/twice-archived/archive/")
+        recreate = self.client.post(
+            f"/api/environments/{self.team.id}/llm_prompts/",
+            data={"name": "twice-archived", "prompt": "gen2-v1"},
+            format="json",
+        )
+        assert recreate.status_code == status.HTTP_201_CREATED
+        self.client.post(f"/api/environments/{self.team.id}/llm_prompts/name/twice-archived/archive/")
+
+        response = self.client.post(f"/api/environments/{self.team.id}/llm_prompts/name/twice-archived/unarchive/")
+
+        assert response.status_code == status.HTTP_409_CONFLICT
+        assert "archived more than once" in response.json()["detail"]
+        assert LLMPrompt.objects.filter(team=self.team, name="twice-archived", deleted=False).count() == 0
+        assert LLMPrompt.objects.filter(team=self.team, name="twice-archived", deleted=True).count() == 3
+
+    def test_unarchive_endpoint_conflicts_when_create_races_the_active_name_check(self):
+        self.create_prompt_version(name="raced-name", version=1, is_latest=True, prompt="old")
+        self.client.post(f"/api/environments/{self.team.id}/llm_prompts/name/raced-name/archive/")
+
+        def create_active_row_concurrently(*args: Any, **kwargs: Any) -> None:
+            self.create_prompt_version(name="raced-name", version=1, is_latest=True, prompt="fresh")
+
+        # Reference validation runs after the active-name check and before the
+        # restore write, so a row inserted there lands like a concurrent create.
+        with patch(
+            "posthog.api.services.llm_prompt.validate_reference_targets",
+            side_effect=create_active_row_concurrently,
+        ):
+            response = self.client.post(f"/api/environments/{self.team.id}/llm_prompts/name/raced-name/unarchive/")
+
+        assert response.status_code == status.HTTP_409_CONFLICT
+        assert LLMPrompt.objects.filter(team=self.team, name="raced-name", deleted=True, prompt="old").count() == 1
+
+    def test_unarchive_endpoint_rejects_restore_whose_references_are_archived(self):
+        self.create_prompt_version(name="ref-child", version=1, is_latest=True, prompt="child")
+        parent_create = self.client.post(
+            f"/api/environments/{self.team.id}/llm_prompts/",
+            data={"name": "ref-parent", "prompt": "Use: @@@prompt:name=ref-child|version=1@@@"},
+            format="json",
+        )
+        assert parent_create.status_code == status.HTTP_201_CREATED
+        assert (
+            self.client.post(f"/api/environments/{self.team.id}/llm_prompts/name/ref-parent/archive/").status_code
+            == status.HTTP_204_NO_CONTENT
+        )
+        assert (
+            self.client.post(f"/api/environments/{self.team.id}/llm_prompts/name/ref-child/archive/").status_code
+            == status.HTTP_204_NO_CONTENT
+        )
+
+        response = self.client.post(f"/api/environments/{self.team.id}/llm_prompts/name/ref-parent/unarchive/")
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert LLMPrompt.objects.filter(team=self.team, name="ref-parent", deleted=False).count() == 0
+
     def test_resolve_prompt_by_name_supports_explicit_version_for_session_auth(self):
         historical = self.create_prompt_version(name="resolve-prompt", version=1, is_latest=False, prompt="v1")
         self.create_prompt_version(name="resolve-prompt", version=2, is_latest=True, prompt="v2")
@@ -815,6 +933,65 @@ class TestLLMPromptAPI(APIBaseTest):
         response = self.client.get(f"/api/environments/{self.team.id}/llm_prompts/resolve/name/test-prompt/")
 
         assert response.status_code == status.HTTP_200_OK
+
+    @parameterized.expand(
+        [
+            ("get_by_name", "name/test-prompt/"),
+            ("list", ""),
+        ]
+    )
+    @covers_authentication(ProjectSecretAPIKeyAuthentication)
+    def test_project_secret_key_created_in_settings_fetches_prompts(self, _name: str, path: str) -> None:
+        self.create_prompt_version(name="test-prompt", prompt="Prompt text")
+        self.organization_membership.level = OrganizationMembership.Level.ADMIN
+        self.organization_membership.save()
+        created = self.client.post(
+            f"/api/projects/{self.team.id}/project_secret_api_keys",
+            {"label": "sdk", "scopes": ["llm_prompt:read"]},
+        )
+        assert created.status_code == status.HTTP_201_CREATED, created.content
+        self.client.logout()
+
+        response = self.client.get(
+            f"/api/environments/{self.team.id}/llm_prompts/{path}",
+            headers={"authorization": f"Bearer {created.json()['value']}"},
+        )
+
+        assert response.status_code == status.HTTP_200_OK, response.content
+        body = response.json()
+        prompt = body["results"][0] if "results" in body else body
+        assert prompt["name"] == "test-prompt"
+        assert prompt["prompt"] == "Prompt text"
+
+    @parameterized.expand(
+        [
+            ("resolve_by_name", ["llm_prompt:read"], True, "get", "resolve/name/test-prompt/"),
+            ("publish", ["llm_prompt:read"], True, "patch", "name/test-prompt/"),
+            ("create", ["llm_prompt:read"], True, "post", ""),
+            ("archive", ["llm_prompt:read"], True, "post", "name/test-prompt/archive/"),
+            ("key_without_the_scope", ["feature_flag:read"], True, "get", "name/test-prompt/"),
+            ("key_of_another_project", ["llm_prompt:read"], False, "get", "name/test-prompt/"),
+        ]
+    )
+    def test_project_secret_key_is_denied_outside_sdk_reads(
+        self, _name: str, scopes: list[str], key_is_for_this_project: bool, method: str, path: str
+    ) -> None:
+        self.create_prompt_version(name="test-prompt")
+        key_team = (
+            self.team if key_is_for_this_project else self.create_team_with_organization(organization=self.organization)
+        )
+        _, token = create_project_secret_api_key(key_team, scopes=scopes)
+        self.client.logout()
+
+        response = getattr(self.client, method)(
+            f"/api/environments/{self.team.id}/llm_prompts/{path}",
+            data={"name": "new-prompt", "prompt": "v2", "base_version": 1} if method != "get" else None,
+            format="json",
+            headers={"authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == status.HTTP_403_FORBIDDEN, response.content
+        assert LLMPrompt.objects.filter(team=self.team).count() == 1
 
     @override_settings(TEST=False)
     @patch("posthog.api.llm_prompt.capture_internal")
@@ -959,8 +1136,9 @@ class TestLLMPromptAPI(APIBaseTest):
 
         throttles = view.get_throttles()
 
-        assert len(throttles) == 1
+        assert len(throttles) == 2
         assert isinstance(throttles[0], LLMPromptFetchRateThrottle)
+        assert isinstance(throttles[1], LLMPromptFetchProjectSecretApiKeyTeamRateThrottle)
 
     def test_duplicate_prompt_creates_new_prompt_with_latest_content(self):
         self.create_prompt_version(name="original", version=1, is_latest=False, prompt="v1")
@@ -1110,6 +1288,13 @@ class TestLLMPromptAPI(APIBaseTest):
         # 4 lifecycle entries for my-prompt (the copy's "created" is keyed to the copy)
         # + label created and label deleted-on-archive.
         assert len(rows) == 6
+
+    def test_per_prompt_access_control_route_does_not_exist(self):
+        prompt = self.create_prompt_version(name="guarded-prompt")
+
+        response = self.client.get(f"/api/environments/{self.team.id}/llm_prompts/{prompt.id}/access_controls/")
+
+        assert response.status_code == status.HTTP_404_NOT_FOUND
 
 
 class TestLLMPromptConfigAPI(APIBaseTest):
@@ -1479,6 +1664,7 @@ class TestLLMPromptLabelsAPI(APIBaseTest):
     @override_settings(TEST=False)
     @patch("posthog.api.llm_prompt.capture_internal")
     @patch("posthog.api.llm_prompt.report_team_action")
+    @covers_authentication(DelegatedOAuthAccessTokenAuthentication)
     def test_list_reports_one_fetch_per_request_unless_the_caller_is_the_ui(
         self, mock_report: Any, mock_capture: Any
     ) -> None:

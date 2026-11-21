@@ -10,7 +10,11 @@ _rustWorkspaceEveryCrate: [
 	"rust/Dockerfile", "rust/Dockerfile.sqlx-migrate",
 ]
 _rustEveryCrate:    list.Concat([_rustWorkspaceEveryCrate, ["manage.py", "posthog/settings/**"], _djangoMigrations])
-_rustIgnoredBinaries: ["rust/usage-ingestion/tests/{e2e,load,counters}.rs"]
+_rustIgnoredBinaries: [
+	"rust/usage-ingestion/tests/{e2e,load,counters}.rs",
+	"rust/cohort-stream-processor/tests/{cascade_consumer,events_consumer,merge_consumer,merge_durability,ownership_fence,seed_consumer}.rs",
+	"rust/feature-flags/tests/stall_recovery.rs",
+]
 
 _livePersonhogRust: [
 	"rust/personhog-{common,coordination,proto,replica,router}/**",
@@ -70,7 +74,7 @@ pipeline: components: {
 		technology:      ["rust", "python"]
 		root:            "posthog/api/test/rust_integration"
 		depends_on:      ["test_env", "proto", "geoip"]
-		workspace_scope: include: list.Concat([_djangoRustTree, ["rust", "proto", "docker", "infra"]])
+		workspace_scope: include: list.Concat([_djangoRustTree, ["products", "rust", "proto", "docker", "infra"]])
 		watch_paths: list.Concat([[
 			"posthog/api/feature_flag.py",
 			"posthog/api/cohort.py",

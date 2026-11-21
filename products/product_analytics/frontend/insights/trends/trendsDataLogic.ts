@@ -2,8 +2,9 @@ import { MakeLogicType, actions, connect, kea, key, listeners, path, props, redu
 
 import { DataColorTheme, DataColorToken } from 'lib/colors'
 import type { Intervals } from 'lib/components/IntervalFilter/intervals'
-import { PIE_DISPLAY_TYPES } from 'lib/constants'
+import { PART_OF_WHOLE_DISPLAY_TYPES } from 'lib/constants'
 import { dayjs } from 'lib/dayjs'
+import { keyForInsightLogicProps } from 'lib/insights/sharedUtils'
 import { isMultiSeriesFormula } from 'lib/utils/strings'
 import {
     BreakdownColorConfig,
@@ -15,7 +16,6 @@ import { dashboardLogic } from 'scenes/dashboard/dashboardLogic'
 import { getColorFromToken } from 'scenes/dataThemeLogic'
 import { insightLogic } from 'scenes/insights/insightLogic'
 import { insightVizDataLogic } from 'scenes/insights/insightVizDataLogic'
-import { keyForInsightLogicProps } from 'scenes/insights/sharedUtils'
 import {
     BREAKDOWN_NULL_NUMERIC_LABEL,
     BREAKDOWN_NULL_STRING_LABEL,
@@ -27,8 +27,10 @@ import {
     getTrendResultCustomizationColorToken,
     getTrendResultCustomizationKey,
 } from 'scenes/insights/utils'
+import { ActionNames, getResultSeriesIndex } from 'scenes/insights/utils/resultSeries'
 
 import { isSharedView } from '~/exporter/exporterViewLogic'
+import { hasBreakdownFilter } from '~/queries/schema/node-guards'
 import {
     BreakdownFilter,
     EventsNode,
@@ -77,7 +79,6 @@ import type {
     WebStatsTableQuery,
 } from '~/queries/schema/schema-general'
 import type { PathsV2Query } from '~/queries/schema/schema-general'
-import { hasBreakdownFilter } from '~/queries/utils'
 import {
     ChartDisplayType,
     CountPerActorMathType,
@@ -166,6 +167,7 @@ export interface trendsDataLogicValues {
     trendsFilter: TrendsFilter | null | undefined // insightVizDataLogic
     vizSpecificOptions: VizSpecificOptions | null | undefined // insightVizDataLogic
     yAxisScaleType: string | null | undefined // insightVizDataLogic
+    actionNames: ActionNames
     alertSeries: EventsNode[]
     areAllSeriesVisible: boolean
     breakdownValuesLoading: boolean
@@ -175,6 +177,7 @@ export interface trendsDataLogicValues {
     getTrendsColor: (dataset: IndexedTrendResult) => string
     getTrendsColorToken: (dataset: IndexedTrendResult) => [DataColorTheme | null, DataColorToken | null]
     getTrendsHidden: (dataset: IndexedTrendResult) => boolean
+    getTrendsYAxisPosition: (dataset: IndexedTrendResult) => ResultCustomization['yAxisPosition']
     hasBreakdownMore: boolean
     hasPersonsModal: boolean
     hoveredDatasetIndex: number | null
@@ -187,8 +190,8 @@ export interface trendsDataLogicValues {
     movingAverageIntervals: number
     pieChartVizOptions:
         | {
-              disableHoverOffset?: boolean | undefined
-              hideAggregation?: boolean | undefined
+              disableHoverOffset?: boolean
+              hideAggregation?: boolean
           }
         | undefined
     resultCustomizationBy: ResultCustomizationBy
@@ -290,6 +293,7 @@ export interface trendsDataLogicMeta {
                 | null
         ) => EventsNode[]
         results: (insightData: Record<string, any>) => TrendResult[]
+        actionNames: (insightData: Record<string, any>) => ActionNames
         hasBreakdownMore: (insightData: Record<string, any>, isTrends: boolean) => boolean
         hasPersonsModal: (
             formula: string | null | undefined,
@@ -312,7 +316,18 @@ export interface trendsDataLogicMeta {
         indexedResults: (
             results: TrendResult[],
             display: ChartDisplayType | null | undefined,
-            lifecycleFilter: LifecycleFilter | null | undefined
+            lifecycleFilter: LifecycleFilter | null | undefined,
+            querySource:
+                | FunnelsQuery
+                | LifecycleQuery
+                | PathsQuery
+                | PathsV2Query
+                | RetentionQuery
+                | StickinessQuery
+                | TrendsQuery
+                | WebOverviewQuery
+                | WebStatsTableQuery
+                | null
         ) => IndexedTrendResult[]
         currentPeriodResult: (indexedResults: IndexedTrendResult[]) => IndexedTrendResult | undefined
         labelGroupType: (
@@ -367,8 +382,8 @@ export interface trendsDataLogicMeta {
         confidenceLevel: (trendsFilter: TrendsFilter | null | undefined) => number
         pieChartVizOptions: (arg: VizSpecificOptions | null | undefined) =>
             | {
-                  disableHoverOffset?: boolean | undefined
-                  hideAggregation?: boolean | undefined
+                  disableHoverOffset?: boolean
+                  hideAggregation?: boolean
               }
             | undefined
         mightContainFractionalNumbers: (
@@ -390,7 +405,7 @@ export interface trendsDataLogicMeta {
                 | Record<string, ResultCustomizationByValue>
                 | Record<number, ResultCustomizationByPosition>
                 | undefined,
-            getTheme: (themeId: number | string | null | undefined) => DataColorTheme | null, // insightVizDataLogic
+            getTheme: (themeId: number | string | null | undefined) => DataColorTheme | null,
             breakdownFilter: BreakdownFilter | null | undefined,
             querySource:
                 | FunnelsQuery
@@ -408,12 +423,41 @@ export interface trendsDataLogicMeta {
         getTrendsColor: (
             getTrendsColorToken: (dataset: IndexedTrendResult) => [DataColorTheme | null, DataColorToken | null]
         ) => (dataset: IndexedTrendResult) => string
+        getTrendsYAxisPosition: (
+            resultCustomizationBy: ResultCustomizationBy,
+            resultCustomizations:
+                | Record<string, ResultCustomizationByValue>
+                | Record<number, ResultCustomizationByPosition>
+                | undefined,
+            querySource:
+                | FunnelsQuery
+                | LifecycleQuery
+                | PathsQuery
+                | PathsV2Query
+                | RetentionQuery
+                | StickinessQuery
+                | TrendsQuery
+                | WebOverviewQuery
+                | WebStatsTableQuery
+                | null
+        ) => (dataset: IndexedTrendResult) => ResultCustomization['yAxisPosition']
         getTrendsHidden: (
             resultCustomizationBy: ResultCustomizationBy,
             resultCustomizations:
                 | Record<string, ResultCustomizationByValue>
                 | Record<number, ResultCustomizationByPosition>
-                | undefined
+                | undefined,
+            querySource:
+                | FunnelsQuery
+                | LifecycleQuery
+                | PathsQuery
+                | PathsV2Query
+                | RetentionQuery
+                | StickinessQuery
+                | TrendsQuery
+                | WebOverviewQuery
+                | WebStatsTableQuery
+                | null
         ) => (dataset: IndexedTrendResult) => boolean
         areAllSeriesVisible: (
             indexedResults: IndexedTrendResult[],
@@ -423,7 +467,18 @@ export interface trendsDataLogicMeta {
         getIsOnlyVisibleSeriesInLegend: (
             indexedResults: IndexedTrendResult[],
             resultCustomizationBy: ResultCustomizationBy,
-            getTrendsHidden: (dataset: IndexedTrendResult) => boolean
+            getTrendsHidden: (dataset: IndexedTrendResult) => boolean,
+            querySource:
+                | FunnelsQuery
+                | LifecycleQuery
+                | PathsQuery
+                | PathsV2Query
+                | RetentionQuery
+                | StickinessQuery
+                | TrendsQuery
+                | WebOverviewQuery
+                | WebStatsTableQuery
+                | null
         ) => (dataset: IndexedTrendResult) => boolean
     }
 }
@@ -538,6 +593,11 @@ export const trendsDataLogic = kea<trendsDataLogicType>([
             },
         ],
 
+        actionNames: [
+            (s) => [s.insightData],
+            (insightData: Record<string, any>): ActionNames => insightData.action_names ?? {},
+        ],
+
         hasBreakdownMore: [
             (s) => [s.insightData, s.isTrends],
             (insightData: Record<string, any>, isTrends: boolean) => {
@@ -587,14 +647,20 @@ export const trendsDataLogic = kea<trendsDataLogicType>([
         ],
 
         indexedResults: [
-            (s) => [s.results, s.display, s.lifecycleFilter],
+            (s) => [s.results, s.display, s.lifecycleFilter, s.querySource],
             (
                 results: TrendResult[],
                 display: ChartDisplayType | null | undefined,
-                lifecycleFilter: null | import('~/queries/schema/schema-general').LifecycleFilter | undefined
+                lifecycleFilter: null | import('~/queries/schema/schema-general').LifecycleFilter | undefined,
+                querySource: InsightQueryNode | null
             ): IndexedTrendResult[] => {
                 const defaultLifecyclesOrder = ['new', 'resurrecting', 'returning', 'dormant']
                 let indexedResults = results.map((result, index) => ({ ...result, seriesIndex: index }))
+
+                // One bar has one total, so a previous period saved with compare on is left out.
+                if (display === ChartDisplayType.ActionsProportionBar) {
+                    indexedResults = indexedResults.filter((r) => r.compare_label !== 'previous')
+                }
 
                 // want the previous bars to show before current bars
                 if (display === ChartDisplayType.ActionsUnstackedBar && indexedResults.some((x) => x.compare)) {
@@ -612,7 +678,7 @@ export const trendsDataLogic = kea<trendsDataLogicType>([
                     })
                 } else if (
                     display &&
-                    (display === ChartDisplayType.ActionsBarValue || PIE_DISPLAY_TYPES.includes(display))
+                    (display === ChartDisplayType.ActionsBarValue || PART_OF_WHOLE_DISPLAY_TYPES.includes(display))
                 ) {
                     indexedResults.sort((a, b) => {
                         const aValue =
@@ -643,19 +709,24 @@ export const trendsDataLogic = kea<trendsDataLogicType>([
                     )
                 }
 
+                const colorIndexKey = (item: TrendResult): string =>
+                    `${item.label}_${getResultSeriesIndex(querySource, item)}_${item?.breakdown_value}`
                 const colorIndexMap = new Map<string, number>()
                 indexedResults
                     .slice()
-                    .sort((a, b) => (a.action?.order ?? 0) - (b.action?.order ?? 0))
+                    .sort(
+                        (a, b) =>
+                            (getResultSeriesIndex(querySource, a) ?? 0) - (getResultSeriesIndex(querySource, b) ?? 0)
+                    )
                     .forEach((item) => {
-                        const key = `${item.label}_${item.action?.order}_${item?.breakdown_value}`
+                        const key = colorIndexKey(item)
                         if (!colorIndexMap.has(key)) {
                             colorIndexMap.set(key, colorIndexMap.size)
                         }
                     })
 
                 return indexedResults.map((item, index) => {
-                    const key = `${item.label}_${item.action?.order}_${item?.breakdown_value}`
+                    const key = colorIndexKey(item)
                     const colorIndex = colorIndexMap.get(key) ?? 0
                     return { ...item, colorIndex, id: index }
                 })
@@ -915,7 +986,7 @@ export const trendsDataLogic = kea<trendsDataLogicType>([
                             const overrideToken =
                                 findBreakdownColorConfig(
                                     overrides,
-                                    JSON.parse(getTrendDatasetKey(result))['breakdown_value'],
+                                    JSON.parse(getTrendDatasetKey(result, querySource))['breakdown_value'],
                                     breakdownFilter?.breakdown_type,
                                     breakdownPropertyKey
                                 )?.colorToken ?? null
@@ -924,8 +995,12 @@ export const trendsDataLogic = kea<trendsDataLogicType>([
                                 position: getTrendDatasetPosition(result),
                                 overrideToken:
                                     overrideToken ??
-                                    getTrendResultCustomization(resultCustomizationBy, result, resultCustomizations)
-                                        ?.color ??
+                                    getTrendResultCustomization(
+                                        resultCustomizationBy,
+                                        result,
+                                        resultCustomizations,
+                                        querySource
+                                    )?.color ??
                                     null,
                             }
                         })
@@ -937,7 +1012,7 @@ export const trendsDataLogic = kea<trendsDataLogicType>([
                 }
 
                 return (dataset: IndexedTrendResult): [DataColorTheme | null, DataColorToken | null] => {
-                    const breakdownValue = JSON.parse(getTrendDatasetKey(dataset))['breakdown_value']
+                    const breakdownValue = JSON.parse(getTrendDatasetKey(dataset, querySource))['breakdown_value']
 
                     // dashboard color overrides
                     const logic = dashboardLogic.findMounted({ id: props.dashboardId })
@@ -968,7 +1043,8 @@ export const trendsDataLogic = kea<trendsDataLogicType>([
                         const customizationColor = getTrendResultCustomization(
                             resultCustomizationBy,
                             dataset,
-                            resultCustomizations
+                            resultCustomizations,
+                            querySource
                         )?.color
                         const fallbackToken = customizationColor
                             ? undefined
@@ -984,7 +1060,8 @@ export const trendsDataLogic = kea<trendsDataLogicType>([
                             resultCustomizationBy,
                             resultCustomizations,
                             theme,
-                            dataset
+                            dataset,
+                            querySource
                         ),
                     ]
                 }
@@ -999,20 +1076,46 @@ export const trendsDataLogic = kea<trendsDataLogicType>([
                 }
             },
         ],
+        getTrendsYAxisPosition: [
+            (s) => [s.resultCustomizationBy, s.resultCustomizations, s.querySource],
+            (
+                resultCustomizationBy: ResultCustomizationBy,
+                resultCustomizations:
+                    | Record<string, ResultCustomizationByValue>
+                    | Record<number, ResultCustomizationByPosition>
+                    | undefined,
+                querySource:
+                    | FunnelsQuery
+                    | LifecycleQuery
+                    | PathsQuery
+                    | PathsV2Query
+                    | RetentionQuery
+                    | StickinessQuery
+                    | TrendsQuery
+                    | WebOverviewQuery
+                    | WebStatsTableQuery
+                    | null
+            ) =>
+                (dataset: IndexedTrendResult): ResultCustomization['yAxisPosition'] =>
+                    getTrendResultCustomization(resultCustomizationBy, dataset, resultCustomizations, querySource)
+                        ?.yAxisPosition,
+        ],
         getTrendsHidden: [
-            (s) => [s.resultCustomizationBy, s.resultCustomizations],
+            (s) => [s.resultCustomizationBy, s.resultCustomizations, s.querySource],
             (
                 resultCustomizationBy: ResultCustomizationBy,
                 resultCustomizations:
                     | Record<string, import('~/queries/schema/schema-general').ResultCustomizationByValue>
                     | Record<number, import('~/queries/schema/schema-general').ResultCustomizationByPosition>
-                    | undefined
+                    | undefined,
+                querySource: InsightQueryNode | null
             ) => {
                 return (dataset: IndexedTrendResult): boolean => {
                     const resultCustomization = getTrendResultCustomization(
                         resultCustomizationBy,
                         dataset,
-                        resultCustomizations
+                        resultCustomizations,
+                        querySource
                     )
                     return resultCustomization?.hidden || false
                 }
@@ -1033,11 +1136,12 @@ export const trendsDataLogic = kea<trendsDataLogicType>([
         ],
 
         getIsOnlyVisibleSeriesInLegend: [
-            (s) => [s.indexedResults, s.resultCustomizationBy, s.getTrendsHidden],
+            (s) => [s.indexedResults, s.resultCustomizationBy, s.getTrendsHidden, s.querySource],
             (
                 indexedResults: IndexedTrendResult[],
                 resultCustomizationBy: ResultCustomizationBy,
-                getTrendsHidden: (dataset: IndexedTrendResult) => boolean
+                getTrendsHidden: (dataset: IndexedTrendResult) => boolean,
+                querySource: InsightQueryNode | null
             ) => {
                 if (indexedResults.length < 2) {
                     return (): boolean => false
@@ -1046,25 +1150,30 @@ export const trendsDataLogic = kea<trendsDataLogicType>([
                 const visibleKeys = new Set(
                     indexedResults
                         .filter((r) => !getTrendsHidden(r))
-                        .map((r) => getTrendResultCustomizationKey(resultCustomizationBy, r))
+                        .map((r) => getTrendResultCustomizationKey(resultCustomizationBy, r, querySource))
                 )
                 const soloKey = visibleKeys.size === 1 ? [...visibleKeys][0] : null
 
                 return (dataset: IndexedTrendResult): boolean =>
                     soloKey !== null &&
                     !getTrendsHidden(dataset) &&
-                    getTrendResultCustomizationKey(resultCustomizationBy, dataset) === soloKey
+                    getTrendResultCustomizationKey(resultCustomizationBy, dataset, querySource) === soloKey
             },
         ],
     })),
 
     listeners(({ actions, values }) => ({
         toggleResultHidden: ({ dataset }) => {
-            const resultCustomizationKey = getTrendResultCustomizationKey(values.resultCustomizationBy, dataset)
+            const resultCustomizationKey = getTrendResultCustomizationKey(
+                values.resultCustomizationBy,
+                dataset,
+                values.querySource
+            )
             const resultCustomization = getTrendResultCustomization(
                 values.resultCustomizationBy,
                 dataset,
-                values.resultCustomizations
+                values.resultCustomizations,
+                values.querySource
             )
             actions.updateInsightFilter({
                 resultCustomizations: {
@@ -1080,11 +1189,16 @@ export const trendsDataLogic = kea<trendsDataLogicType>([
         toggleAllResultsHidden: ({ datasets, hidden }) => {
             const resultCustomizations: Record<string, ResultCustomization> = { ...values.resultCustomizations }
             for (const dataset of datasets) {
-                const resultCustomizationKey = getTrendResultCustomizationKey(values.resultCustomizationBy, dataset)
+                const resultCustomizationKey = getTrendResultCustomizationKey(
+                    values.resultCustomizationBy,
+                    dataset,
+                    values.querySource
+                )
                 const existing = getTrendResultCustomization(
                     values.resultCustomizationBy,
                     dataset,
-                    values.resultCustomizations
+                    values.resultCustomizations,
+                    values.querySource
                 )
                 resultCustomizations[resultCustomizationKey] = {
                     ...existing,
@@ -1098,7 +1212,7 @@ export const trendsDataLogic = kea<trendsDataLogicType>([
             } as Partial<TrendsFilter>)
         },
         setResultsHidden: ({ hiddenIds }) => {
-            const { indexedResults, resultCustomizationBy, resultCustomizations } = values
+            const { indexedResults, resultCustomizationBy, resultCustomizations, querySource } = values
             const hidden = new Set(hiddenIds)
             // Customizations are keyed per series identity, which several results can share when
             // assigning by value. Resolve visibility per key — a key stays visible while any of its
@@ -1106,13 +1220,18 @@ export const trendsDataLogic = kea<trendsDataLogicType>([
             const visibleKeys = new Set(
                 indexedResults
                     .filter((r) => !hidden.has(String(r.id)))
-                    .map((r) => getTrendResultCustomizationKey(resultCustomizationBy, r))
+                    .map((r) => getTrendResultCustomizationKey(resultCustomizationBy, r, querySource))
             )
 
             const next: Record<string, ResultCustomization> = { ...resultCustomizations }
             for (const result of indexedResults) {
-                const key = getTrendResultCustomizationKey(resultCustomizationBy, result)
-                const existing = getTrendResultCustomization(resultCustomizationBy, result, resultCustomizations)
+                const key = getTrendResultCustomizationKey(resultCustomizationBy, result, querySource)
+                const existing = getTrendResultCustomization(
+                    resultCustomizationBy,
+                    result,
+                    resultCustomizations,
+                    querySource
+                )
                 next[key] = {
                     ...existing,
                     assignmentBy: resultCustomizationBy,
@@ -1123,14 +1242,14 @@ export const trendsDataLogic = kea<trendsDataLogicType>([
             actions.updateInsightFilter({ resultCustomizations: next } as Partial<TrendsFilter>)
         },
         toggleOtherSeriesHidden: ({ dataset }) => {
-            const { indexedResults, resultCustomizationBy, resultCustomizations, getTrendsHidden } = values
+            const { indexedResults, resultCustomizationBy, resultCustomizations, getTrendsHidden, querySource } = values
             if (indexedResults.length < 2) {
                 return
             }
 
-            const clickedKey = getTrendResultCustomizationKey(resultCustomizationBy, dataset)
+            const clickedKey = getTrendResultCustomizationKey(resultCustomizationBy, dataset, querySource)
             const others = indexedResults.filter(
-                (d) => getTrendResultCustomizationKey(resultCustomizationBy, d) !== clickedKey
+                (d) => getTrendResultCustomizationKey(resultCustomizationBy, d, querySource) !== clickedKey
             )
             const isSoloMode = others.length > 0 && !getTrendsHidden(dataset) && others.every((d) => getTrendsHidden(d))
 
@@ -1138,8 +1257,13 @@ export const trendsDataLogic = kea<trendsDataLogicType>([
 
             if (isSoloMode) {
                 for (const r of indexedResults) {
-                    const key = getTrendResultCustomizationKey(resultCustomizationBy, r)
-                    const existing = getTrendResultCustomization(resultCustomizationBy, r, resultCustomizations)
+                    const key = getTrendResultCustomizationKey(resultCustomizationBy, r, querySource)
+                    const existing = getTrendResultCustomization(
+                        resultCustomizationBy,
+                        r,
+                        resultCustomizations,
+                        querySource
+                    )
                     next[key] = {
                         ...existing,
                         assignmentBy: values.resultCustomizationBy,
@@ -1148,8 +1272,13 @@ export const trendsDataLogic = kea<trendsDataLogicType>([
                 }
             } else {
                 for (const r of indexedResults) {
-                    const key = getTrendResultCustomizationKey(resultCustomizationBy, r)
-                    const existing = getTrendResultCustomization(resultCustomizationBy, r, resultCustomizations)
+                    const key = getTrendResultCustomizationKey(resultCustomizationBy, r, querySource)
+                    const existing = getTrendResultCustomization(
+                        resultCustomizationBy,
+                        r,
+                        resultCustomizations,
+                        querySource
+                    )
                     const isClicked = key === clickedKey
                     next[key] = {
                         ...existing,

@@ -4,6 +4,7 @@ import { Logger } from "../../../utils/logger";
 import {
   BUDGET_CAP_ENV,
   BUDGET_PRICES_ENV,
+  BUDGET_STEER_MAX_ATTEMPTS,
   DEFAULT_MODEL_PRICES,
   estimateMessageCostUsd,
   RunBudgetGuard,
@@ -57,6 +58,26 @@ describe("RunBudgetGuard", () => {
       DEFAULT_MODEL_PRICES,
     );
     expect(unknown).toBe(known);
+  });
+
+  test.each([
+    ["claude-fable-5-2", 48.2],
+    ["claude-fable-5-1", 61],
+  ])("prices %s at its own fable rates", (model, perMillionEach) => {
+    const cost = estimateMessageCostUsd(
+      {
+        id: "m1",
+        model,
+        usage: {
+          input_tokens: 1_000_000,
+          output_tokens: 1_000_000,
+          cache_read_input_tokens: 1_000_000,
+          cache_creation_input_tokens: 0,
+        },
+      },
+      DEFAULT_MODEL_PRICES,
+    );
+    expect(cost).toBeCloseTo(perMillionEach, 6);
   });
 
   test.each([
@@ -213,6 +234,23 @@ describe("RunBudgetGuard", () => {
     expect(guard.takePendingSteer()).toBeNull();
   });
 
+  test("retries a declined steer a bounded number of times", () => {
+    const guard = new RunBudgetGuard(1, DEFAULT_MODEL_PRICES, logger);
+    guard.recordAssistantMessage(opusCall("m1", 1_000_000));
+    expect(guard.hasRetryableSteer()).toBe(false);
+    for (let attempt = 1; attempt < BUDGET_STEER_MAX_ATTEMPTS; attempt++) {
+      expect(guard.takePendingSteer()).toBe("warn");
+      guard.recordSteer("warn", false);
+      guard.markUndelivered("warn");
+      expect(guard.hasRetryableSteer()).toBe(true);
+    }
+    expect(guard.takePendingSteer()).toBe("warn");
+    guard.recordSteer("warn", false);
+    guard.markUndelivered("warn");
+    expect(guard.hasRetryableSteer()).toBe(false);
+    expect(guard.takePendingSteer()).toBe("warn");
+  });
+
   test("never lets a lower or zeroed SDK total erase spend already counted", () => {
     const guard = new RunBudgetGuard(10, DEFAULT_MODEL_PRICES, logger);
     guard.recordAssistantMessage(opusCall("m1", 1_000_000));
@@ -327,6 +365,26 @@ describe("RunBudgetGuard", () => {
         "open the draft pull request",
       );
     }
+  });
+
+  test("uses GitLab publishing instructions at both budget thresholds", async () => {
+    const guard = RunBudgetGuard.fromEnv(
+      { [BUDGET_CAP_ENV]: "1", POSTHOG_GIT_PROVIDER: "gitlab" },
+      logger,
+      "publish",
+    )!;
+    for (const stage of ["warn", "critical"] as const) {
+      expect(guard.steerText(stage)).toContain("gitlab_merge_request");
+      expect(guard.steerText(stage)).not.toContain("git_signed_commit");
+    }
+    guard.recordAssistantMessage(opusCall("m1", 1_000_000));
+    guard.recordAssistantMessage(opusCall("m2", 500_000));
+    const result = await guard.preToolUseHook()(
+      spawn("Agent"),
+      undefined,
+      hookOptions(),
+    );
+    expect(JSON.stringify(result)).toContain("gitlab_merge_request");
   });
 
   test("snapshots the steers it recorded", () => {

@@ -1,4 +1,5 @@
 import type { Schemas } from '@/api/generated'
+import { wrapError } from '@/lib/errors'
 import { ProjectGetAllSchema } from '@/schema/tool-inputs'
 import { omitResponseFields } from '@/tools/tool-utils'
 import type { Context, ToolBase } from '@/tools/types'
@@ -10,8 +11,6 @@ const schema = ProjectGetAllSchema
 // project, which is the only tool that still returns it.
 const CREDENTIAL_FIELDS = [
     'api_token',
-    'secret_api_token',
-    'secret_api_token_backup',
     'live_events_token',
     'heatmaps_screenshot_secret',
 ] as const satisfies readonly (keyof Schemas.ProjectBackwardCompat)[]
@@ -24,7 +23,7 @@ export const getProjectsHandler: ToolBase<typeof schema, PublicProject[]>['handl
     const projectsResult = await context.api.organizations().projects({ orgId }).list()
 
     if (!projectsResult.success) {
-        throw new Error(`Failed to get projects: ${projectsResult.error.message}`)
+        throw wrapError(`Failed to get projects: ${projectsResult.error.message}`, projectsResult.error)
     }
 
     return projectsResult.data.map(

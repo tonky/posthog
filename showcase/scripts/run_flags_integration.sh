@@ -79,8 +79,9 @@ if [ "$serve" -eq 1 ]; then
     }
 
     # Its listen address is ADDRESS (config.rs); upstream's BIND_HOST and BIND_PORT set nothing,
-    # and its default, 127.0.0.1:3001, is the port upstream probes.
-    (cd rust && exec "${run[@]}" ADDRESS="127.0.0.1:$flags_port" \
+    # and its default, 127.0.0.1:3001, is the port upstream probes. Unoptimized debug async state
+    # machines overflow Tokio's 2 MiB default worker stack on aarch64, so set RUST_MIN_STACK.
+    (cd rust && exec "${run[@]}" RUST_MIN_STACK=16777216 ADDRESS="127.0.0.1:$flags_port" \
         MAXMIND_DB_PATH="$root/share/GeoLite2-City.mmdb" \
         READ_DATABASE_URL="$FLAGS_DATABASE" WRITE_DATABASE_URL="$FLAGS_DATABASE" \
         PERSONS_READ_DATABASE_URL="$persons" PERSONS_WRITE_DATABASE_URL="$persons" \

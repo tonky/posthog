@@ -1,7 +1,7 @@
-import { useValues } from 'kea'
+import { useActions, useValues } from 'kea'
 
 import { IconGraph } from '@posthog/icons'
-import { LemonBanner, LemonCollapse, LemonSkeleton } from '@posthog/lemon-ui'
+import { LemonCollapse, LemonSkeleton, LemonSwitch } from '@posthog/lemon-ui'
 
 import { humanFriendlyNumber } from 'lib/utils/numbers'
 
@@ -9,8 +9,17 @@ import { autoresearchPipelineLogic } from '../autoresearchPipelineLogic'
 import { DailyVolumeChart } from '../DailyVolumeChart'
 import { ProbabilityHistogram } from '../ProbabilityHistogram'
 import { EmptyTab } from './EmptyTab'
+import { PredictionActionsPanel } from './PredictionActionsPanel'
+import {
+    COVERAGE_PANEL_DATA_ATTR,
+    CoverageHistoryChart,
+    CoverageSummaryBanner,
+    LowCoverageNotice,
+} from './PredictionCoverage'
+import { PredictionSegmentCards } from './PredictionSegmentCards'
 import { ProbabilityUsersTable } from './ProbabilityUsersTable'
 import { ScoreNowButton } from './ScoreNowButton'
+import { SectionCard } from './SectionCard'
 
 function DailyVolumePanel(): JSX.Element {
     const { dailyVolume, dailyVolumeError } = useValues(autoresearchPipelineLogic)
@@ -32,7 +41,9 @@ function DailyVolumePanel(): JSX.Element {
 }
 
 function ProbabilityDistributionPanel(): JSX.Element {
-    const { probabilityHistogram, probabilityDistributionError } = useValues(autoresearchPipelineLogic)
+    const { probabilityHistogram, probabilityDistributionError, segmentThresholds, lowestBucket, lowestBucketHidden } =
+        useValues(autoresearchPipelineLogic)
+    const { setHideLowestBucket } = useActions(autoresearchPipelineLogic)
 
     if (probabilityDistributionError) {
         return (
@@ -51,25 +62,33 @@ function ProbabilityDistributionPanel(): JSX.Element {
             </p>
         )
     }
-    return <ProbabilityHistogram buckets={probabilityHistogram} />
-}
-
-function ScoringCoverageBanner(): JSX.Element | null {
-    const { scoringCoverage } = useValues(autoresearchPipelineLogic)
-    if (!scoringCoverage) {
-        return null
-    }
-    const { scored, eligible, rescoreDays } = scoringCoverage
     return (
-        <LemonBanner type="info">
-            The latest run scored {humanFriendlyNumber(scored)} of {humanFriendlyNumber(eligible)} users, starting with
-            users never scored, then those scored longest ago. Everyone is rescored about every {rescoreDays} days.
-        </LemonBanner>
+        <div className="space-y-3">
+            {lowestBucket && (
+                <LemonSwitch
+                    label="Hide the lowest bucket"
+                    checked={lowestBucketHidden}
+                    onChange={setHideLowestBucket}
+                    data-attr="autoresearch-hide-lowest-bucket"
+                />
+            )}
+            <ProbabilityHistogram
+                buckets={probabilityHistogram}
+                thresholds={segmentThresholds}
+                hideLowestBucket={lowestBucketHidden}
+            />
+            {lowestBucketHidden && lowestBucket && (
+                <p className="text-xs text-muted mb-0">
+                    {`The 0-10% bucket is hidden. It holds ${humanFriendlyNumber(lowestBucket.users)} people (${(100 * lowestBucket.share).toFixed(1)}% of everyone scored).`}
+                </p>
+            )}
+        </div>
     )
 }
 
 export function PredictionsTab(): JSX.Element {
-    const { pipeline } = useValues(autoresearchPipelineLogic)
+    const { pipeline, predictionsPanels } = useValues(autoresearchPipelineLogic)
+    const { setPredictionsPanels } = useActions(autoresearchPipelineLogic)
     if (!pipeline) {
         return <LemonSkeleton className="h-40" />
     }
@@ -86,17 +105,28 @@ export function PredictionsTab(): JSX.Element {
 
     return (
         <div className="space-y-6">
-            <p className="text-sm text-muted">
-                Each scoring run writes the champion's predicted probability to the{' '}
-                <code>{pipeline.output_person_property}</code> person property and emits an{' '}
-                <code>autoresearch_prediction</code> event. These views read straight from those events.
-            </p>
+            <LowCoverageNotice />
 
-            <ScoringCoverageBanner />
+            <SectionCard
+                title="Likelihood segments"
+                description={
+                    <>
+                        Each scoring run writes the champion's predicted probability to the{' '}
+                        <code>{pipeline.output_person_property}</code> person property and emits an{' '}
+                        <code>autoresearch_prediction</code> event. These views read straight from those events.
+                    </>
+                }
+            >
+                <PredictionSegmentCards />
+            </SectionCard>
+
+            <PredictionActionsPanel />
 
             <LemonCollapse
+                className="bg-surface-primary"
                 multiple
-                defaultActiveKeys={['distribution', 'highest']}
+                activeKeys={predictionsPanels}
+                onChange={setPredictionsPanels}
                 panels={[
                     {
                         key: 'distribution',
@@ -104,14 +134,20 @@ export function PredictionsTab(): JSX.Element {
                         content: <ProbabilityDistributionPanel />,
                     },
                     {
-                        key: 'highest',
-                        header: 'Highest-probability users (latest scoring run)',
-                        content: <ProbabilityUsersTable pipelineId={pipeline.id} direction="DESC" />,
+                        key: 'people',
+                        header: 'People (latest scoring run)',
+                        content: <ProbabilityUsersTable pipelineId={pipeline.id} />,
                     },
                     {
-                        key: 'lowest',
-                        header: 'Lowest-probability users (latest scoring run)',
-                        content: <ProbabilityUsersTable pipelineId={pipeline.id} direction="ASC" />,
+                        key: 'coverage',
+                        header: 'Coverage and score age',
+                        dataAttr: COVERAGE_PANEL_DATA_ATTR,
+                        content: (
+                            <div className="space-y-4">
+                                <CoverageSummaryBanner />
+                                <CoverageHistoryChart />
+                            </div>
+                        ),
                     },
                     {
                         key: 'volume',

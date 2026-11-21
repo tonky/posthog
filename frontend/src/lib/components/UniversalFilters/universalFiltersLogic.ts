@@ -9,7 +9,6 @@ import {
     hasRecentContext,
     recentTaxonomicFiltersLogic,
 } from 'lib/components/TaxonomicFilter/recentTaxonomicFiltersLogic'
-import { taxonomicFilterGroupTypeToEntityType } from 'scenes/insights/filters/ActionFilter/ActionFilterRow/ActionFilterRow'
 import { sessionRecordingSavedFiltersLogic } from 'scenes/session-recordings/filters/sessionRecordingSavedFiltersLogic'
 import { teamLogic } from 'scenes/teamLogic'
 
@@ -38,6 +37,7 @@ import {
     quickFilterToPropertyFilters,
 } from '../TaxonomicFilter/types'
 import { DEFAULT_UNIVERSAL_GROUP_FILTER } from './constants'
+import { taxonomicFilterGroupTypeToEntityType } from './utils'
 
 function isApplicableSavedFilter(
     item: unknown
@@ -120,11 +120,11 @@ export interface universalFiltersLogicActions {
         }
     ) => {
         item: {
-            key?: string | undefined
-            matchedOn?: string | undefined
-            matchedValue?: string | undefined
-            name?: string | undefined
-            propertyFilterType?: PropertyFilterType | undefined
+            key?: string
+            matchedOn?: string
+            matchedValue?: string
+            name?: string
+            propertyFilterType?: PropertyFilterType
         }
         propertyKey: TaxonomicFilterValue
         taxonomicGroup: TaxonomicFilterGroup

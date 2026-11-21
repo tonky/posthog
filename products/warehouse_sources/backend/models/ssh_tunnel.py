@@ -1,4 +1,6 @@
+import re
 import base64
+import socket
 import typing
 import dataclasses
 from io import StringIO
@@ -6,8 +8,12 @@ from typing import IO, Literal
 
 from cryptography.hazmat.primitives import serialization as crypto_serialization
 from cryptography.hazmat.primitives.asymmetric import dsa, ec, ed25519, rsa
-from paramiko import DSSKey, ECDSAKey, Ed25519Key, PKey, RSAKey
-from sshtunnel import SSHTunnelForwarder
+from paramiko import DSSKey, ECDSAKey, Ed25519Key, PKey, RSAKey, Transport
+from sshtunnel import (
+    SSH_TIMEOUT,
+    BaseSSHTunnelForwarderError,
+    SSHTunnelForwarder as _UnboundedSSHTunnelForwarder,
+)
 
 from posthog.dataclasses import frozen
 
@@ -35,40 +41,108 @@ _HOST_KEY_FORMAT_HELP = (
 )
 
 
+# Limits on each step of the connection to the SSH server. paramiko opens the socket with no
+# timeout when it gets an address, so a server that drops packets holds the caller for as long as
+# the kernel keeps retrying. The other three are the paramiko defaults, set here so that a paramiko
+# upgrade cannot remove a limit without a change in this file.
+SSH_TUNNEL_CONNECT_TIMEOUT_SECONDS = 15
+SSH_TUNNEL_BANNER_TIMEOUT_SECONDS = 15
+SSH_TUNNEL_HANDSHAKE_TIMEOUT_SECONDS = 15
+SSH_TUNNEL_AUTH_TIMEOUT_SECONDS = 30
+
+# Starts with the wording sshtunnel uses for every other failure to reach the gateway. The sources
+# match that prefix to classify the error and to show the user how to fix the tunnel.
+SSH_TUNNEL_CONNECT_TIMEOUT_ERROR = (
+    "Could not establish session to SSH gateway: the SSH server did not accept a connection within "
+    f"{SSH_TUNNEL_CONNECT_TIMEOUT_SECONDS} seconds"
+)
+
+
+class SSHTunnelForwarder(_UnboundedSSHTunnelForwarder):
+    """An `sshtunnel` forwarder with a limit on every step of the connection to the SSH server."""
+
+    def _get_transport(self) -> Transport:
+        # The parent method also handles a proxy. Nothing here configures one, so this keeps only
+        # its direct path and its transport settings.
+        try:
+            sock = socket.create_connection((self.ssh_host, self.ssh_port), timeout=SSH_TUNNEL_CONNECT_TIMEOUT_SECONDS)
+        except TimeoutError as e:
+            raise BaseSSHTunnelForwarderError(SSH_TUNNEL_CONNECT_TIMEOUT_ERROR) from e
+        sock.settimeout(SSH_TIMEOUT)
+        transport = Transport(sock)
+        transport.banner_timeout = SSH_TUNNEL_BANNER_TIMEOUT_SECONDS
+        transport.handshake_timeout = SSH_TUNNEL_HANDSHAKE_TIMEOUT_SECONDS
+        transport.auth_timeout = SSH_TUNNEL_AUTH_TIMEOUT_SECONDS
+        transport.set_keepalive(self.set_keepalive)
+        transport.use_compression(compress=self.compression)
+        transport.daemon = self.daemon_transport
+        return transport
+
+
 class HostKeyParseError(ValueError):
     """Carries the user-facing reason a pasted host key was rejected."""
+
+
+# What `ssh-keygen -lf` and the first-connect prompt print: `SHA256:<43 base64 chars>`, or the legacy
+# `MD5:` form of 16 colon-separated hex pairs, which is also pasted without its `MD5:` prefix.
+_FINGERPRINT_PATTERN = re.compile(
+    r"(?<![\w+/=:])SHA256:[A-Za-z0-9+/]{43}(?![\w+/=])"
+    r"|(?<![0-9A-Fa-f:])(?:MD5:)?(?:[0-9A-Fa-f]{2}:){15}[0-9A-Fa-f]{2}(?![0-9A-Fa-f:])"
+)
+
+
+def _build_host_key(key_type: str, key_base64: str) -> PKey | None:
+    """Build the key for a type and base64 blob, or return None when they are not a key."""
+    try:
+        key_bytes = base64.b64decode(key_base64, validate=True)
+        key = PKey.from_type_string(key_type, key_bytes)
+    except Exception:
+        return None
+    # paramiko zero-fills a short blob instead of raising, so a key whose base64 wrapped across
+    # lines still builds a well-formed key that can never match the server. Only a key that
+    # re-serializes to exactly the bytes pasted is the one the user meant to pin.
+    if key.asbytes() != key_bytes:
+        raise HostKeyParseError(
+            "The host key looks incomplete. Paste the whole key on one line, because a line "
+            "break inside the key data cuts it short."
+        )
+    return key
+
+
+def _key_type_from_blob(key_base64: str) -> str | None:
+    """Read the type name that an SSH public key blob starts with, as a 4-byte length and the name."""
+    try:
+        key_bytes = base64.b64decode(key_base64, validate=True)
+    except Exception:
+        return None
+    name_length = int.from_bytes(key_bytes[:4], "big")
+    key_type = key_bytes[4 : 4 + name_length].decode("ascii", errors="replace")
+    return key_type if key_type in _SSH_KEY_TYPES else None
 
 
 def _host_keys_from_line(line: str) -> list[PKey]:
     """Return every host key on one known_hosts-style line."""
     keys: list[PKey] = []
     tokens = line.split()
+    # A lone token can only be the key data with its type name left off.
+    if len(tokens) == 1 and (bare_type := _key_type_from_blob(tokens[0])) is not None:
+        key = _build_host_key(bare_type, tokens[0])
+        return [key] if key is not None else keys
     for index, token in enumerate(tokens):
         if token not in _SSH_KEY_TYPES or index + 1 >= len(tokens):
             continue
-        try:
-            key_bytes = base64.b64decode(tokens[index + 1], validate=True)
-            key = PKey.from_type_string(token, key_bytes)
-        except Exception:
-            continue
-        # paramiko zero-fills a short blob instead of raising, so a key whose base64 wrapped across
-        # lines still builds a well-formed key that can never match the server. Only a key that
-        # re-serializes to exactly the bytes pasted is the one the user meant to pin.
-        if key.asbytes() != key_bytes:
-            raise HostKeyParseError(
-                "The host key looks incomplete. Paste the whole key on one line, because a line "
-                "break inside the key data cuts it short."
-            )
-        keys.append(key)
+        key = _build_host_key(token, tokens[index + 1])
+        if key is not None:
+            keys.append(key)
     return keys
 
 
 def host_key_from_string(value: str) -> PKey:
     """Parse one pasted SSH host public key into a paramiko `PKey`.
 
-    Accepts a bare `<type> <base64>` public key or a `known_hosts` line. The returned key is what
-    paramiko compares the server's presented host key against, so a mismatch fails the handshake
-    instead of trusting whatever key the server offers.
+    Accepts a bare `<type> <base64>` public key, only the base64 key data, or a `known_hosts` line.
+    The returned key is what paramiko compares the server's presented host key against, so a
+    mismatch fails the handshake instead of trusting whatever key the server offers.
 
     Rejects a paste that carries more than one key. A tunnel pins exactly one key, so picking one
     of several would verify a server the user did not choose and silently ignore the rest.
@@ -92,6 +166,11 @@ def host_key_from_string(value: str) -> PKey:
             "you want to pin, for example the `ssh-ed25519` line."
         )
     if len(keys) == 0:
+        if _FINGERPRINT_PATTERN.search(value):
+            raise HostKeyParseError(
+                "That's a host key fingerprint, not the key. Paste the full public key line, for "
+                "example one line of `ssh-keyscan -p <port> <host>` output."
+            )
         raise HostKeyParseError(f"No SSH host key found. {_HOST_KEY_FORMAT_HELP}")
     return keys[0]
 

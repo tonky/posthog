@@ -51,24 +51,36 @@ from hogli_commands.complexity_lint import PYTHON_SCOPE, TEST_WARN_AT, TYPESCRIP
 from hogli_commands.depot_mirrors import mirror_violations
 from hogli_commands.devenv.generator import TRACKED_MPROCS_FILES
 from hogli_commands.lockfile_merge import LOCKFILE_GLOBS, missing_resolutions
+from hogli_commands.ownership_lint import check_test_owners
 from hogli_commands.preflight_checks import (
     SEMGREP_SCOPE,
     SNAPSHOT_MANIFEST,
     Outcome,
     Scope,
     Status,
+    check_cross_lane,
     check_merge_queue_lane,
     check_semgrep_devex,
     check_snapshot_baselines,
+    check_stack_depth,
     prepare_semgrep,
 )
-from hogli_commands.projections import all_outputs as projection_outputs
+from hogli_commands.projections import (
+    Tier,
+    all_outputs as projection_outputs,
+    all_triggers as projection_triggers,
+    projections_of,
+)
 from hogli_commands.size_lint import (
     SCOPE as SIZE_SCOPE,
     _merge_base,
 )
 
-Requirement = Literal["node", "desktop-node", "agent-node", "stack", "clickhouse", "python-env"]
+Requirement = Literal["node", "desktop-node", "agent-node", "stack", "clickhouse", "python-env", "migration-checks"]
+
+_UNMET_REASON: dict[Requirement, str] = {
+    "migration-checks": "POSTHOG_SKIP_MIGRATION_CHECKS is set (the flox default), so migrations:check checks nothing",
+}
 
 
 @dataclass
@@ -96,6 +108,7 @@ class DiffCheck:
     # for advisory checks whose findings print on stdout with exit 0. Warnings
     # never block and never count toward the advisory footer.
     soft: bool = False
+    detail_from_tail: bool = False
     # A check that reads the diff itself. It replaces `verify` and `fix`, and it has no auto-fix.
     run: Callable[[Scope], Outcome] | None = None
     matched: list[str] = field(default_factory=list)
@@ -171,6 +184,13 @@ DIFF_CHECKS: list[DiffCheck] = [
         soft=True,
     ),
     DiffCheck(
+        key="test-owners",
+        label="test ownership (a test file left with no team owner)",
+        triggers=["*"],
+        verify=None,
+        run=check_test_owners,
+    ),
+    DiffCheck(
         key="ruff-format",
         label="Python format (ruff format)",
         triggers=["*.py"],
@@ -216,7 +236,7 @@ DIFF_CHECKS: list[DiffCheck] = [
         # changed-file subset both blames files outside the diff and misses reverse-dependency
         # breakage), and that costs minutes cold. Naming the command lets the agent judge.
         verify=None,
-        advice="a type error costs a full CI re-run — consider `uv run mypy --cache-fine-grained .` (what CI runs)",
+        advice="a type error costs a full CI re-run — consider `uv run mypy .` (what CI runs)",
     ),
     DiffCheck(
         key="django-template-format",
@@ -291,6 +311,39 @@ DIFF_CHECKS: list[DiffCheck] = [
         requires=("python-env",),
     ),
     DiffCheck(
+        key="frontend-layers",
+        label="new static import from a lower frontend layer into a higher one",
+        triggers=[
+            "frontend/src/*",
+            "frontend/@posthog/*",
+            "products/*/frontend/*",
+            "common/*",
+            "packages/*",
+            "frontend/bin/layers.mjs",
+            "frontend/bin/layer-baseline.txt",
+        ],
+        verify=["hogli", "lint:frontend-layers"],
+        # Prune, never update: --update-baseline would grandfather the upward import the
+        # branch just added, which is the one thing the check exists to stop.
+        fix=["hogli", "lint:frontend-layers", "--prune-baseline"],
+        requires=("node",),
+    ),
+    DiffCheck(
+        key="frontend-css-coupling",
+        label="new component that uses a stylesheet's class without importing the stylesheet",
+        triggers=[
+            "frontend/src/*",
+            "products/*/frontend/*",
+            "frontend/bin/cssCoupling.mjs",
+            "frontend/bin/css-coupling-baseline.txt",
+        ],
+        verify=["hogli", "lint:frontend-css-coupling"],
+        # Prune, never update: --update-baseline would grandfather the coupling the
+        # branch just added, which is the one thing the check exists to stop.
+        fix=["hogli", "lint:frontend-css-coupling", "--prune-baseline"],
+        requires=("node",),
+    ),
+    DiffCheck(
         key="workflow-lint",
         label="workflow-convention failure in .github/workflows",
         triggers=[".github/workflows/*.yml", ".github/workflows/*.yaml"],
@@ -328,20 +381,31 @@ DIFF_CHECKS: list[DiffCheck] = [
         # cannot drift on which diffs need a regen. The outputs count too, so a hand-edit
         # to one is caught.
         triggers=[
-            *BUILD_TRIGGERS["build:projections"],
-            *projection_outputs(),
+            *projection_triggers(Tier.PREFLIGHT),
+            *projection_outputs(Tier.PREFLIGHT),
         ],
-        verify=["hogli", "build:projections", "--check"],
-        fix=["hogli", "build:projections"],
+        verify=["hogli", "build:projections", "--check", "--tier", Tier.PREFLIGHT],
+        fix=["hogli", "build:projections", "--tier", Tier.PREFLIGHT],
+        requires=("python-env",),
+    ),
+    DiffCheck(
+        key="ci-projections",
+        label="sources of CI-only projections changed (outputs may need a regen)",
+        triggers=[
+            path for projection in projections_of(Tier.CI) for path in (*projection.triggers, *projection.outputs)
+        ],
+        verify=None,
+        fix=["hogli", "build:projections", "--tier", Tier.CI],
         requires=("python-env",),
     ),
     DiffCheck(
         key="migrations",
-        label="migration conflict / orphaned migration",
+        label="migration conflict, or migrations not applied to the local database",
         triggers=["*/migrations/*.py"],
         # migrations:check declares both postgresql and clickhouse services.
         verify=["hogli", "migrations:check"],
-        requires=("stack", "clickhouse"),
+        requires=("migration-checks", "stack", "clickhouse"),
+        detail_from_tail=True,
     ),
     DiffCheck(
         key="snapshot-baselines",
@@ -358,6 +422,21 @@ DIFF_CHECKS: list[DiffCheck] = [
         run=check_semgrep_devex,
     ),
     DiffCheck(
+        key="new-ee-files",
+        label="new file under ee/ (needs human approval)",
+        triggers=["ee/*"],
+        verify=["python", ".github/scripts/check-no-new-ee-files.py"],
+        takes_diff_scope=True,
+    ),
+    DiffCheck(
+        key="cross-lane",
+        label="Python or frontend changes mixed with Node or Rust changes (fails CI without a label)",
+        triggers=["*"],
+        verify=None,
+        run=check_cross_lane,
+        soft=True,
+    ),
+    DiffCheck(
         key="merge-queue-lane",
         label="merge queue lane this diff claims",
         triggers=["*"],
@@ -368,9 +447,9 @@ DIFF_CHECKS: list[DiffCheck] = [
 ]
 
 
-# A change under these paths can fail .github/workflows/ci-backend-shadow-drift.yml, which runs
+# A change under these paths can fail .github/workflows/ci-depot-action-mirrors.yml, which runs
 # the same depot_mirrors check. Running it here lands the failure pre-push instead of in CI.
-SHADOW_DRIFT_TRIGGERS = [".github/workflows/ci-backend.yml", ".github/actions/**", ".depot/**"]
+DEPOT_MIRROR_TRIGGERS = [".github/actions/**", ".depot/**"]
 
 
 def _has_node_modules() -> bool:
@@ -420,6 +499,8 @@ def _capability_met(req: Requirement) -> bool:
         return (REPO_ROOT / "packages" / "agent" / "node_modules" / ".pnpm").exists()
     if req == "python-env":
         return _project_python_ready()
+    if req == "migration-checks":
+        return not os.environ.get("POSTHOG_SKIP_MIGRATION_CHECKS")
     if req == "stack":
         # Postgres reachable — proxy for "dev stack is running".
         return _port_open(5432)
@@ -519,7 +600,7 @@ def _run_diff_check(
         # finding, and sends anyone who already ran it looking for a diff that isn't there.
         return "advisory", f"if you have not run `{' '.join(chk.fix or [])}` since changing them, run it and commit"
     elif unmet:
-        return "skipped", f"needs {', '.join(unmet)}"
+        return "skipped", "; ".join(_UNMET_REASON.get(req, f"needs {req}") for req in unmet)
     else:
         cmd = list(chk.verify)
     if chk.takes_diff_scope:
@@ -549,8 +630,11 @@ def _run_diff_check(
             warn_lines = result.stdout.strip().splitlines()
             return "warning", " · ".join(warn_lines[:3])
         return "pass", "fixed" if do_fix else "ok"
-    lines = (result.stdout or result.stderr).strip().splitlines()
-    return "fail", " · ".join(lines[:3]) if lines else f"exit {result.returncode}"
+    if chk.detail_from_tail:
+        lines = [line for line in f"{result.stdout}\n{result.stderr}".splitlines() if line.strip()][-3:]
+    else:
+        lines = (result.stdout or result.stderr).strip().splitlines()[:3]
+    return "fail", " · ".join(lines) if lines else f"exit {result.returncode}"
 
 
 # Branch-freshness backstop thresholds. The risk signals in ``_staleness_risks``
@@ -576,6 +660,11 @@ def _git(*args: str, timeout: float = 5.0) -> str | None:
     """Like ``_git_run`` but collapses to trimmed stdout, None on any failure."""
     result = _git_run(*args, timeout=timeout)
     return result.stdout.strip() if result is not None and result.returncode == 0 else None
+
+
+def _untracked_count() -> int:
+    out = _git("ls-files", "--others", "--exclude-standard", "-z")
+    return len([path for path in out.split("\0") if path]) if out else 0
 
 
 def _fetch_marker() -> Path | None:
@@ -812,12 +901,24 @@ def _emit_telemetry(summary: dict[str, Any]) -> None:
 @click.option("--against", default=None, help="Diff against this base ref instead of the branch default.")
 @click.option("--json", "as_json", is_flag=True, help="Emit the result summary as JSON.")
 @click.option(
+    "--include-untracked",
+    is_flag=True,
+    help="Also check (and with --fix, rewrite) files git does not track. Off by default.",
+)
+@click.option(
     "--prepare-semgrep",
     "prepare_semgrep_tool",
     is_flag=True,
     help="Cache the pinned Semgrep tool without running checks.",
 )
-def ci_preflight(do_fix: bool, strict: bool, against: str | None, as_json: bool, prepare_semgrep_tool: bool) -> None:
+def ci_preflight(
+    do_fix: bool,
+    strict: bool,
+    against: str | None,
+    as_json: bool,
+    include_untracked: bool,
+    prepare_semgrep_tool: bool,
+) -> None:
     if os.environ.get("HOGLI_PREFLIGHT_DISABLED", "").lower() in {"1", "true"}:
         disabled_summary: dict[str, Any] = {"mode": "disabled", "results": []}
         if as_json:
@@ -844,8 +945,9 @@ def ci_preflight(do_fix: bool, strict: bool, against: str | None, as_json: bool,
     # --strict is the blocking pre-push hook: scope it to the committed diff, since a
     # push only carries commits. Untracked/uncommitted work never reaches CI, so gating
     # a push on lint errors in a scratch file is a false block. Advisory/--fix runs keep
-    # the working tree in scope so agents can clean edits before committing.
-    files = changed_files(against, include_worktree=not strict)
+    # the working tree in scope so agents can clean edits before committing, minus untracked
+    # files, which are often scratch scripts and local tool configs that --fix must not rewrite.
+    files = changed_files(against, include_worktree=not strict, include_untracked=include_untracked)
     base = against or "origin/master"
 
     triggered: list[DiffCheck] = []
@@ -854,13 +956,19 @@ def ci_preflight(do_fix: bool, strict: bool, against: str | None, as_json: bool,
         # A check that can only warn is not worth its run time in the pre-push hook.
         if chk.matched and not (strict and chk.soft and chk.run is not None):
             triggered.append(chk)
-    shadow_drift_triggered = any(matches_globs(path, SHADOW_DRIFT_TRIGGERS) for path in files)
+    depot_mirrors_triggered = any(matches_globs(path, DEPOT_MIRROR_TRIGGERS) for path in files)
 
     results: list[dict[str, Any]] = []
     failures = 0
     advisories = 0
     if not as_json:
         click.secho(f"\n  ci:preflight — {len(files)} changed file(s) vs {base}\n", bold=True)
+        if not strict and not include_untracked and (untracked := _untracked_count()):
+            click.secho(
+                f"  {untracked} untracked file(s) not checked. `git add` the ones that belong to this change, "
+                "or pass --include-untracked.\n",
+                dim=True,
+            )
 
     # Always-on branch-health check, independent of which files changed: a stale
     # branch breaks CI on merge no matter what the diff touches. Advisory only —
@@ -871,15 +979,22 @@ def ci_preflight(do_fix: bool, strict: bool, against: str | None, as_json: bool,
         click.secho(f"   {_ICON[stale_status]} [staleness] branch freshness vs master", fg=_COLOR[stale_status])
         click.echo(f"       {stale_detail}")
 
-    if shadow_drift_triggered:
+    depth_status, depth_detail = check_stack_depth()
+    failures += depth_status == "fail"
+    results.append({"check": "stack-depth", "status": depth_status, "files": 0, "detail": depth_detail})
+    if not as_json and depth_status != "skipped":
+        click.secho(f"   {_ICON[depth_status]} [stack-depth] open layers in this gh stack", fg=_COLOR[depth_status])
+        click.echo(f"       {depth_detail}")
+
+    if depot_mirrors_triggered:
         violations = mirror_violations(REPO_ROOT, set(files))
         drift_status: Status = "fail" if violations else "pass"
         drift_detail = " · ".join(violations[:3]) if violations else "depot mirrors in sync"
         failures += drift_status == "fail"
-        results.append({"check": "shadow-drift", "status": drift_status, "files": 1, "detail": drift_detail})
+        results.append({"check": "depot-mirrors", "status": drift_status, "files": 1, "detail": drift_detail})
         if not as_json:
             click.secho(
-                f"   {_ICON[drift_status]} [shadow-drift] depot shadow drift (.depot mirrors of backend CI)",
+                f"   {_ICON[drift_status]} [depot-mirrors] depot action mirrors (.depot/actions)",
                 fg=_COLOR[drift_status],
             )
             click.echo(f"       {drift_detail}")
@@ -897,7 +1012,7 @@ def ci_preflight(do_fix: bool, strict: bool, against: str | None, as_json: bool,
 
     summary = {
         "changed_files": len(files),
-        "triggered": (["shadow-drift"] if shadow_drift_triggered else []) + [c.key for c in triggered],
+        "triggered": (["depot-mirrors"] if depot_mirrors_triggered else []) + [c.key for c in triggered],
         "failures": failures,
         "advisories": advisories,
         "mode": "fix" if do_fix else ("strict" if strict else "advisory"),
@@ -907,7 +1022,7 @@ def ci_preflight(do_fix: bool, strict: bool, against: str | None, as_json: bool,
     if as_json:
         click.echo(json.dumps(summary))
     else:
-        if not triggered and not shadow_drift_triggered:
+        if not triggered and not depot_mirrors_triggered:
             click.secho("   ✓ Nothing in this diff maps to a known CI failure class.", fg="green")
         click.echo()
         click.echo(

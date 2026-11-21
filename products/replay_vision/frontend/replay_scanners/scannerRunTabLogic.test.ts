@@ -4,10 +4,13 @@ import { lemonToast } from 'lib/lemon-ui/LemonToast'
 
 import { useMocks } from '~/mocks/jest'
 import { initKeaTests } from '~/test/init'
+import { AccessControlLevel, AccessControlResourceType, type AppContext } from '~/types'
 
 import { visionQuotaLogic } from '../logics/visionQuotaLogic'
 import { makeQuota } from '../utils/quotaTestUtils'
+import { replayScannerLogic } from './replayScannerLogic'
 import { scannerRunTabLogic } from './scannerRunTabLogic'
+import type { ScannerFormValues } from './types'
 
 describe('scannerRunTabLogic', () => {
     let logic: ReturnType<typeof scannerRunTabLogic.build>
@@ -78,6 +81,38 @@ describe('scannerRunTabLogic', () => {
         // On the server's default page size the tail is dropped and those sessions render "Not scanned";
         // one-per-row would drop them as soon as a retry stacks a second observation onto a session.
         expect(lookupUrl).toContain('limit=12')
+    })
+
+    it('splits a large selection into short lookups and keeps the chunks that succeed', async () => {
+        const sessionIds = Array.from(
+            { length: 120 },
+            (_, i) => `0190f5c2-0000-7000-8000-${String(i).padStart(12, '0')}`
+        )
+        const lookedUp: string[][] = []
+        useMocks({
+            get: {
+                '/api/projects/:team/vision/scanners/:id/observations/': ({ request }: { request: Request }) => {
+                    const ids = new URL(request.url).searchParams.get('session_id')?.split(',') ?? []
+                    lookedUp.push(ids)
+                    if (ids.includes(sessionIds[0])) {
+                        return [500, {}]
+                    }
+                    return [
+                        200,
+                        { results: ids.map((id) => ({ id: `obs-${id}`, session_id: id, status: 'succeeded' })) },
+                    ]
+                },
+            },
+        })
+
+        await expectLogic(logic, () => logic.actions.setVisibleSessionIds(sessionIds)).toDispatchActions([
+            'loadObservationsSuccess',
+        ])
+
+        expect(Math.max(...lookedUp.map((ids) => ids.length))).toBeLessThanOrEqual(50)
+        expect(lookedUp.flat().sort()).toEqual([...sessionIds].sort())
+        // The first chunk's lookup failed, so only the other chunks' sessions carry an observation.
+        expect(Object.keys(logic.values.observationBySession).sort()).toEqual(sessionIds.slice(50).sort())
     })
 
     it('releases the pending bridge once the scanned session lands in the lookup', async () => {
@@ -288,5 +323,33 @@ describe('scannerRunTabLogic', () => {
         // page keeps showing pre-scan usage until the scene remounts.
         expect(quotaLoads).toBe(loadsOnMount + 1)
         quotaLogic.unmount()
+    })
+
+    it.each([
+        ['an unscheduled scanner after a scan', { enabled: false, disabled_reason: null }, 1, true],
+        ['before anything was scanned', { enabled: false, disabled_reason: null }, 0, false],
+        ['a scheduled scanner', { enabled: true, disabled_reason: null }, 1, false],
+        ['a scanner out of free credits', { enabled: false, disabled_reason: 'free_credits_used' }, 1, false],
+        ['a viewer', { enabled: false, disabled_reason: null, user_access_level: 'viewer' }, 1, false],
+    ])('offers the schedule for %s', (_, fields, started, expected) => {
+        const appContext = window.POSTHOG_APP_CONTEXT
+        window.POSTHOG_APP_CONTEXT = {
+            ...appContext,
+            resource_access_control: {
+                ...appContext?.resource_access_control,
+                [AccessControlResourceType.SessionRecording]: AccessControlLevel.Viewer,
+            },
+        } as AppContext
+        replayScannerLogic({ id: 'scanner-1' }).actions.loadScannerSuccess({
+            id: 'scanner-1',
+            user_access_level: 'editor',
+            ...fields,
+        } as unknown as ScannerFormValues)
+        logic.actions.bulkScanDone(started, 0)
+        try {
+            expect(logic.values.showScheduleOffer).toBe(expected)
+        } finally {
+            window.POSTHOG_APP_CONTEXT = appContext
+        }
     })
 })

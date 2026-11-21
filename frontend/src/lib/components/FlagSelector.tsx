@@ -5,9 +5,13 @@ import { TaxonomicFilter } from 'lib/components/TaxonomicFilter/TaxonomicFilter'
 import { TaxonomicFilterGroupType, TaxonomicFilterLogicProps } from 'lib/components/TaxonomicFilter/types'
 import { LemonButton } from 'lib/lemon-ui/LemonButton'
 import { Popover } from 'lib/lemon-ui/Popover'
-import { featureFlagLogic } from 'scenes/feature-flags/featureFlagLogic'
+import { useQuillSurface } from 'lib/ui/QuillSurface/quillSurfaceContext'
+import { productHasEffectiveNoneAccess } from 'lib/utils/accessControlUtils'
 
-import { FeatureFlagBasicType } from '~/types'
+import { AccessControlResourceType, FeatureFlagBasicType } from '~/types'
+
+import { flagSelectorLogic } from './flagSelectorLogic'
+import { QuillFlagSelector } from './QuillFlagSelector'
 
 interface FlagSelectorProps {
     value: number | undefined
@@ -55,7 +59,8 @@ export function FlagSelector({
     // whatever the picker handed us to cover that gap.
     const [selectedFlag, setSelectedFlag] = useState<PickedFlag | undefined>(undefined)
 
-    const { featureFlag } = useValues(featureFlagLogic({ id: value || 'link' }))
+    const { flagKey } = useValues(flagSelectorLogic({ id: value }))
+    const quillSurface = useQuillSurface()
 
     const taxonomicFilterLogicProps: TaxonomicFilterLogicProps = {
         groupType: TaxonomicFilterGroupType.FeatureFlags,
@@ -76,12 +81,31 @@ export function FlagSelector({
         selectingKeyOnly: true,
     }
 
+    // The flag list returns 403 without view access, so opening the picker can only show an error.
+    const noFlagAccessReason = productHasEffectiveNoneAccess(AccessControlResourceType.FeatureFlag)
+        ? "You don't have access to feature flags in this project"
+        : undefined
+
     const buttonLabel = flagSelectorButtonLabel({
-        flagKey: featureFlag.key,
+        flagKey,
         value,
         pickedFlag: selectedFlag,
         initialButtonLabel,
     })
+
+    const buttonDisabledReason = (readOnly && (disabledReason || "I'm read-only")) || noFlagAccessReason
+
+    if (quillSurface) {
+        return (
+            <QuillFlagSelector
+                open={visible}
+                onOpenChange={setVisible}
+                label={buttonLabel}
+                disabledReason={buttonDisabledReason}
+                taxonomicFilterLogicProps={taxonomicFilterLogicProps}
+            />
+        )
+    }
 
     return (
         <Popover
@@ -91,11 +115,7 @@ export function FlagSelector({
             fallbackPlacements={['left-end', 'bottom']}
             onClickOutside={() => setVisible(false)}
         >
-            <LemonButton
-                type="secondary"
-                onClick={() => setVisible(!visible)}
-                disabledReason={readOnly && (disabledReason || "I'm read-only")}
-            >
+            <LemonButton type="secondary" onClick={() => setVisible(!visible)} disabledReason={buttonDisabledReason}>
                 {buttonLabel}
             </LemonButton>
         </Popover>

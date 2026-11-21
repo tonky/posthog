@@ -2,6 +2,7 @@ import {
     MakeLogicType,
     actions,
     afterMount,
+    beforeUnmount,
     connect,
     kea,
     listeners,
@@ -15,9 +16,11 @@ import posthog from 'posthog-js'
 
 import { FEATURE_FLAGS } from 'lib/constants'
 import { FeatureFlagsSet, featureFlagLogic } from 'lib/logic/featureFlagLogic'
+import { uuid } from 'lib/utils/dom'
 import { teamLogic } from 'scenes/teamLogic'
 
 import { dataNodeCollectionLogic } from '~/queries/nodes/DataNode/dataNodeCollectionLogic'
+import type { CollectionNodeLoadMeta } from '~/queries/nodes/DataNode/dataNodeCollectionLogic'
 
 import { webAnalyticsAchievementsRecordVisit } from 'products/web_analytics/frontend/generated/api'
 
@@ -50,10 +53,16 @@ export interface webAnalyticsLoadTimeLogicActions {
     } // dataNodeCollectionLogic
     collectionNodeLoadDataSuccess: (
         id: string,
-        meta?: import('~/queries/nodes/DataNode/dataNodeCollectionLogic').CollectionNodeLoadMeta | undefined
+        meta?: CollectionNodeLoadMeta | undefined
     ) => {
         id: string
-        meta: import('~/queries/nodes/DataNode/dataNodeCollectionLogic').CollectionNodeLoadMeta | undefined
+        meta: CollectionNodeLoadMeta | undefined
+    } // dataNodeCollectionLogic
+    endPageVisit: () => {
+        value: true
+    } // dataNodeCollectionLogic
+    startPageVisit: (visitId: string) => {
+        visitId: string
     } // dataNodeCollectionLogic
     recordVisit: () => {
         value: true
@@ -90,7 +99,13 @@ export const webAnalyticsLoadTimeLogic = kea<webAnalyticsLoadTimeLogicType>([
     connect(() => ({
         actions: [
             dataNodeCollectionLogic({ key: WEB_ANALYTICS_DATA_COLLECTION_NODE_ID }),
-            ['collectionNodeLoadData', 'collectionNodeLoadDataSuccess', 'collectionNodeLoadDataFailure'],
+            [
+                'collectionNodeLoadData',
+                'collectionNodeLoadDataSuccess',
+                'collectionNodeLoadDataFailure',
+                'startPageVisit',
+                'endPageVisit',
+            ],
         ],
         values: [
             dataNodeCollectionLogic({ key: WEB_ANALYTICS_DATA_COLLECTION_NODE_ID }),
@@ -129,6 +144,7 @@ export const webAnalyticsLoadTimeLogic = kea<webAnalyticsLoadTimeLogicType>([
             posthog.capture('web_analytics_dashboard_loaded', {
                 duration_ms: Math.round(performance.now() - cache.mountStart),
                 tile_skeletons_enabled: values.tileSkeletonsEnabled,
+                visit_id: cache.visitId,
             })
         },
     })),
@@ -158,9 +174,15 @@ export const webAnalyticsLoadTimeLogic = kea<webAnalyticsLoadTimeLogicType>([
     afterMount(({ cache, values, actions }) => {
         cache.mountStart = performance.now()
         cache.hasCapturedLoaded = false
+        cache.visitId = uuid()
+        actions.startPageVisit(cache.visitId)
         posthog.capture('web_analytics_dashboard_mounted', {
             tile_skeletons_enabled: values.tileSkeletonsEnabled,
+            visit_id: cache.visitId,
         })
         actions.recordVisit()
+    }),
+    beforeUnmount(({ actions }) => {
+        actions.endPageVisit()
     }),
 ])

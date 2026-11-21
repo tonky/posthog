@@ -6,17 +6,21 @@ Called by facade/api.py. Do not call from outside this module.
 """
 
 import math
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
 from django.core.exceptions import ValidationError
 from django.core.validators import URLValidator
-from django.db import IntegrityError, transaction
+from django.db import IntegrityError, connections, router, transaction
+from django.db.models import QuerySet
 from django.utils import timezone
 
+from posthog.dataclasses import frozen
 from posthog.exceptions_capture import capture_exception
+from posthog.models.scoping.manager import resolve_effective_team_id
 from posthog.models.user import User
 
 from products.customer_analytics.backend.events import emit_account_custom_property_changed
@@ -27,6 +31,7 @@ from products.customer_analytics.backend.models import (
     CustomPropertyValue,
     DataType,
     DisplayType,
+    TargetType,
 )
 from products.customer_analytics.backend.models.custom_property_value import ACTIVE_VALUE_CONSTRAINT_NAME
 
@@ -42,6 +47,14 @@ class InvalidCustomPropertyValue(ValueError):
     """
 
     field: str | None = None
+
+
+class CustomPropertyValueHistoryTooLong(Exception):
+    """Raised when a property's history in the requested window has more values than one response holds."""
+
+    def __init__(self, limit: int):
+        super().__init__(f"More than {limit} values.")
+        self.limit = limit
 
 
 class CustomPropertyDefinitionNotFound(Exception):
@@ -63,6 +76,25 @@ class CustomPropertyValueConflict(Exception):
     soft-deletes the now-existing active row before inserting. Any other integrity error is a real
     fault and is left to surface.
     """
+
+
+@contextmanager
+def _guard_value(*, team_id: int, account_id: str | UUID, definition_id: str | UUID) -> Iterator[str]:
+    using = router.db_for_write(CustomPropertyValue)
+    canonical_team_id = resolve_effective_team_id(team_id)
+    key = f"account-custom-property:{canonical_team_id}:{UUID(str(account_id))}:{UUID(str(definition_id))}"
+    with transaction.atomic(using=using):
+        with connections[using].cursor() as cursor:
+            # Row locks cannot protect a value that is absent or has been replaced.
+            cursor.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))", [key])
+        yield using
+
+
+def _parse_definition_id(identifier: str) -> UUID:
+    try:
+        return UUID(identifier)
+    except ValueError as exc:
+        raise CustomPropertyDefinitionNotFound(identifier) from exc
 
 
 def set_custom_property_value(
@@ -122,7 +154,9 @@ def set_account_custom_properties_by_id(
     """
     _assert_account_in_team(team_id=team_id, account_id=account_id)
     rows: list[CustomPropertyValue] = []
-    for definition_id, value in properties.items():
+    # Outer batch transactions retain these locks until commit, so use a consistent order.
+    for definition_id in sorted(properties, key=_parse_definition_id):
+        value = properties[definition_id]
         try:
             definition = CustomPropertyDefinition.objects.for_team(team_id).get(id=definition_id)
         except (CustomPropertyDefinition.DoesNotExist, ValidationError) as exc:
@@ -174,22 +208,24 @@ def record_last_slack_message_at(*, team_id: int, account_id: str | UUID, timest
         defaults={"display_type": DisplayType.DATETIME},
     )
     for _attempt in range(_LAST_SLACK_MESSAGE_WRITE_ATTEMPTS):
-        current = (
-            CustomPropertyValue.objects.for_team(team_id)
-            .filter(account_id=account_id, definition_id=definition.id, is_deleted=False)
-            .values_list("value_datetime", flat=True)
-            .first()
-        )
-        if current is not None and timestamp - current < MIN_INTERVAL_BETWEEN_LAST_SLACK_MESSAGE_WRITES:
-            return False
         try:
-            _set_value(
-                team_id=team_id,
-                account_id=account_id,
-                definition=definition,
-                value=timestamp,
-                created_by_id=None,
-            )
+            with _guard_value(team_id=team_id, account_id=account_id, definition_id=definition.id) as using:
+                current = (
+                    CustomPropertyValue.objects.for_team(team_id)
+                    .using(using)
+                    .filter(account_id=account_id, definition_id=definition.id, is_deleted=False)
+                    .values_list("value_datetime", flat=True)
+                    .first()
+                )
+                if current is not None and timestamp - current < MIN_INTERVAL_BETWEEN_LAST_SLACK_MESSAGE_WRITES:
+                    return False
+                _set_value(
+                    team_id=team_id,
+                    account_id=account_id,
+                    definition=definition,
+                    value=timestamp,
+                    created_by_id=None,
+                )
         except CustomPropertyValueConflict:
             continue
         return True
@@ -203,22 +239,24 @@ def set_synced_custom_property_value(
     if value is None:
         return _clear_value(team_id=team_id, account_id=account_id, definition=definition)
     _, coerced = _coerce_to_column(definition, value)
-    current = (
-        CustomPropertyValue.objects.for_team(team_id)
-        .filter(account_id=account_id, definition_id=definition.id, is_deleted=False)
-        .first()
-    )
-    if current is not None:
-        current.definition = definition
-        if value_of(current) == coerced:
-            return False
-    _set_value(
-        team_id=team_id,
-        account_id=account_id,
-        definition=definition,
-        value=value,
-        created_by_id=None,
-    )
+    with _guard_value(team_id=team_id, account_id=account_id, definition_id=definition.id) as using:
+        current = (
+            CustomPropertyValue.objects.for_team(team_id)
+            .using(using)
+            .filter(account_id=account_id, definition_id=definition.id, is_deleted=False)
+            .first()
+        )
+        if current is not None:
+            current.definition = definition
+            if value_of(current) == coerced:
+                return False
+        _set_value(
+            team_id=team_id,
+            account_id=account_id,
+            definition=definition,
+            value=value,
+            created_by_id=None,
+        )
     return True
 
 
@@ -235,18 +273,24 @@ def _set_value(
     """Coerce `value` and atomically supersede the account's active row for `definition`."""
     column, coerced = _coerce_to_column(definition, value)
     try:
-        with transaction.atomic():
-            active_rows = CustomPropertyValue.objects.for_team(team_id).filter(
-                account_id=account_id, definition_id=definition.id, is_deleted=False
+        with _guard_value(team_id=team_id, account_id=account_id, definition_id=definition.id) as using:
+            active_rows = (
+                CustomPropertyValue.objects.for_team(team_id)
+                .using(using)
+                .filter(account_id=account_id, definition_id=definition.id, is_deleted=False)
             )
             previous_row = active_rows.first()
             active_rows.update(is_deleted=True)
-            row = CustomPropertyValue.objects.for_team(team_id).create(
-                team_id=team_id,
-                account_id=account_id,
-                definition_id=definition.id,
-                created_by_id=created_by_id,
-                **{column: coerced},
+            row = (
+                CustomPropertyValue.objects.for_team(team_id)
+                .using(using)
+                .create(
+                    team_id=team_id,
+                    account_id=account_id,
+                    definition_id=definition.id,
+                    created_by_id=created_by_id,
+                    **{column: coerced},
+                )
             )
             _schedule_value_changed_event(
                 team_id=team_id,
@@ -256,6 +300,7 @@ def _set_value(
                 current_value=coerced,
                 actor=actor,
                 workflow_id=workflow_id,
+                using=using,
             )
     except IntegrityError as exc:
         if _is_active_value_conflict(exc):
@@ -275,9 +320,11 @@ def _clear_value(
     actor: User | None = None,
     workflow_id: str | None = None,
 ) -> bool:
-    with transaction.atomic():
-        active_rows = CustomPropertyValue.objects.for_team(team_id).filter(
-            account_id=account_id, definition_id=definition.id, is_deleted=False
+    with _guard_value(team_id=team_id, account_id=account_id, definition_id=definition.id) as using:
+        active_rows = (
+            CustomPropertyValue.objects.for_team(team_id)
+            .using(using)
+            .filter(account_id=account_id, definition_id=definition.id, is_deleted=False)
         )
         previous_row = active_rows.first()
         if previous_row is None:
@@ -295,6 +342,7 @@ def _clear_value(
             current_value=None,
             actor=actor,
             workflow_id=workflow_id,
+            using=using,
         )
     return True
 
@@ -308,6 +356,7 @@ def _schedule_value_changed_event(
     current_value: CoercedValue | None,
     actor: User | None,
     workflow_id: str | None,
+    using: str,
 ) -> None:
     """Emit $account_custom_property_changed post-commit when the stored value actually changes.
 
@@ -321,7 +370,7 @@ def _schedule_value_changed_event(
         previous_value = value_of(previous_row)
     if previous_value == current_value:
         return
-    account = Account.objects.for_team(team_id).select_related("team").get(id=account_id)
+    account = Account.objects.for_team(team_id).using(using).select_related("team").get(id=account_id)
 
     def emit() -> None:
         try:
@@ -336,7 +385,7 @@ def _schedule_value_changed_event(
         except Exception as e:
             capture_exception(e)
 
-    transaction.on_commit(emit)
+    transaction.on_commit(emit, using=using)
 
 
 def _is_active_value_conflict(exc: IntegrityError) -> bool:
@@ -351,6 +400,85 @@ def list_active_custom_property_values(*, team_id: int, account_id: str | UUID) 
         .select_related("definition", "created_by")
         .order_by("-created_at")
     )
+
+
+@frozen
+class CustomPropertyValueHistoryRow:
+    row: CustomPropertyValue
+    replaced_at: datetime | None
+    is_current: bool
+
+
+HISTORY_ENTRY_LIMIT = 1000
+
+
+def list_custom_property_value_history(
+    *, team_id: int, account_id: str | UUID, definition_id: str | UUID, since: datetime | None = None
+) -> list[CustomPropertyValueHistoryRow]:
+    """Every value the account has held for an account definition, oldest first. With `since`, only
+    the values held from then on, starting with the one in place at `since`. Raises
+    `CustomPropertyValueHistoryTooLong` when more than `HISTORY_ENTRY_LIMIT` values remain, rather than
+    return a history with a silent gap.
+
+    Setting the same value again stores a new row, so a run of equal values collapses into its
+    first row. A clear stores no time, so a cleared value reads as held until the next value is
+    set, and a value cleared last has no `replaced_at`.
+    """
+    try:
+        definition = CustomPropertyDefinition.objects.for_team(team_id).get(
+            id=definition_id, target_type=TargetType.ACCOUNT
+        )
+    except (CustomPropertyDefinition.DoesNotExist, ValidationError, ValueError) as exc:
+        raise CustomPropertyDefinitionNotFound(definition_id) from exc
+    values = CustomPropertyValue.objects.for_team(team_id).filter(account_id=account_id, definition=definition)
+    if since is None:
+        entries = _list_value_run_starts(values, definition, HISTORY_ENTRY_LIMIT + 1)
+        _raise_when_too_long(entries)
+    else:
+        held_at_since = _list_value_run_starts(values.filter(created_at__lt=since), definition, 1)
+        entries = _list_value_run_starts(values.filter(created_at__gte=since), definition, HISTORY_ENTRY_LIMIT + 1)
+        _raise_when_too_long(entries)
+        if held_at_since and entries and _stored_key(entries[0]) == _stored_key(held_at_since[0]):
+            entries[0] = held_at_since[0]
+        elif held_at_since and not (entries and entries[0].created_at <= since):
+            entries = held_at_since + entries
+    has_current = values.filter(is_deleted=False).exists()
+    return [
+        CustomPropertyValueHistoryRow(
+            row=row,
+            replaced_at=entries[index + 1].created_at if index + 1 < len(entries) else None,
+            is_current=has_current and index == len(entries) - 1,
+        )
+        for index, row in enumerate(entries)
+    ]
+
+
+def _list_value_run_starts(
+    values: QuerySet[CustomPropertyValue], definition: CustomPropertyDefinition, limit: int
+) -> list[CustomPropertyValue]:
+    """The first row of each of the `limit` latest runs of equal values, oldest first. Rows stream
+    newest first and only run starts are kept, so repeated writes of one value cost no memory."""
+    starts: list[CustomPropertyValue] = []
+    for row in values.order_by("-created_at", "-id").iterator(chunk_size=50):
+        row.definition = definition
+        if starts and _stored_key(row) == _stored_key(starts[-1]):
+            starts[-1] = row
+            continue
+        if len(starts) == limit:
+            break
+        starts.append(row)
+    starts.reverse()
+    return starts
+
+
+def _raise_when_too_long(entries: list[CustomPropertyValue]) -> None:
+    if len(entries) > HISTORY_ENTRY_LIMIT:
+        raise CustomPropertyValueHistoryTooLong(HISTORY_ENTRY_LIMIT)
+
+
+def _stored_key(row: CustomPropertyValue) -> tuple:
+    """Includes the column, so a `true` stored before a type change never equals a later `1`."""
+    return (row.value_str, row.value_bool, row.value_num, row.value_datetime)
 
 
 VALUE_SUGGESTIONS_LIMIT = 50
@@ -507,6 +635,12 @@ def _coerce_to_column(definition: CustomPropertyDefinition, value: Any) -> tuple
         return "value_str", _coerce_link(definition, value)
     column, coerce = _HANDLER_BY_DATA_TYPE[definition.data_type]
     return column, coerce(definition, value)
+
+
+def stored_value_of(row: CustomPropertyValue) -> CoercedValue | None:
+    """The value in whichever column `row` filled. A past row keeps the column of the data type its
+    definition had when the row was written, which can differ from the definition's type today."""
+    return next((v for v in (row.value_str, row.value_bool, row.value_num, row.value_datetime) if v is not None), None)
 
 
 def value_of(row: CustomPropertyValue) -> CoercedValue | None:

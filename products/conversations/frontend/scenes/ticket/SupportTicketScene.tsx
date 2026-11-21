@@ -2,16 +2,18 @@ import { useActions, useValues } from 'kea'
 import { combineUrl, router } from 'kea-router'
 import { useMemo, useRef } from 'react'
 
-import { IconChevronDown } from '@posthog/icons'
-import { LemonButton, LemonCard, LemonModal, LemonSelect, LemonTag, Link, Spinner } from '@posthog/lemon-ui'
+import { IconChevronDown, IconEllipsis, IconTrash } from '@posthog/icons'
+import { LemonButton, LemonCard, LemonMenu, LemonModal, LemonSelect, LemonTag, Link, Spinner } from '@posthog/lemon-ui'
 
-import { AccessControlAction } from 'lib/components/AccessControlAction'
-import { Resizer } from 'lib/components/Resizer/Resizer'
-import { ResizerLogicProps, resizerLogic } from 'lib/components/Resizer/resizerLogic'
 import { TZLabel } from 'lib/components/TZLabel'
+import { FEATURE_FLAGS } from 'lib/constants'
 import { dayjs } from 'lib/dayjs'
 import { LemonCalendarSelectInput } from 'lib/lemon-ui/LemonCalendar/LemonCalendarSelect'
+import { Resizer } from 'lib/lemon-ui/Resizer/Resizer'
+import { ResizerLogicProps, resizerLogic } from 'lib/lemon-ui/Resizer/resizerLogic'
+import { featureFlagLogic } from 'lib/logic/featureFlagLogic'
 import { getAccessControlDisabledReason, accessLevelSatisfied } from 'lib/utils/accessControlUtils'
+import { getCurrentTeamId } from 'lib/utils/getAppContext'
 import { newInternalTab } from 'lib/utils/newInternalTab'
 import { SceneExport } from 'scenes/sceneTypes'
 import { teamLogic } from 'scenes/teamLogic'
@@ -20,38 +22,43 @@ import { userLogic } from 'scenes/userLogic'
 
 import { SceneContent } from '~/layout/scenes/components/SceneContent'
 import { SceneTitleSection } from '~/layout/scenes/components/SceneTitleSection'
+import { useTodayPeopleTitle } from '~/layout/today/todayPeopleRows'
+import { TodayScenePinButton } from '~/layout/today/TodayScenePinButton'
 import { ProductKey } from '~/queries/schema/schema-general'
 import { AccessControlLevel, AccessControlResourceType, Breadcrumb } from '~/types'
 
+import { conversationsTicketsAttachmentsCreate } from 'products/conversations/frontend/generated/api'
 import { PersonDisplay } from 'products/persons/frontend/components/PersonDisplay'
 
 import { AssigneeIconDisplay, AssigneeLabelDisplay, AssigneeSelect } from '../../components/Assignee'
 import { ChannelsTag, getChannelThreadUrl } from '../../components/Channels/ChannelsTag'
 import { ChatView } from '../../components/Chat/ChatView'
+import type { SimplifiedRepliesProps } from '../../components/ComposerHeader/ComposerHeader'
 import { SupportMarkdown } from '../../components/Editor'
 import { IdentityBadge } from '../../components/IdentityBadge/IdentityBadge'
+import { MacroPicker } from '../../components/Macros/MacroPicker'
 import { SlaDisplay } from '../../components/SlaDisplay/SlaDisplay'
+import { SupportTicketSidebarWidgets } from '../../components/SupportTicketSidebarWidgets/SupportTicketSidebarWidgets'
 import { TicketTags } from '../../components/TicketTags'
-import { type TicketPriority, type TicketStatus, priorityOptions, statusOptionsWithoutAll } from '../../types'
-import { AIPanel } from './AIPanel'
-import { ExceptionsPanel } from './ExceptionsPanel'
-import { PreviousTicketsPanel } from './PreviousTicketsPanel'
-import { RecentEventsPanel } from './RecentEventsPanel'
-import { RelatedGroupsPanel } from './RelatedGroupsPanel'
-import { SessionRecordingPanel } from './SessionRecordingPanel'
-import { StaffActionsPanel } from './StaffActionsPanel'
+import {
+    type Ticket,
+    type TicketPriority,
+    type TicketStatus,
+    priorityOptions,
+    statusOptionsWithoutAll,
+} from '../../types'
 import { supportTicketSceneLogic } from './supportTicketSceneLogic'
+import { SupportTicketSceneMenuBar } from './SupportTicketSceneMenuBar'
 import { useDiscussionTimelineExtras } from './ThreadDiscussions'
 import { reportTimelineExtras } from './ThreadReports'
-import { TicketActivityPanel } from './TicketActivityPanel'
 
 // The list's filters / saved view ride along in the ticket page's query string
 // (the ticket row carries them through on navigation). Rebuild the list URL from
 // them so the back arrow returns to the view the user came from rather than the
 // unfiltered ticket list.
-export function ticketListBackTo(searchParams: Record<string, any>): Breadcrumb {
+export function ticketListBackTo(searchParams: Record<string, any>, name: string = 'Ticket list'): Breadcrumb {
     return {
-        name: 'Ticket list',
+        name,
         path: combineUrl(urls.supportTickets(), searchParams).url,
         key: 'supportTickets',
     }
@@ -75,11 +82,25 @@ const SEND_AND_SET_STATUS_OPTIONS: { value: TicketStatus; statusLabel: string }[
     { value: 'resolved', statusLabel: 'resolved' },
 ]
 
+export function simplifiedRepliesFor(ticket: Ticket, emailRecipients: string): SimplifiedRepliesProps {
+    const customer =
+        ticket.person?.properties?.name ||
+        ticket.person?.properties?.email ||
+        ticket.anonymous_traits?.name ||
+        ticket.anonymous_traits?.email ||
+        null
+    // Person properties and traits can hold any JSON value, and React cannot render an object.
+    const customerText = customer === null || typeof customer === 'string' ? customer : JSON.stringify(customer)
+    return {
+        recipient: ticket.channel_source === 'email' ? emailRecipients : customerText,
+        statusLabel: statusOptionsWithoutAll.find((option) => option.value === ticket.status)?.label,
+    }
+}
+
 export function SupportTicketScene({ ticketId }: { ticketId: string }): JSX.Element {
     const logic = supportTicketSceneLogic({ id: ticketId || 'new' })
     const {
         ticket,
-        person,
         ticketLoading,
         status,
         priority,
@@ -91,15 +112,12 @@ export function SupportTicketScene({ ticketId }: { ticketId: string }): JSX.Elem
         messageSending,
         hasMoreMessages,
         olderMessagesLoading,
-        eventsQuery,
-        previousTickets,
-        previousTicketsLoading,
         linkedReports,
-        exceptionsQuery,
         chatPanelWidth,
-        hasUnsavedChanges,
         unsavedTicketChanges,
         ticketUpdating,
+        ticketDeleting,
+        deleteDisabledReason,
         draftContent,
         draftIsPrivate,
         draftModeEnabled,
@@ -115,6 +133,8 @@ export function SupportTicketScene({ ticketId }: { ticketId: string }): JSX.Elem
         fullEmailContentLoading,
         fullEmailMessageId,
         composerPrefillAt,
+        composerInsertAt,
+        pendingComposerInsert,
         aiDraftApplying,
     } = useValues(logic)
     // The list's filters / saved view ride along in this page's query string
@@ -129,7 +149,6 @@ export function SupportTicketScene({ ticketId }: { ticketId: string }): JSX.Elem
         setTags,
         setSnoozedUntil,
         sendMessage,
-        updateTicket,
         loadOlderMessages,
         setDraftContent,
         setDraftIsPrivate,
@@ -138,16 +157,26 @@ export function SupportTicketScene({ ticketId }: { ticketId: string }): JSX.Elem
         startEditingMessage,
         cancelEditingMessage,
         deleteMessage,
+        deleteTicket,
         loadFullEmail,
         closeFullEmail,
         applyAiDraft,
+        insertMacro,
     } = useActions(logic)
 
     const { user } = useValues(userLogic)
+    const { featureFlags } = useValues(featureFlagLogic)
+    const ticketsTitle = useTodayPeopleTitle('support')
+    const simplifiedReplies = !!featureFlags[FEATURE_FLAGS.PRODUCT_SUPPORT_SIMPLIFIED_REPLIES]
+    // Widget tickets stay images only until the widget can render file links.
+    const canAttachFiles =
+        !!featureFlags[FEATURE_FLAGS.PRODUCT_SUPPORT_REPLY_FILE_ATTACHMENTS] &&
+        !!ticket &&
+        ticket.channel_source !== 'widget'
     const { currentTeam } = useValues(teamLogic)
     const aiSuggestionsEnabled = !!currentTeam?.conversations_settings?.ai_suggestions_enabled
 
-    const conversationsSettingsUrl = urls.settings('environment-conversations', 'conversations-general')
+    const conversationsSettingsUrl = urls.settings('environment-conversations', 'conversations-channels')
     const replyDisabledReason: JSX.Element | undefined = emailReplyBlockedReason
         ? {
               email_disabled: (
@@ -232,7 +261,9 @@ export function SupportTicketScene({ ticketId }: { ticketId: string }): JSX.Elem
 
     return (
         <SceneContent className="flex-1 min-h-0 pb-4">
+            <SupportTicketSceneMenuBar ticketId={ticketId} />
             <SceneTitleSection
+                nameAction={<TodayScenePinButton />}
                 name={`Ticket: ${ticket?.ticket_number?.toString() || ticket?.id || ''}`}
                 nameSuffix={
                     ticket && ticket.identity_verified !== true ? (
@@ -240,8 +271,8 @@ export function SupportTicketScene({ ticketId }: { ticketId: string }): JSX.Elem
                     ) : undefined
                 }
                 description=""
-                resourceType={{ type: 'conversation' }}
-                forceBackTo={ticketListBackTo(searchParams)}
+                resourceType={ticketsTitle?.resourceType ?? { type: 'conversation' }}
+                forceBackTo={ticketListBackTo(searchParams, ticketsTitle?.name ?? undefined)}
             />
             <LemonModal title="Full email" isOpen={fullEmailMessageId !== null} onClose={closeFullEmail}>
                 {fullEmailContentLoading ? (
@@ -287,6 +318,11 @@ export function SupportTicketScene({ ticketId }: { ticketId: string }): JSX.Elem
                         onDraftModeChange={setDraftModeEnabled}
                         sendConfirmationMessage={`This will send to ${replyRecipientDescription}`}
                         sendAndSetStatusOptions={ticket ? SEND_AND_SET_STATUS_OPTIONS : undefined}
+                        simplifiedReplies={
+                            simplifiedReplies && ticket
+                                ? simplifiedRepliesFor(ticket, replyRecipientDescription)
+                                : undefined
+                        }
                         unsavedTicketChanges={unsavedTicketChanges}
                         replyDisabledReason={replyDisabledReason}
                         sendDisabledReason={sendDisabledReason}
@@ -305,6 +341,24 @@ export function SupportTicketScene({ ticketId }: { ticketId: string }): JSX.Elem
                         fullEmailLoadingMessageId={fullEmailContentLoading ? fullEmailMessageId : null}
                         onViewFullEmail={loadFullEmail}
                         composerPrefillAt={composerPrefillAt}
+                        composerInsertAt={composerInsertAt}
+                        composerInsertContent={pendingComposerInsert}
+                        enableMacros
+                        onAttachFile={
+                            canAttachFiles
+                                ? (file) =>
+                                      conversationsTicketsAttachmentsCreate(String(getCurrentTeamId()), ticketId, {
+                                          file,
+                                      })
+                                : undefined
+                        }
+                        onInsertMacro={(macro) => insertMacro(macro, 'slash')}
+                        macroPicker={
+                            <MacroPicker
+                                disabledReason={sendDisabledReason}
+                                onInsert={(macro) => insertMacro(macro, 'button')}
+                            />
+                        }
                         aiSources={ticket?.ai_triage?.sources}
                         aiDraftApplying={aiDraftApplying}
                         onApplyAiDraft={applyAiDraft}
@@ -363,7 +417,34 @@ export function SupportTicketScene({ ticketId }: { ticketId: string }): JSX.Elem
                         )}
 
                         {/* Ticket info */}
-                        <h3 className="text-sm font-semibold mb-2">Ticket info</h3>
+                        <div className="flex items-center justify-between gap-2 mb-2">
+                            <div className="flex items-center gap-1">
+                                <h3 className="text-sm font-semibold">Ticket info</h3>
+                                {ticketUpdating && <Spinner className="text-muted-alt" />}
+                            </div>
+                            <LemonMenu
+                                items={[
+                                    {
+                                        label: 'Delete ticket',
+                                        icon: <IconTrash />,
+                                        status: 'danger',
+                                        onClick: () => deleteTicket(),
+                                        disabledReason:
+                                            deleteDisabledReason ?? (ticketDeleting ? 'Deleting ticket…' : undefined),
+                                        'data-attr': 'ticket-delete',
+                                    },
+                                ]}
+                                placement="bottom-end"
+                            >
+                                <LemonButton
+                                    size="xsmall"
+                                    icon={<IconEllipsis />}
+                                    tooltip="More ticket actions"
+                                    aria-label="More ticket actions"
+                                    data-attr="ticket-more-menu"
+                                />
+                            </LemonMenu>
+                        </div>
                         <div className="space-y-2 text-xs">
                             {ticket?.created_at && (
                                 <div className="flex justify-between">
@@ -458,6 +539,20 @@ export function SupportTicketScene({ ticketId }: { ticketId: string }): JSX.Elem
                                 <div className="flex justify-between items-center">
                                     <span className="text-muted-alt">Zendesk ID</span>
                                     <LemonTag type="highlight">#{ticket.zendesk_ticket_id}</LemonTag>
+                                </div>
+                            )}
+                            {ticket?.intercom_conversation_id && (
+                                <div className="flex justify-between items-center">
+                                    <span className="text-muted-alt">Intercom ID</span>
+                                    <LemonTag type="highlight">#{ticket.intercom_conversation_id}</LemonTag>
+                                </div>
+                            )}
+                            {ticket?.pylon_issue_id && (
+                                <div className="flex justify-between items-center gap-2">
+                                    <span className="text-muted-alt shrink-0">Pylon ID</span>
+                                    <LemonTag type="highlight" className="truncate" title={ticket.pylon_issue_id}>
+                                        {ticket.pylon_issue_id}
+                                    </LemonTag>
                                 </div>
                             )}
                             {ticket?.session_context?.current_url && (
@@ -575,73 +670,9 @@ export function SupportTicketScene({ ticketId }: { ticketId: string }): JSX.Elem
                                 />
                             </div>
                         </div>
-                        <div className="mt-3 pt-3 border-t flex justify-end">
-                            <AccessControlAction
-                                resourceType={AccessControlResourceType.Ticket}
-                                minAccessLevel={AccessControlLevel.Editor}
-                                userAccessLevel={ticket?.user_access_level}
-                            >
-                                <LemonButton
-                                    type="primary"
-                                    size="small"
-                                    onClick={() => updateTicket()}
-                                    loading={ticketUpdating}
-                                    disabledReason={!hasUnsavedChanges ? 'No changes to save' : undefined}
-                                >
-                                    Save changes
-                                </LemonButton>
-                            </AccessControlAction>
-                        </div>
                     </LemonCard>
 
-                    {/* Related Groups Panel */}
-                    {(person?.uuid || ticket?.organization_id) && (
-                        <RelatedGroupsPanel
-                            personUuid={person?.uuid}
-                            organizationId={ticket?.organization_id}
-                            organizationIdSource={ticket?.organization_id_source}
-                        />
-                    )}
-
-                    {/* Staff Actions Panel */}
-                    {user?.is_staff && ticket && <StaffActionsPanel />}
-
-                    {/* AI Triage Panel */}
-                    {aiSuggestionsEnabled && ticket && <AIPanel aiTriage={ticket.ai_triage} />}
-
-                    {ticket?.channel_source === 'widget' && (
-                        <>
-                            {/* Session Recording Panel */}
-                            <SessionRecordingPanel
-                                sessionContext={ticket?.session_context}
-                                distinctId={ticket?.distinct_id}
-                            />
-
-                            {/* Recent Events Panel */}
-                            <RecentEventsPanel
-                                eventsQuery={eventsQuery}
-                                distinctId={ticket?.distinct_id}
-                                sessionId={ticket?.session_id}
-                            />
-
-                            {/* Exceptions Panel */}
-                            <ExceptionsPanel
-                                exceptionsQuery={exceptionsQuery}
-                                sessionId={ticket?.session_id}
-                                distinctId={ticket?.distinct_id}
-                            />
-
-                            {/* Previous Tickets Panel */}
-                            <PreviousTicketsPanel
-                                previousTickets={previousTickets}
-                                previousTicketsLoading={previousTicketsLoading}
-                                personDistinctIds={person?.distinct_ids}
-                            />
-                        </>
-                    )}
-
-                    {/* Activity History Panel */}
-                    {ticket?.id && <TicketActivityPanel ticketId={ticket.id} />}
+                    <SupportTicketSidebarWidgets ticketId={ticketId || 'new'} />
                 </div>
             </div>
         </SceneContent>

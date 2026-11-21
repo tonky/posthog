@@ -3,14 +3,22 @@ import { useActions, useValues } from 'kea'
 import { IconChevronDown } from '@posthog/icons'
 import { LemonButton } from '@posthog/lemon-ui'
 
+import { useFeatureFlag } from 'lib/hooks/useFeatureFlag'
 import { LemonMenu } from 'lib/lemon-ui/LemonMenu'
 
 import { SceneContent } from '~/layout/scenes/components/SceneContent'
 
+import {
+    isRealtimeCohortCalculating,
+    realtimeCohortSendBlockedReason,
+} from '../Workflows/hogflows/steps/realtimeCohortStatus'
 import { manageDisabledReason } from './broadcastLifecycle'
+import { BroadcastPreviousSendBanner } from './BroadcastPreviousSendBanner'
 import { BroadcastSceneHeader } from './BroadcastSceneHeader'
 import { broadcastWizardLogic } from './broadcastWizardLogic'
 import { BroadcastWizardStepper } from './BroadcastWizardStepper'
+import { QuillBroadcastActionsMenu } from './QuillBroadcastActionsMenu'
+import { missingContentReason } from './steps/broadcastContentErrors'
 import { BroadcastContentStep } from './steps/BroadcastContentStep'
 import { BroadcastGoalStep } from './steps/BroadcastGoalStep'
 import { BroadcastRecipientsStep } from './steps/BroadcastRecipientsStep'
@@ -19,11 +27,16 @@ import { BroadcastScheduleStep } from './steps/BroadcastScheduleStep'
 import { useBroadcastAgentPanel } from './useBroadcastAgentPanel'
 
 export function BroadcastWizard(): JSX.Element {
-    const { currentStep, stepValidationErrors, currentStepHasErrors, saving, launching, scheduleMode } =
+    const { currentStep, stepValidationErrors, currentStepHasErrors, saving, launching, scheduleMode, blastRadius } =
         useValues(broadcastWizardLogic)
-    const { setStep, prevStep, continueStep, launchBroadcast, archiveBroadcast } = useActions(broadcastWizardLogic)
-    const { broadcastId, broadcast } = useValues(broadcastWizardLogic)
+    const realtimeCohort = blastRadius?.realtime_cohort
+    const { setStep, prevStep, continueStep, launchBroadcast, archiveBroadcast, openInWorkflowEditor } =
+        useActions(broadcastWizardLogic)
+    const { broadcastId, broadcast, sourceRecord, aiEmailDraftLoading } = useValues(broadcastWizardLogic)
+    // Saving the first time opens the saved broadcast, which drops a draft that hasn't arrived yet.
+    const draftBlockedReason = aiEmailDraftLoading ? 'AI is still writing the email' : null
     useBroadcastAgentPanel()
+    const todayRailNav = useFeatureFlag('TODAY_RAIL_NAV')
 
     return (
         <SceneContent className="min-h-full w-full shrink-0" data-attr="broadcast-wizard">
@@ -32,28 +45,62 @@ export function BroadcastWizard(): JSX.Element {
                 actions={
                     // A draft not saved yet has nothing to archive.
                     broadcastId ? (
-                        <LemonMenu
-                            items={[
-                                {
-                                    label: 'Archive',
-                                    status: 'danger',
-                                    onClick: archiveBroadcast,
-                                    disabledReason:
-                                        manageDisabledReason(broadcast?.user_access_level) ??
-                                        (saving || launching ? 'Wait for the broadcast to finish saving' : undefined),
-                                    'data-attr': 'broadcast-archive',
-                                },
-                            ]}
-                        >
-                            <LemonButton
-                                type="secondary"
-                                size="small"
-                                sideIcon={<IconChevronDown />}
-                                data-attr="broadcast-actions"
+                        todayRailNav ? (
+                            <QuillBroadcastActionsMenu
+                                items={[
+                                    {
+                                        label: 'Open in workflow editor',
+                                        onClick: openInWorkflowEditor,
+                                        disabledReason:
+                                            saving || launching ? 'Wait for the broadcast to finish saving' : undefined,
+                                        'data-attr': 'broadcast-open-in-workflow-editor',
+                                    },
+                                    {
+                                        label: 'Archive',
+                                        danger: true,
+                                        onClick: archiveBroadcast,
+                                        disabledReason:
+                                            manageDisabledReason(broadcast?.user_access_level) ??
+                                            (saving || launching
+                                                ? 'Wait for the broadcast to finish saving'
+                                                : undefined),
+                                        'data-attr': 'broadcast-archive',
+                                    },
+                                ]}
+                            />
+                        ) : (
+                            <LemonMenu
+                                items={[
+                                    {
+                                        label: 'Open in workflow editor',
+                                        onClick: openInWorkflowEditor,
+                                        disabledReason:
+                                            saving || launching ? 'Wait for the broadcast to finish saving' : undefined,
+                                        'data-attr': 'broadcast-open-in-workflow-editor',
+                                    },
+                                    {
+                                        label: 'Archive',
+                                        status: 'danger',
+                                        onClick: archiveBroadcast,
+                                        disabledReason:
+                                            manageDisabledReason(broadcast?.user_access_level) ??
+                                            (saving || launching
+                                                ? 'Wait for the broadcast to finish saving'
+                                                : undefined),
+                                        'data-attr': 'broadcast-archive',
+                                    },
+                                ]}
                             >
-                                Actions
-                            </LemonButton>
-                        </LemonMenu>
+                                <LemonButton
+                                    type="secondary"
+                                    size="small"
+                                    sideIcon={<IconChevronDown />}
+                                    data-attr="broadcast-actions"
+                                >
+                                    Actions
+                                </LemonButton>
+                            </LemonMenu>
+                        )
                     ) : undefined
                 }
             />
@@ -64,9 +111,12 @@ export function BroadcastWizard(): JSX.Element {
                             currentStep={currentStep}
                             onStepClick={setStep}
                             stepErrors={stepValidationErrors}
+                            forwardBlockedReason={draftBlockedReason}
                         />
                     </div>
                 </div>
+
+                {sourceRecord && <BroadcastPreviousSendBanner sourceRecord={sourceRecord} />}
 
                 <div>
                     {currentStep === 'recipients' && <BroadcastRecipientsStep />}
@@ -93,19 +143,29 @@ export function BroadcastWizard(): JSX.Element {
                                 disabledReason={
                                     stepValidationErrors.review.length > 0
                                         ? 'Fix the issues above before sending'
-                                        : undefined
+                                        : realtimeCohortSendBlockedReason(realtimeCohort)
                                 }
                                 onClick={launchBroadcast}
                                 data-attr="broadcast-wizard-launch"
                             >
-                                {scheduleMode === 'now' ? 'Send now' : 'Schedule broadcast'}
+                                {scheduleMode !== 'now'
+                                    ? 'Schedule broadcast'
+                                    : isRealtimeCohortCalculating(realtimeCohort)
+                                      ? 'Send when calculated'
+                                      : 'Send now'}
                             </LemonButton>
                         ) : (
                             <LemonButton
                                 type="primary"
                                 loading={saving}
                                 disabled={launching}
-                                disabledReason={currentStepHasErrors ? 'Fix errors before continuing' : undefined}
+                                disabledReason={
+                                    currentStepHasErrors
+                                        ? ((todayRailNav && currentStep === 'content'
+                                              ? missingContentReason(stepValidationErrors.content)
+                                              : undefined) ?? 'Fix errors before continuing')
+                                        : draftBlockedReason
+                                }
                                 onClick={continueStep}
                                 data-attr="broadcast-wizard-continue"
                             >

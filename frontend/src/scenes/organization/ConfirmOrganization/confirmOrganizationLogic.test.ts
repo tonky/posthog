@@ -19,22 +19,28 @@ describe('confirmOrganizationLogic', () => {
     })
 
     describe('query params', () => {
-        it('prefills the form from the URL', async () => {
-            router.actions.push('/organization/confirm-creation', {
-                email: 'spike@spike.com',
-                first_name: 'Spike',
-                organization_name: 'Spikes Inc',
-            })
+        it.each([
+            ['Spike', 'Spikes Inc'],
+            ['3130', '2600'],
+        ])('prefills the form from the URL with the name %p', async (firstName, organizationName) => {
+            // A raw URL, not a params object: kea-router passes object values through untouched, so
+            // only a real query string parses a name of only digits into a number, which used to crash
+            router.actions.push(
+                `/organization/confirm-creation?email=spike@spike.com&first_name=${encodeURIComponent(firstName)}&organization_name=${encodeURIComponent(organizationName)}`
+            )
 
             await expectLogic(logic)
                 .toDispatchActions(['setEmail', 'setConfirmOrganizationValues'])
                 .toMatchValues({
                     confirmOrganization: expect.objectContaining({
-                        first_name: 'Spike',
-                        organization_name: 'Spikes Inc',
+                        first_name: firstName,
+                        organization_name: organizationName,
                     }),
                     email: 'spike@spike.com',
                 })
+
+            expect(logic.values.confirmOrganizationValidationErrors.first_name).toBeUndefined()
+            expect(logic.values.confirmOrganizationValidationErrors.organization_name).toBeUndefined()
         })
 
         it('keeps user input when a later location change re-fires the handler', async () => {
@@ -52,13 +58,50 @@ describe('confirmOrganizationLogic', () => {
     })
 
     describe('form', () => {
-        it('requires a name and an organization name', async () => {
+        describe('signup continuation', () => {
+            const originalLocation = window.location
+
+            beforeEach(() => {
+                Object.defineProperty(window, 'location', {
+                    configurable: true,
+                    value: {
+                        ...originalLocation,
+                        search: '?next=%2Finsights',
+                        href: `${originalLocation.origin}/organization/confirm-creation`,
+                    },
+                })
+            })
+
+            afterEach(() => {
+                Object.defineProperty(window, 'location', { configurable: true, value: originalLocation })
+            })
+
+            it.each([
+                ['/complete/oidc/', '/complete/oidc/'],
+                [undefined, '/insights'],
+                ['https://example.net/complete/oidc/', '/insights'],
+            ])('follows the safe continuation %p before the next destination', async (continueUrl, expected) => {
+                useMocks({ post: { '/api/social_signup/': () => [201, { continue_url: continueUrl }] } })
+                logic.actions.setConfirmOrganizationValues({
+                    first_name: 'Example',
+                    organization_name: 'Example organization',
+                    role_at_organization: 'engineering',
+                })
+                await expectLogic(logic, () => logic.actions.submitConfirmOrganization()).toDispatchActions([
+                    'submitConfirmOrganizationSuccess',
+                ])
+                expect(window.location.href).toEqual(expected)
+            })
+        })
+
+        it('requires a name, an organization name and a role', async () => {
             await expectLogic(logic, () => {
                 logic.actions.submitConfirmOrganization()
             }).toMatchValues({
                 confirmOrganizationValidationErrors: {
                     first_name: 'Please enter your name',
                     organization_name: ORGANIZATION_NAME_ERROR,
+                    role_at_organization: 'Please select your role to continue',
                 },
             })
         })
@@ -96,7 +139,11 @@ describe('confirmOrganizationLogic', () => {
                     ],
                 },
             })
-            logic.actions.setConfirmOrganizationValues({ first_name: 'Spike', organization_name: 'Spikes Inc' })
+            logic.actions.setConfirmOrganizationValues({
+                first_name: 'Spike',
+                organization_name: 'Spikes Inc',
+                role_at_organization: 'engineering',
+            })
 
             await expectLogic(logic, () => {
                 logic.actions.submitConfirmOrganization()

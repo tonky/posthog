@@ -1,43 +1,85 @@
+import './tooltip.css'
+
+import { useDirection } from '@base-ui/react/direction-provider'
 import { Tooltip as TooltipPrimitive } from '@base-ui/react/tooltip'
 import * as React from 'react'
 
 import { cn } from './lib/utils'
-import './tooltip.css'
 
 function TooltipProvider({ delay = 250, ...props }: TooltipPrimitive.Provider.Props): React.ReactElement {
     return <TooltipPrimitive.Provider data-slot="tooltip-provider" delay={delay} {...props} />
 }
 
-function Tooltip({ ...props }: TooltipPrimitive.Root.Props): React.ReactElement {
-    return <TooltipPrimitive.Root data-slot="tooltip" {...props} />
-}
+const TooltipGlideContext = React.createContext(false)
+const TooltipTracksCursorContext = React.createContext(false)
 
-function TooltipTrigger({ ...props }: TooltipPrimitive.Trigger.Props): React.ReactElement {
-    return <TooltipPrimitive.Trigger data-slot="tooltip-trigger" {...props} />
-}
+const createTooltipHandle = TooltipPrimitive.createHandle
 
-function TooltipContent({
-    className,
-    side = 'top',
-    sideOffset = 4,
-    align = 'center',
-    alignOffset = 0,
-    children,
+function Tooltip<Payload>({
+    onOpenChangeComplete,
+    disableHoverablePopup,
     ...props
-}: TooltipPrimitive.Popup.Props &
-    Pick<TooltipPrimitive.Positioner.Props, 'align' | 'alignOffset' | 'side' | 'sideOffset'>): React.ReactElement {
+}: TooltipPrimitive.Root.Props<Payload>): React.ReactElement {
+    // A tooltip shared through a handle glides between its triggers. It starts once the tooltip has
+    // opened in place, so the first placement does not slide in from the corner of the page.
+    const [glide, setGlide] = React.useState(false)
+    // A tooltip that follows the pointer sits under it, so it must never take a hover or a click.
+    // Otherwise a press or a release lands on the tooltip instead of the page below it.
+    const tracksCursor = props.trackCursorAxis !== undefined && props.trackCursorAxis !== 'none'
+    return (
+        <TooltipGlideContext.Provider value={glide}>
+            <TooltipTracksCursorContext.Provider value={tracksCursor}>
+                <TooltipPrimitive.Root
+                    data-slot="tooltip"
+                    onOpenChangeComplete={(open) => {
+                        setGlide(open && props.handle !== undefined)
+                        onOpenChangeComplete?.(open)
+                    }}
+                    disableHoverablePopup={disableHoverablePopup ?? tracksCursor}
+                    {...props}
+                />
+            </TooltipTracksCursorContext.Provider>
+        </TooltipGlideContext.Provider>
+    )
+}
+
+// The cast restores the `Payload` generic, because forwardRef cannot carry a generic signature.
+// Props already type `ref`, so adding React.RefAttributes would break contextual typing of `render` callbacks.
+const TooltipTrigger = React.forwardRef(function TooltipTrigger(
+    props: TooltipPrimitive.Trigger.Props,
+    ref: React.ForwardedRef<HTMLButtonElement>
+): React.ReactElement {
+    return <TooltipPrimitive.Trigger ref={ref} data-slot="tooltip-trigger" {...props} />
+}) as <Payload>(props: TooltipPrimitive.Trigger.Props<Payload>) => React.ReactElement
+
+const TooltipContent = React.forwardRef<
+    React.ComponentRef<typeof TooltipPrimitive.Popup>,
+    TooltipPrimitive.Popup.Props &
+        Pick<TooltipPrimitive.Positioner.Props, 'align' | 'alignOffset' | 'side' | 'sideOffset'>
+>(function TooltipContent(
+    { className, side = 'top', sideOffset = 4, align = 'center', alignOffset = 0, children, ...props },
+    ref
+) {
+    const glide = React.useContext(TooltipGlideContext)
+    const tracksCursor = React.useContext(TooltipTracksCursorContext)
+    const direction = useDirection()
     return (
         <TooltipPrimitive.Portal>
+            {/* The popup is portaled out of the app's `dir`, so it restates the DirectionProvider's. Its
+                text and the logical inset of a start-aligned arrow (tooltip.css) both follow it. */}
             <TooltipPrimitive.Positioner
+                dir={direction}
                 data-quill
                 data-quill-portal="tooltip"
                 align={align}
                 alignOffset={alignOffset}
                 side={side}
                 sideOffset={sideOffset}
-                className="isolate"
+                data-glide={glide ? '' : undefined}
+                className={cn('quill-tooltip__positioner isolate', tracksCursor && 'pointer-events-none')}
             >
                 <TooltipPrimitive.Popup
+                    ref={ref}
                     data-slot="tooltip-content"
                     className={cn('quill-tooltip__content inline-flex items-center gap-1.5', className)}
                     {...props}
@@ -48,6 +90,6 @@ function TooltipContent({
             </TooltipPrimitive.Positioner>
         </TooltipPrimitive.Portal>
     )
-}
+})
 
-export { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider }
+export { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider, createTooltipHandle }

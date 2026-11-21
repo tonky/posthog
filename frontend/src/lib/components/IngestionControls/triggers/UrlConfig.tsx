@@ -13,6 +13,32 @@ import { AiRegexHelper, AiRegexHelperButton } from 'scenes/session-recordings/co
 import { ingestionControlsLogic } from '../ingestionControlsLogic'
 import { UrlTriggerConfig } from '../types'
 
+export function confirmRemoveUrl(index: number, onRemove: (index: number) => void): void {
+    LemonDialog.open({
+        title: <>Remove URL</>,
+        description: 'Are you sure you want to remove this URL?',
+        primaryButton: {
+            status: 'danger',
+            children: 'Remove',
+            onClick: () => onRemove(index),
+        },
+        secondaryButton: {
+            children: 'Cancel',
+        },
+    })
+}
+
+export function applyAiRegex(regex: string, addUrl: (urlTriggerConfig: UrlTriggerConfig) => void): void {
+    try {
+        addUrl({
+            url: regex,
+            matching: 'regex',
+        })
+    } catch {
+        lemonToast.error('Failed to apply regex')
+    }
+}
+
 export function UrlConfig({
     logic,
     logicProps,
@@ -88,12 +114,12 @@ export function UrlConfig({
             {!props.isAddFormVisible && props.config && props.config.length > 0 && (
                 <div className="border rounded p-3 bg-surface-primary">
                     <LemonLabel className="text-sm font-medium mb-2 block">
-                        Test a URL against these patterns:
+                        Test a full URL against these patterns:
                     </LemonLabel>
                     <LemonInput
                         value={checkUrl}
                         onChange={setCheckUrl}
-                        placeholder="Enter a URL to test (e.g., https://example.com/page)"
+                        placeholder="e.g., https://example.com/checkout?step=2"
                         data-attr="url-check-input"
                         className="mb-2"
                     />
@@ -102,7 +128,10 @@ export function UrlConfig({
                             {Object.values(checkUrlResults).some(Boolean) ? (
                                 <span className="text-success">✓ This URL matches at least one pattern</span>
                             ) : (
-                                <span className="text-danger">✗ This URL doesn't match any patterns</span>
+                                <span className="text-danger">
+                                    ✗ This URL doesn't match any patterns. Patterns match the full URL, so a path on its
+                                    own never matches.
+                                </span>
                             )}
                         </div>
                     )}
@@ -218,20 +247,7 @@ function UrlConfigRow({
                     icon={<IconTrash />}
                     tooltip="Remove URL"
                     center
-                    onClick={() => {
-                        LemonDialog.open({
-                            title: <>Remove URL</>,
-                            description: 'Are you sure you want to remove this URL?',
-                            primaryButton: {
-                                status: 'danger',
-                                children: 'Remove',
-                                onClick: () => onRemove(index),
-                            },
-                            secondaryButton: {
-                                children: 'Cancel',
-                            },
-                        })
-                    }}
+                    onClick={() => confirmRemoveUrl(index, onRemove)}
                     disabledReason={restrictedReason}
                 >
                     Remove
@@ -268,32 +284,25 @@ function UrlConfigForm({
         >
             <div className="flex flex-col gap-2 w-full">
                 <LemonBanner type="info" className="text-sm">
-                    We always wrap the URL regex with anchors to avoid unexpected behavior (if you do not). This is
-                    because <pre className="inline">https://example.com/</pre> does not only match the homepage. You'd
-                    need <pre className="inline">^https://example.com/$</pre>
+                    Patterns are wrapped in <code className="inline">^</code> and <code className="inline">$</code> and
+                    matched against the full URL, so a path on its own never matches. Write the full URL, e.g.{' '}
+                    <code className="inline">https://example.com/checkout.*</code>
                 </LemonBanner>
                 <LemonLabel className="w-full">
                     Matching regex:
                     <LemonField name="url" className="flex-1">
-                        <LemonInput autoFocus placeholder="Enter URL regex." data-attr="url-input" />
+                        <LemonInput
+                            autoFocus
+                            placeholder="e.g., https://example.com/checkout.*, ^https://example.com/page$"
+                            data-attr="url-input"
+                        />
                     </LemonField>
                 </LemonLabel>
                 {validationWarning && <span className="text-danger">{validationWarning}</span>}
             </div>
             <div className="flex justify-between gap-2 w-full">
                 <div>
-                    <AiRegexHelper
-                        onApply={(regex) => {
-                            try {
-                                addUrl({
-                                    url: regex,
-                                    matching: 'regex',
-                                })
-                            } catch {
-                                lemonToast.error('Failed to apply regex')
-                            }
-                        }}
-                    />
+                    <AiRegexHelper onApply={(regex) => applyAiRegex(regex, addUrl)} />
                     <AiRegexHelperButton />
                 </div>
 

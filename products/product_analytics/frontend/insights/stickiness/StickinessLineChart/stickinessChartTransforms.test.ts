@@ -2,9 +2,10 @@ import { DEFAULT_Y_AXIS_ID } from '@posthog/quill-charts'
 import type { TooltipConfig, YAxisConfig } from '@posthog/quill-charts'
 
 import { hexToRGBA } from 'lib/utils/colors'
-import type { SeriesDatum } from 'scenes/insights/InsightTooltip/insightTooltipUtils'
 
 import { ChartDisplayType } from '~/types'
+
+import type { SeriesDatum } from 'products/product_analytics/frontend/insights/shared/InsightTooltip/insightTooltipUtils'
 
 import {
     buildStickinessLineTimeSeriesConfig,
@@ -70,14 +71,15 @@ describe('stickinessChartTransforms', () => {
         })
 
         it.each([
-            { compare_label: undefined, expectedColor: RED },
-            { compare_label: 'current' as const, expectedColor: RED },
-            { compare_label: 'previous' as const, expectedColor: hexToRGBA(RED, 0.5) },
+            { compare_label: undefined, expectedColor: RED, expectedTag: undefined },
+            { compare_label: 'current' as const, expectedColor: RED, expectedTag: undefined },
+            { compare_label: 'previous' as const, expectedColor: hexToRGBA(RED, 0.5), expectedTag: 'Previous' },
         ])(
-            'dims the compare-against-previous series to 0.5 alpha, leaving others full color (compare_label=$compare_label)',
-            ({ compare_label, expectedColor }) => {
+            'dims and tags the compare-against-previous series, leaving others as they are (compare_label=$compare_label)',
+            ({ compare_label, expectedColor, expectedTag }) => {
                 const series = buildStickinessMainSeries(makeResult({ compare_label }), 0, { getColor: () => RED })
                 expect(series.color).toBe(expectedColor)
+                expect(series.legendTag).toBe(expectedTag)
             }
         )
 

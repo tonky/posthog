@@ -31,7 +31,7 @@ import {
 import { dayjs } from 'lib/dayjs'
 import { fullNameOrEmail } from 'lib/utils/strings'
 
-import { TaskUserAvatar } from 'products/tasks/frontend/spaces/TaskUserAvatar'
+import { TaskUserAvatar } from '~/layout/today/TaskUserAvatar'
 
 import { ArtifactCommentThread, supportsSelectionComments } from '../artifactComments'
 import { TaskArtifactCommentsLogicProps, taskArtifactCommentsLogic } from '../taskArtifactCommentsLogic'
@@ -261,7 +261,7 @@ export function ArtifactCommentsMenu({ logicProps }: { logicProps: TaskArtifactC
                     <ArtifactCommentComposer
                         value={drafts.document ?? ''}
                         onChange={(value) => setDraft('document', value)}
-                        onSubmit={() => submitComment('document')}
+                        onSubmit={(addToChat) => submitComment('document', addToChat)}
                         saving={writing === 'document'}
                         busy={!!writing && writing !== 'document'}
                         label="Comment on this file"

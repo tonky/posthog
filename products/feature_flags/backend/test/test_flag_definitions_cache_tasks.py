@@ -3,7 +3,7 @@ import os
 from unittest.mock import MagicMock, patch
 
 from django.conf import settings
-from django.test import TestCase, override_settings
+from django.test import SimpleTestCase, override_settings
 
 from posthog.storage.cache_expiry_manager import CacheRefreshCounts
 from posthog.tasks.test.utils import PushGatewayTaskTestMixin
@@ -16,7 +16,7 @@ from products.feature_flags.backend.tasks import (
 )
 
 
-class TestRefreshExpiringFlagDefinitionsCacheEntries(PushGatewayTaskTestMixin, TestCase):
+class TestRefreshExpiringFlagDefinitionsCacheEntries(PushGatewayTaskTestMixin, SimpleTestCase):
     @patch("products.feature_flags.backend.tasks.get_cache_stats_generic", return_value={})
     @patch("posthog.storage.cache_expiry_manager.refresh_expiring_caches")
     def test_refreshes_cache(self, mock_refresh: MagicMock, mock_stats: MagicMock) -> None:
@@ -76,7 +76,7 @@ class TestRefreshExpiringFlagDefinitionsCacheEntries(PushGatewayTaskTestMixin, T
             refresh_expiring_flag_definitions_cache_entries()
 
 
-class TestCleanupStaleFlagDefinitionsExpiryTrackingTask(PushGatewayTaskTestMixin, TestCase):
+class TestCleanupStaleFlagDefinitionsExpiryTrackingTask(PushGatewayTaskTestMixin, SimpleTestCase):
     @patch("posthog.storage.cache_expiry_manager.cleanup_stale_expiry_tracking")
     def test_cleans_up_cache(self, mock_cleanup: MagicMock) -> None:
         mock_cleanup.return_value = 3

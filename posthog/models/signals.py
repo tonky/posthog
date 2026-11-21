@@ -13,12 +13,6 @@ is_muted = False
 # See FeatureFlag for an example.
 model_activity_signal = Signal()
 
-# Sent by Team.rotate_secret_token_and_save inside the rotation's transaction, after
-# save() and before commit, so dependent stores (e.g. the conversations signing secret)
-# can stay in sync without core importing product models. An exception from any
-# receiver rolls the rotation back. Work outside the database belongs in on_commit.
-secret_api_token_rotated = Signal()
-
 
 def mutable_receiver(*args, **kwargs):
     """

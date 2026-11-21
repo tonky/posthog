@@ -1,13 +1,13 @@
-import { useActions, useValues } from 'kea'
+import { useActions, useMountedLogic, useValues } from 'kea'
 import { useState } from 'react'
 
-import { IconWarning } from '@posthog/icons'
-import { LemonButton, LemonModal, LemonSelect, Link, Spinner } from '@posthog/lemon-ui'
+import { IconUpload, IconWarning } from '@posthog/icons'
+import { LemonBanner, LemonButton, LemonModal, LemonSelect, Link, Spinner } from '@posthog/lemon-ui'
 
 import { PropertyFilters } from 'lib/components/PropertyFilters/PropertyFilters'
 import { TaxonomicFilterGroupType } from 'lib/components/TaxonomicFilter/types'
+import { useFeatureFlag } from 'lib/hooks/useFeatureFlag'
 import { humanFriendlyNumber } from 'lib/utils/numbers'
-import { COHORTS_ONLY_SUPPORT_IN_PICKER_PROPS } from 'scenes/feature-flags/cohortPickerProps'
 import { Scene } from 'scenes/sceneTypes'
 import { urls } from 'scenes/urls'
 
@@ -15,13 +15,37 @@ import { DataTable } from '~/queries/nodes/DataTable/DataTable'
 import { ActorsQuery, DataTableNode, NodeKind, ProductKey } from '~/queries/schema/schema-general'
 import { AnyPersonScopeFilter, PropertyFilterType } from '~/types'
 
+import { AiEmailDraftStatus } from '../../MessageAudience/AiEmailDraftStatus'
 import { optOutCategoriesLogic } from '../../OptOuts/optOutCategoriesLogic'
 import { WORKFLOW_OPERATOR_ALLOWLIST } from '../../Workflows/hogflows/filters/HogFlowFilters'
+import { RealtimeCohortAudienceNotice } from '../../Workflows/hogflows/steps/components/RealtimeCohortAudienceNotice'
 import { BroadcastAudienceCohorts } from '../audience/BroadcastAudienceCohorts'
-import { broadcastWizardLogic } from '../broadcastWizardLogic'
+import { broadcastAudienceCohortsLogic } from '../audience/broadcastAudienceCohortsLogic'
+import { broadcastAudienceListLogic } from '../audience/broadcastAudienceListLogic'
+import { BroadcastAudienceListModal } from '../audience/BroadcastAudienceListModal'
+import { broadcastWizardLogic, rateLimitedReachSentence } from '../broadcastWizardLogic'
+import { BroadcastChannelPicker } from './BroadcastChannelPicker'
+import { BroadcastRateLimitSuggestion } from './BroadcastRateLimitSuggestion'
+
+function AudienceSizeErrorDetails({ reason }: { reason: string | null }): JSX.Element | null {
+    if (!reason) {
+        return null
+    }
+    return <div className="mt-1 text-muted">Details: {reason}</div>
+}
 
 function AudienceSizePreview(): JSX.Element | null {
-    const { blastRadius, blastRadiusLoading } = useValues(broadcastWizardLogic)
+    const {
+        blastRadius,
+        blastRadiusLoading,
+        blastRadiusError,
+        channel,
+        channelReach,
+        emailRateLimit,
+        rateLimitNeeded,
+        rateLimitedSendDuration,
+        audienceLimit,
+    } = useValues(broadcastWizardLogic)
 
     if (blastRadiusLoading) {
         return <Spinner className="mt-1" />
@@ -29,26 +53,49 @@ function AudienceSizePreview(): JSX.Element | null {
 
     if (!blastRadius) {
         return (
-            <div className="text-warning text-xs flex items-center gap-1 mt-1">
+            <div className="text-warning text-xs flex items-start gap-1 mt-1">
                 <IconWarning className="text-base shrink-0" />
-                <span>Couldn't estimate the audience size. Check your filters and try again.</span>
+                <div>
+                    <div>Couldn't estimate the audience size. Check your filters and try again.</div>
+                    <AudienceSizeErrorDetails reason={blastRadiusError} />
+                </div>
             </div>
         )
     }
 
     const { affected, total, limit } = blastRadius
-    const exceeded = limit != null && affected > limit
+    const exceeded = audienceLimit != null && affected > audienceLimit
 
     return (
         <div className="text-muted">
-            <span className={exceeded ? 'text-danger font-semibold' : undefined}>
+            <span className={exceeded && !rateLimitNeeded ? 'text-danger font-semibold' : undefined}>
                 approximately {humanFriendlyNumber(affected)} of {humanFriendlyNumber(total)} people.
             </span>
-            {exceeded && (
+            {channelReach?.channel === channel ? (
+                <div className="text-xs" data-attr="broadcast-audience-channel-reach">
+                    {humanFriendlyNumber(channelReach.reachable)} of {humanFriendlyNumber(channelReach.total)}{' '}
+                    {channelReach.total === 1 ? 'person' : 'people'}{' '}
+                    {channel === 'push'
+                        ? 'can receive push'
+                        : `${channelReach.total === 1 ? 'has' : 'have'} an email address`}
+                    .
+                </div>
+            ) : channel === 'push' ? (
+                <div className="text-xs" data-attr="broadcast-audience-push-reach">
+                    Only people with push turned on in your app get the notification.
+                </div>
+            ) : null}
+            {rateLimitNeeded ? (
+                <BroadcastRateLimitSuggestion />
+            ) : exceeded ? (
                 <div className="text-danger text-xs" data-attr="broadcast-audience-over-limit">
-                    This project can send a broadcast to up to {humanFriendlyNumber(limit)} people right now. The limit
-                    can rise as the project keeps sending with low bounce and spam complaint rates. Add filters to
-                    narrow the audience, or{' '}
+                    This project can send a broadcast to up to {humanFriendlyNumber(limit)} people right now.
+                    {channel === 'email'
+                        ? " The project's workflows share one daily email allowance, so a larger broadcast would hold the others up for days." +
+                          rateLimitedReachSentence(blastRadius.rate_limited) +
+                          ' The limit rises as the project keeps sending with low bounce and spam complaint rates.'
+                        : ''}{' '}
+                    Add filters to narrow the audience, or{' '}
                     <Link
                         to={urls.workflows('reputation')}
                         target="_blank"
@@ -58,13 +105,18 @@ function AudienceSizePreview(): JSX.Element | null {
                     </Link>
                     .
                 </div>
-            )}
+            ) : channel === 'email' && emailRateLimit && rateLimitedSendDuration ? (
+                <div className="text-xs" data-attr="broadcast-audience-rate-limited-duration">
+                    Sends at most {humanFriendlyNumber(emailRateLimit.count)} emails per {emailRateLimit.period}, so
+                    about {rateLimitedSendDuration} to reach everyone.
+                </div>
+            ) : null}
         </div>
     )
 }
 
 function MessageCategoryPicker(): JSX.Element {
-    const { emailSettings } = useValues(broadcastWizardLogic)
+    const { emailSettings, channel } = useValues(broadcastWizardLogic)
     const { setEmailSettings } = useActions(broadcastWizardLogic)
     const { categories, categoriesLoading } = useValues(optOutCategoriesLogic())
     const selected = categories.find((category) => category.id === emailSettings.messageCategoryId)
@@ -73,7 +125,8 @@ function MessageCategoryPicker(): JSX.Element {
         <div className="flex flex-col gap-1 mt-4">
             <span className="font-semibold">Message category</span>
             <span className="text-secondary text-sm">
-                People who unsubscribed from this category don't get the email.{' '}
+                People who unsubscribed from this category don't get the {channel === 'push' ? 'notification' : 'email'}
+                .{' '}
                 <Link to={urls.workflows('opt-outs')} target="_blank">
                     Manage categories
                 </Link>
@@ -141,18 +194,44 @@ function AudienceListModal({ isOpen, onClose }: { isOpen: boolean; onClose: () =
 }
 
 export function BroadcastRecipientsStep(): JSX.Element {
-    const { audienceProperties } = useValues(broadcastWizardLogic)
-    const { setAudienceProperties } = useActions(broadcastWizardLogic)
+    const cohortConditionsEnabled = useFeatureFlag('WORKFLOWS_COHORT_CONDITIONS')
+    const { audienceProperties, linkAudienceRejected, blastRadius, channel, aiEmailDraftLoading } =
+        useValues(broadcastWizardLogic)
+    // A realtime cohort has to be the audience's only condition.
+    const realtimeCohortAlone = !!blastRadius?.realtime_cohort || !!blastRadius?.realtime_cohort_with_other_conditions
+    const { setAudienceProperties, sendToEveryoneAfterRejectedLink, stayOnRecipients } =
+        useActions(broadcastWizardLogic)
+    const { props } = useMountedLogic(broadcastWizardLogic)
+    const { openListModal } = useActions(broadcastAudienceListLogic(props))
+    const { editableAudience } = useValues(broadcastAudienceCohortsLogic(props))
     const [audienceListOpen, setAudienceListOpen] = useState(false)
 
     return (
-        <div className="flex flex-col gap-2">
+        <div className="flex flex-col gap-2 @container">
+            <BroadcastChannelPicker />
+            {aiEmailDraftLoading ? <AiEmailDraftStatus status="loading" /> : null}
             <div>
-                <h2 className="m-0 text-xl font-semibold">Who should receive this email?</h2>
+                <h2 className="m-0 text-xl font-semibold">
+                    Who should receive this {channel === 'push' ? 'notification' : 'email'}?
+                </h2>
                 <p className="m-0 text-secondary">
-                    Filter by person properties or cohorts. Without filters, the broadcast goes to everyone.
+                    Filter by person properties or cohorts, or upload a list. Without filters, the broadcast goes to
+                    everyone.
                 </p>
             </div>
+            {linkAudienceRejected && audienceProperties.length === 0 && (
+                <LemonBanner
+                    type="warning"
+                    action={{
+                        children: 'Send to everyone',
+                        onClick: sendToEveryoneAfterRejectedLink,
+                        'data-attr': 'broadcast-rejected-link-send-to-everyone',
+                    }}
+                >
+                    The link you followed had recipients we couldn't read, so none were added. Add a condition below, or
+                    send to everyone.
+                </LemonBanner>
+            )}
             <div className="flex items-start justify-between gap-2">
                 <div>
                     <span className="font-semibold">This broadcast will reach</span> <AudienceSizePreview />
@@ -169,15 +248,18 @@ export function BroadcastRecipientsStep(): JSX.Element {
             <AudienceListModal isOpen={audienceListOpen} onClose={() => setAudienceListOpen(false)} />
             <PropertyFilters
                 pageKey="broadcast-wizard-recipients"
-                propertyFilters={audienceProperties}
+                propertyFilters={editableAudience}
                 addText="Add condition"
+                allowNew={!realtimeCohortAlone}
                 orFiltering
                 sendAllKeyUpdates
                 allowRelativeDateOptions
-                {...COHORTS_ONLY_SUPPORT_IN_PICKER_PROPS}
-                hideBehavioralCohorts
+                hideBehavioralCohorts={!cohortConditionsEnabled}
                 logicalRowDivider
-                onChange={(properties) => setAudienceProperties(properties)}
+                onChange={(properties) => {
+                    stayOnRecipients()
+                    setAudienceProperties(properties)
+                }}
                 taxonomicGroupTypes={[
                     TaxonomicFilterGroupType.PersonProperties,
                     TaxonomicFilterGroupType.Cohorts,
@@ -191,7 +273,25 @@ export function BroadcastRecipientsStep(): JSX.Element {
                 hasRowOperator={false}
                 operatorAllowlist={WORKFLOW_OPERATOR_ALLOWLIST}
             />
+            <RealtimeCohortAudienceNotice blastRadius={blastRadius} />
+            {!realtimeCohortAlone && (
+                <div>
+                    <LemonButton
+                        type="secondary"
+                        size="small"
+                        icon={<IconUpload />}
+                        onClick={() => {
+                            stayOnRecipients()
+                            openListModal()
+                        }}
+                        data-attr="broadcast-audience-add-list"
+                    >
+                        Upload a list
+                    </LemonButton>
+                </div>
+            )}
             <BroadcastAudienceCohorts />
+            <BroadcastAudienceListModal />
             <MessageCategoryPicker />
         </div>
     )

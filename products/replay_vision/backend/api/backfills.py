@@ -23,9 +23,11 @@ from posthog.api.shared import UserBasicSerializer
 from posthog.permissions import is_scout_sandbox_request
 from posthog.rate_limit import PersonalApiKeyOrUserRateThrottle
 
+from products.replay_vision.backend.api.cloud_only import ReplayVisionCloudOnly
 from products.replay_vision.backend.billing import observation_credits_for_model
+from products.replay_vision.backend.consent import AI_CONSENT_REQUIRED_CODE, is_ai_data_processing_approved
 from products.replay_vision.backend.models.replay_observation import IN_FLIGHT_STATUSES, ObservationStatus
-from products.replay_vision.backend.models.replay_scanner import SETTLE_INTERVAL, ReplayScanner, ScannerType
+from products.replay_vision.backend.models.replay_scanner import SETTLE_INTERVAL, ReplayScanner
 from products.replay_vision.backend.models.replay_scanner_backfill import (
     ACTIVE_BACKFILL_STATUSES,
     BackfillStatus,
@@ -38,6 +40,7 @@ from products.replay_vision.backend.queries.scanner_candidate_query import (
 )
 from products.replay_vision.backend.quota import quota_state
 from products.replay_vision.backend.scanner_access import can_read_targeted_experiment
+from products.replay_vision.backend.scope.load import experiment_id_of
 from products.replay_vision.backend.scout_writes import refuse_scout_scanner_scan
 from products.replay_vision.backend.temporal.snapshots import BackfillScannerSnapshot
 
@@ -58,9 +61,9 @@ def _experiment_end_date(scanner: ReplayScanner) -> datetime | None:
     still match. A backfill covers the experiment's own run, and stopping at the end is what keeps
     it from paying for that afterlife.
     """
-    if scanner.scanner_type != ScannerType.EXPERIMENT:
-        return None
-    experiment_id = (scanner.experiment_scope() or {}).get("experiment_id")
+    # Judged on the scope, so a backfill of a scanner narrowed only by the `scope` column stops at
+    # the experiment's end too, rather than paying for the afterlife this docstring describes.
+    experiment_id = experiment_id_of(scanner)
     if experiment_id is None:
         return None
     # Deferred: the experiments replay facade pulls in the recordings query modules, which circle
@@ -176,6 +179,7 @@ class ReplayScannerBackfillViewSet(
     """Historical backfills of a scanner over a closed time window (nested under a scanner)."""
 
     scope_object = "replay_scanner"
+    permission_classes = [ReplayVisionCloudOnly]
     scope_object_read_actions = ["list", "retrieve"]
     scope_object_write_actions = ["create", "estimate", "cancel", "resume"]
     serializer_class = ReplayScannerBackfillSerializer
@@ -289,7 +293,6 @@ class ReplayScannerBackfillViewSet(
             sampling_rate=snapshot.sampling_rate,
             sampling_salt=str(scanner.id),
             scanner_id=str(scanner.id),
-            sampling_mode=snapshot.sampling_mode,
             exclude_observed_by_scanner=str(scanner.id) if exclude_observed else None,
             max_execution_time_seconds=ENUMERATION_MAX_EXECUTION_SECONDS,
         ).count(query_type=BACKFILL_COUNT_QUERY_TYPE)
@@ -342,6 +345,14 @@ class ReplayScannerBackfillViewSet(
         )
         return Response(response.data)
 
+    def _require_ai_consent(self) -> None:
+        # Each tick skips dispatch without consent, so a backfill accepted here would sit running and scan nothing.
+        if not is_ai_data_processing_approved(self.team.id):
+            raise ValidationError(
+                "Your organization needs to allow AI analysis before you run a Replay Vision backfill.",
+                code=AI_CONSENT_REQUIRED_CODE,
+            )
+
     @extend_schema(request=BackfillCreateSerializer, responses={201: ReplayScannerBackfillSerializer})
     def create(self, request: Request, **kwargs: Any) -> Response:
         """Create a backfill: freeze the scanner config, enumerate the exact candidate set, start the tick schedule.
@@ -351,6 +362,7 @@ class ReplayScannerBackfillViewSet(
         settled sessions between estimate and confirm can nudge total_count slightly.
         """
         scanner = self._scanner_for_url()
+        self._require_ai_consent()
         window = BackfillCreateSerializer(data=request.data)
         window.is_valid(raise_exception=True)
         window_start, window_end = self._clamped_window(window.validated_data)
@@ -423,6 +435,7 @@ class ReplayScannerBackfillViewSet(
     def resume(self, request: Request, **kwargs: Any) -> Response:
         """Restart a backfill that paused when the monthly quota ran out."""
         backfill = self.get_object()
+        self._require_ai_consent()
         updated = ReplayScannerBackfill.objects.filter(pk=backfill.pk, status=BackfillStatus.PAUSED_QUOTA).update(
             status=BackfillStatus.RUNNING
         )

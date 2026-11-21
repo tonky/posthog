@@ -22,19 +22,24 @@ import { userLogic } from 'scenes/userLogic'
 
 import { SceneContent } from '~/layout/scenes/components/SceneContent'
 
-import { MCPAuthTypeEnumApi, MCPToolApprovalStateEnumApi, ResolvedToolPolicyApi } from '../generated/api.schemas'
+import {
+    MCPAuthTypeEnumApi,
+    MCPGatewayServerApi,
+    MCPToolApprovalStateEnumApi,
+    ResolvedToolPolicyApi,
+} from '../generated/api.schemas'
 import { ServerIcon } from '../scene/icons'
 import { GatewayConnectionModal } from './GatewayConnectionModal'
 import { isPolicyStateAllowedByCeiling } from './gatewayPolicyUtils'
 import { GatewayRouteGuard } from './GatewayRouteGuard'
 import { GatewayAccessSection } from './GatewayServerAccess'
-import { GatewayServerLogicProps, gatewayServerLogic, TOOL_PREVIEW_LIMIT } from './gatewayServerLogic'
-import { getGatewayServerRemovalAction } from './gatewayServerRemoval'
+import { GatewayServerLogicProps, gatewayServerLogic, PolicyScope, TOOL_PREVIEW_LIMIT } from './gatewayServerLogic'
+import { GatewayServerRemovalAction, getGatewayServerRemovalAction } from './gatewayServerRemoval'
 import { GatewayServersLoadError } from './GatewayServersHome'
 import { POLICY_OPTIONS, PolicySummary } from './gatewayUtils'
 import { mcpGatewayLogic } from './mcpGatewayLogic'
 
-const AUTH_TYPE_LABELS: Record<MCPAuthTypeEnumApi, string> = {
+export const AUTH_TYPE_LABELS: Record<MCPAuthTypeEnumApi, string> = {
     api_key: 'API key',
     oauth: 'OAuth',
 }
@@ -93,32 +98,13 @@ export function GatewayServerScene({
         Boolean(connection && disconnectingInstallationIds.has(connection.installation_id))
     const needsReconnect = Boolean(connection?.pending_oauth || connection?.needs_reauth)
     const canReconnect = Boolean(connection && (server.auth_type === 'oauth' || needsReconnect))
-    const confirmRemoval = (): void => {
-        if (!connection && removalAction !== 'delete_for_everyone') {
-            return
-        }
-        const deletesForEveryone = removalAction === 'delete_for_everyone'
-        const deletesForYou = removalAction === 'delete_for_you'
-        LemonDialog.open({
-            title: deletesForEveryone ? 'Delete MCP server' : deletesForYou ? 'Delete server for you' : 'Disconnect',
-            content: deletesForEveryone
-                ? `Delete ${server.name} for everyone? This disconnects every teammate and removes the custom server from the team gateway.`
-                : deletesForYou
-                  ? `Delete ${server.name} for you? This removes its tools without removing the team server for anyone else.`
-                  : `Disconnect your ${server.name} account?`,
-            primaryButton: {
-                children: deletesForEveryone || deletesForYou ? 'Delete' : 'Disconnect',
-                status: 'danger',
-                onClick: () => {
-                    if (deletesForEveryone) {
-                        removeServer(server.id)
-                    } else if (connection) {
-                        disconnectServer(server.id, connection.installation_id, deletesForYou)
-                    }
-                },
-            },
-        })
-    }
+    const reconnectDisabledReason = !server.is_team_enabled
+        ? 'This server is turned off for the team.'
+        : server.is_revoked_for_you
+          ? 'Ask an admin to restore your access first.'
+          : undefined
+    const confirmRemoval = (): void =>
+        confirmGatewayServerRemoval({ server, removalAction, removeServer, disconnectServer })
 
     return (
         <SceneContent className="mx-auto w-full max-w-[1200px]">
@@ -129,6 +115,22 @@ export function GatewayServerScene({
             </LemonButton>
 
             {serversLoadFailed && <GatewayServersLoadError serverDetail onRetry={loadServers} />}
+
+            {connection && needsReconnect && (
+                <LemonBanner
+                    type="error"
+                    action={{
+                        children: 'Reconnect your account',
+                        type: 'primary',
+                        disabledReason: reconnectDisabledReason,
+                        onClick: () => reconnectServer(connection.installation_id),
+                        'data-attr': 'mcp-server-reconnect',
+                    }}
+                >
+                    <div className="font-semibold">Reconnect required</div>
+                    <div>{server.name} tools are not available to you or your agents until you reconnect.</div>
+                </LemonBanner>
+            )}
 
             <div className="flex items-start gap-3">
                 <ServerIcon iconDomain={server.icon_domain} serverUrl={server.url} size={56} />
@@ -184,17 +186,11 @@ export function GatewayServerScene({
                                     }
                                 />
                             </div>
-                            {canReconnect && (
+                            {canReconnect && !needsReconnect && (
                                 <LemonButton
                                     type="primary"
                                     size="small"
-                                    disabledReason={
-                                        !server.is_team_enabled
-                                            ? 'This server is turned off for the team.'
-                                            : server.is_revoked_for_you
-                                              ? 'Ask an admin to restore your access first.'
-                                              : undefined
-                                    }
+                                    disabledReason={reconnectDisabledReason}
                                     onClick={() => reconnectServer(connection.installation_id)}
                                     data-attr="mcp-server-reconnect"
                                 >
@@ -262,9 +258,61 @@ export function GatewayServerScene({
     )
 }
 
+export function confirmGatewayServerRemoval({
+    server,
+    removalAction,
+    removeServer,
+    disconnectServer,
+}: {
+    server: MCPGatewayServerApi
+    removalAction: GatewayServerRemovalAction | null
+    removeServer: (serverId: string) => void
+    disconnectServer: (serverId: string, installationId: string, navigateToServers: boolean) => void
+}): void {
+    const connection = server.your_connection
+    if (!connection && removalAction !== 'delete_for_everyone') {
+        return
+    }
+    const deletesForEveryone = removalAction === 'delete_for_everyone'
+    const deletesForYou = removalAction === 'delete_for_you'
+    LemonDialog.open({
+        title: deletesForEveryone ? 'Delete MCP server' : deletesForYou ? 'Delete server for you' : 'Disconnect',
+        content: deletesForEveryone
+            ? `Delete ${server.name} for everyone? This disconnects every teammate and removes the custom server from the team gateway.`
+            : deletesForYou
+              ? `Delete ${server.name} for you? This removes its tools without removing the team server for anyone else.`
+              : `Disconnect your ${server.name} account?`,
+        primaryButton: {
+            children: deletesForEveryone || deletesForYou ? 'Delete' : 'Disconnect',
+            status: 'danger',
+            onClick: () => {
+                if (deletesForEveryone) {
+                    removeServer(server.id)
+                } else if (connection) {
+                    disconnectServer(server.id, connection.installation_id, deletesForYou)
+                }
+            },
+        },
+    })
+}
+
+export function bulkPolicyDisabledReason(
+    state: MCPToolApprovalStateEnumApi,
+    filteredToolPolicies: ResolvedToolPolicyApi[],
+    scope: PolicyScope
+): string | undefined {
+    return filteredToolPolicies.some(
+        (policy) =>
+            !policy.locked && (scope.scopeType === 'team' || isPolicyStateAllowedByCeiling(state, policy.team_state))
+    )
+        ? undefined
+        : 'No editable tools'
+}
+
 function ToolPoliciesSection(): JSX.Element {
     const {
         availableScopes,
+        canEditScope,
         displayedToolPolicies,
         filteredToolPolicies,
         isAdmin,
@@ -276,13 +324,12 @@ function ToolPoliciesSection(): JSX.Element {
         scopeIsResolving,
         toolPolicies,
         toolPoliciesLoading,
+        toolPolicyGroups,
         toolSearch,
         toolsExpanded,
     } = useValues(gatewayServerLogic)
     const { setScope, setAllTools, setToolSearch, toggleToolsExpanded } = useActions(gatewayServerLogic)
     const { refreshServerTools } = useActions(mcpGatewayLogic)
-    const canEditScope =
-        isAdmin || scope.scopeType === 'member' || (scope.scopeType === 'agent' && canManageAgentAccess)
     const agentScope = scope.scopeType === 'agent'
     const bulkOptions = agentScope
         ? POLICY_OPTIONS.filter((option) => option.value !== 'needs_approval')
@@ -318,16 +365,7 @@ function ToolPoliciesSection(): JSX.Element {
                                     icon={option.icon}
                                     tooltip={option.label}
                                     loading={toolPoliciesLoading}
-                                    disabledReason={
-                                        filteredToolPolicies.some(
-                                            (policy) =>
-                                                !policy.locked &&
-                                                (scope.scopeType === 'team' ||
-                                                    isPolicyStateAllowedByCeiling(option.value, policy.team_state))
-                                        )
-                                            ? undefined
-                                            : 'No editable tools'
-                                    }
+                                    disabledReason={bulkPolicyDisabledReason(option.value, filteredToolPolicies, scope)}
                                     onClick={() => setAllTools({ state: option.value })}
                                 />
                             ))}
@@ -401,6 +439,26 @@ function ToolPoliciesSection(): JSX.Element {
                 <div className="border border-dashed rounded p-6 text-center text-secondary text-sm">
                     No tools match “{toolSearch}”.
                 </div>
+            ) : toolPolicyGroups ? (
+                <LemonCollapse
+                    multiple
+                    defaultActiveKeys={toolPolicyGroups.map((group) => group.key)}
+                    panels={toolPolicyGroups.map((group) => ({
+                        key: group.key,
+                        header: (
+                            <span className="flex items-center gap-2">
+                                {group.label}
+                                <LemonTag type="muted" size="small">
+                                    {group.policies.length}
+                                </LemonTag>
+                            </span>
+                        ),
+                        className: 'divide-y',
+                        content: group.policies.map((policy) => (
+                            <ToolPolicyRow key={policy.tool_name} policy={policy} />
+                        )),
+                    }))}
+                />
             ) : (
                 <div className="border rounded divide-y overflow-hidden bg-surface-primary">
                     {displayedToolPolicies.map((policy) => (
@@ -419,16 +477,19 @@ function ToolPoliciesSection(): JSX.Element {
     )
 }
 
-function ToolPolicyRow({ policy }: { policy: ResolvedToolPolicyApi }): JSX.Element {
-    const { server, scope, isAdmin, canManageAgentAccess, toolPoliciesLoading } = useValues(gatewayServerLogic)
-    const { setToolPolicy } = useActions(gatewayServerLogic)
-
-    const fqName = `${server?.name ?? ''}.${policy.tool_name}`
+export function getToolPolicyDisplay(
+    policy: ResolvedToolPolicyApi,
+    scope: PolicyScope
+): {
+    ruleLocked: boolean
+    setByTeamAdmin: boolean
+    displayedState: MCPToolApprovalStateEnumApi
+    options: ((typeof POLICY_OPTIONS)[number] & { disabledReason: string | undefined })[]
+    rulePolicyLabel: string
+} {
     const ruleLocked = policy.decided_by === 'rule'
     const setByTeamAdmin =
         scope.scopeType !== 'team' && (policy.decided_by === 'team' || policy.decided_by === 'preset')
-    const canEditScope =
-        isAdmin || scope.scopeType === 'member' || (scope.scopeType === 'agent' && canManageAgentAccess)
     const agentScope = scope.scopeType === 'agent'
     const displayedState: MCPToolApprovalStateEnumApi =
         agentScope && policy.policy_state === 'needs_approval' ? 'do_not_use' : policy.policy_state
@@ -447,6 +508,16 @@ function ToolPolicyRow({ policy }: { policy: ResolvedToolPolicyApi }): JSX.Eleme
             : displayedState === 'needs_approval'
               ? 'Needs approval by team policy'
               : 'Allowed by team policy'
+
+    return { ruleLocked, setByTeamAdmin, displayedState, options, rulePolicyLabel }
+}
+
+function ToolPolicyRow({ policy }: { policy: ResolvedToolPolicyApi }): JSX.Element {
+    const { server, scope, canEditScope, toolPoliciesLoading } = useValues(gatewayServerLogic)
+    const { setToolPolicy } = useActions(gatewayServerLogic)
+
+    const fqName = `${server?.name ?? ''}.${policy.tool_name}`
+    const { ruleLocked, setByTeamAdmin, displayedState, options, rulePolicyLabel } = getToolPolicyDisplay(policy, scope)
     const policyControl =
         ruleLocked || !canEditScope ? (
             <Tooltip

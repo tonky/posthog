@@ -3,16 +3,20 @@ from datetime import timedelta
 from posthog.test.base import BaseTest
 from unittest.mock import patch
 
-from django.test import override_settings
+from django.test import SimpleTestCase, override_settings
 from django.utils import timezone
 
 from parameterized import parameterized
+
+from posthog.models.activity_logging.activity_log import ActivityLog
 
 from products.workflows.backend.management.commands.backfill_workflows_email_sending_tiers import (
     Command as BackfillCommand,
 )
 from products.workflows.backend.models.team_workflows_config import TeamWorkflowsConfig
+from products.workflows.backend.services.email_sending_controls import suspend_email_sending, unsuspend_email_sending
 from products.workflows.backend.services.email_sending_tier import (
+    AccountTrust,
     SendingHistoryWindows,
     SesTenantState,
     TeamSendingHistory,
@@ -20,16 +24,18 @@ from products.workflows.backend.services.email_sending_tier import (
     apply_tier_decision,
     decide_tier,
     highest_qualifying_tier,
+    recompute_email_sending_tier_for_team,
     recompute_email_sending_tiers,
 )
+from products.workflows.backend.services.email_sending_tier_audit import EMAIL_SENDING_TIER_CHANGED_EVENT
+from products.workflows.backend.services.ses_tenant_state import apply_ses_tenant_state
+from products.workflows.backend.tasks.email_sending_tiers import recompute_workflows_email_sending_tiers
 from products.workflows.backend.utils.email_sending_tiers import get_email_sending_tier_limits
 
-TIER_HOURLY_CAPS = [200, 600, 2000, 6000, 20000, 60000, 200000]
 TIER_DAILY_CAPS = [1000, 3000, 10000, 30000, 100000, 300000, 1000000]
 TIER_BATCH_CAPS = [1000, 3000, 10000, 30000, 100000, 300000, 1000000]
 
 TIER_SETTINGS = {
-    "WORKFLOWS_EMAIL_TIER_HOURLY_CAPS": TIER_HOURLY_CAPS,
     "WORKFLOWS_EMAIL_TIER_DAILY_CAPS": TIER_DAILY_CAPS,
     "WORKFLOWS_EMAIL_TIER_BATCH_AUDIENCE_CAPS": TIER_BATCH_CAPS,
     "WORKFLOWS_EMAIL_TIER_MIN_DAYS_AT_TIER": [3],
@@ -44,6 +50,8 @@ TIER_SETTINGS = {
     "WORKFLOWS_EMAIL_TIER_DEMOTION_COOLDOWN_DAYS": 7,
     "WORKFLOWS_EMAIL_TIER_INACTIVITY_DECAY_DAYS": 30,
     "WORKFLOWS_EMAIL_TIER_AUTO_PAUSE_METRIC_NAMES": [],
+    "WORKFLOWS_EMAIL_TIER_TRUSTED_FLOOR_TIER": 3,
+    "WORKFLOWS_EMAIL_TIER_TRUSTED_MIN_SCORE": 7,
 }
 
 
@@ -74,11 +82,11 @@ def clean_days(count: int, sent_per_day: int, *, days_ago: int = 0) -> dict[str,
 
 
 @override_settings(**TIER_SETTINGS)
-class TestEmailSendingTierDecision(BaseTest):
-    @parameterized.expand([(tier, caps) for tier, caps in enumerate(zip(TIER_HOURLY_CAPS, TIER_DAILY_CAPS))])
-    def test_tier_maps_to_its_caps(self, tier: int, caps: tuple[int, int]) -> None:
+class TestEmailSendingTierDecision(SimpleTestCase):
+    @parameterized.expand([(tier, cap) for tier, cap in enumerate(TIER_DAILY_CAPS)])
+    def test_tier_maps_to_its_caps(self, tier: int, cap: int) -> None:
         limits = get_email_sending_tier_limits(tier)
-        assert (limits.per_hour, limits.per_day) == caps
+        assert limits.per_day == cap
 
     @parameterized.expand([(tier,) for tier in range(len(TIER_DAILY_CAPS) - 1)])
     def test_promotes_one_tier_when_every_criterion_is_met(self, tier: int) -> None:
@@ -360,6 +368,75 @@ class TestEmailSendingTierDecision(BaseTest):
         assert decision.new_tier == 0
         assert decision.reason == "tier_not_used_enough"
 
+    @parameterized.expand(
+        [
+            ("paid an invoice", True, 7, 5, False, 1, 3, "trusted_account"),
+            ("free trial or never paid", True, 3, 5, False, 0, 0, "tier_not_used_enough"),
+            ("no billing trust score", True, None, 5, False, 0, 0, "tier_not_used_enough"),
+            ("never synced by billing", None, 7, 5, False, 0, 0, "tier_not_used_enough"),
+            ("not paying", False, 7, 5, False, 0, 0, "tier_not_used_enough"),
+            ("before its first send", True, 7, 0, False, 0, 3, "trusted_account"),
+            ("dormant at the floor", True, 7, 0, False, 3, 3, "tier_not_used_enough"),
+            ("dormant above the floor", True, 7, 0, False, 4, 3, "inactive"),
+            ("demoted for its rates before", True, 7, 5, True, 0, 0, "tier_not_used_enough"),
+            ("already at the floor", True, 7, 5, False, 3, 3, "tier_not_used_enough"),
+            ("bounces on a sample too small to demote", True, 7, 100, False, 0, 0, "tier_not_used_enough", 100),
+            ("tenant never synced by AWS", True, 7, 5, False, 0, 0, "tier_not_used_enough", 0, ""),
+            ("tenant with no reputation record yet", True, 7, 0, False, 0, 3, "trusted_account", 0, "ENABLED", ""),
+            (
+                "recent bounces hidden in a clean month",
+                True,
+                7,
+                930,
+                False,
+                0,
+                0,
+                "tier_not_used_enough",
+                10,
+                "ENABLED",
+                None,
+                10,
+            ),
+        ]
+    )
+    def test_trusted_account_floor(
+        self,
+        _name: str,
+        paying: bool | None,
+        trust_score: int | None,
+        sent: int,
+        demoted_before: bool,
+        current_tier: int,
+        expected_tier: int,
+        expected_reason: str,
+        hard_bounced: int = 0,
+        tenant_status: str = "ENABLED",
+        tenant_impact: str | None = None,
+        recent_sent: int | None = None,
+    ) -> None:
+        now = timezone.now()
+        daily_sends = clean_days(1, sent) if sent else {}
+        decision = decide_tier(
+            history=history(sent=sent, hard_bounced=hard_bounced, daily_sends=daily_sends),
+            recent_history=history(sent=recent_sent, hard_bounced=hard_bounced, daily_sends=clean_days(1, recent_sent))
+            if recent_sent is not None
+            else None,
+            current_tier=current_tier,
+            tier_updated_at=now - timedelta(days=30),
+            suspended=False,
+            last_rate_demotion_at=now - timedelta(days=60) if demoted_before else None,
+            tenant_state=SesTenantState(
+                sending_status=tenant_status,
+                reputation_impact=tenant_impact if tenant_impact is not None else ("NONE" if tenant_status else ""),
+            ),
+            account_trust=AccountTrust(
+                has_active_subscription=paying,
+                highest_trust_score=trust_score,
+            ),
+            now=now,
+        )
+        assert (decision.new_tier, decision.reason) == (expected_tier, expected_reason)
+
     def test_qualifying_tier_never_exceeds_the_table(self) -> None:
         used = clean_days(5, TIER_DAILY_CAPS[-1] * 100)
         assert highest_qualifying_tier(used) == len(TIER_DAILY_CAPS) - 1
@@ -395,16 +472,157 @@ class TestRecomputeEmailSendingTiers(BaseTest):
         assert not held.changed
         assert held.reason == "tier_not_used_enough"
         assert TeamWorkflowsConfig.objects.get(team=self.team).email_sending_tier == 2
+        assert not ActivityLog.objects.filter(scope="Team", activity="email_sending_tier_changed").exists()
 
-    def test_promotion_is_persisted_with_a_fresh_timestamp(self) -> None:
+    @parameterized.expand([("sweep", False, "workflows_email_sending_tier_sweep"), ("admin_recompute", True, None)])
+    def test_promotion_is_persisted_with_a_fresh_timestamp_and_audited(
+        self, _name: str, by_staff: bool, expected_job_type: str | None
+    ) -> None:
         self._config(email_sending_tier=0, email_sending_tier_updated_at=timezone.now() - timedelta(days=30))
         used = clean_days(2, TIER_DAILY_CAPS[0])
-        self._run({self.team.id: history(team_id=self.team.id, sent=sum(used.values()), daily_sends=used)})
+        histories = {self.team.id: history(team_id=self.team.id, sent=sum(used.values()), daily_sends=used)}
+        with (
+            patch(
+                "products.workflows.backend.services.email_sending_tier.build_sending_history_windows",
+                return_value=SendingHistoryWindows(window=histories, recent=histories),
+            ),
+            patch("posthog.event_usage.posthoganalytics.capture") as global_capture,
+        ):
+            if by_staff:
+                recompute_email_sending_tier_for_team(self.team.id, user_id=self.user.pk)
+            else:
+                recompute_workflows_email_sending_tiers()
 
+        assert [
+            (call.kwargs["distinct_id"], call.kwargs["properties"]["changed_by"])
+            for call in global_capture.call_args_list
+            if call.kwargs["event"] == EMAIL_SENDING_TIER_CHANGED_EVENT
+        ] == ([(str(self.team.uuid), "staff")] if by_staff else [])
         config = TeamWorkflowsConfig.objects.get(team=self.team)
         assert config.email_sending_tier == 1
         assert config.email_sending_tier_updated_at is not None
         assert config.email_sending_tier_updated_at > timezone.now() - timedelta(minutes=1)
+
+        entry = ActivityLog.objects.get(scope="Team", team_id=self.team.id, activity="email_sending_tier_changed")
+        assert entry.user == (self.user if by_staff else None)
+        detail = entry.detail or {}
+        assert detail["context"] == {"reason": "clean_and_used"}
+        assert (detail["trigger"] or {}).get("job_type") == expected_job_type
+        assert [(c["field"], c["before"], c["after"]) for c in detail["changes"]] == [("email_sending_tier", 0, 1)]
+
+    @parameterized.expand(
+        [
+            ("sending", 5, {"workflow_emails": 7}, 3),
+            ("before its first send", 0, {"workflow_emails": 7}, 3),
+            ("paid only for another product", 5, {"workflow_emails": 0, "product_analytics": 7}, 3),
+            ("scored only on a credit product", 5, {"product_analytics": 3, "ai_credits": 7}, 0),
+        ]
+    )
+    def test_sweep_lifts_an_established_paying_account_to_the_trusted_floor(
+        self, _name: str, sent: int, trust_scores: dict[str, int], expected_tier: int
+    ) -> None:
+        self.organization.has_active_subscription = True
+        self.organization.customer_trust_scores = trust_scores
+        self.organization.save()
+        self._config(
+            email_sending_tier=0,
+            email_sending_tier_updated_at=timezone.now() - timedelta(hours=1),
+            ses_tenant_sending_status="ENABLED",
+            ses_tenant_reputation_impact="NONE",
+        )
+
+        self._run(
+            {self.team.id: history(team_id=self.team.id, sent=sent, daily_sends=clean_days(1, sent))} if sent else {}
+        )
+
+        assert TeamWorkflowsConfig.objects.get(team=self.team).email_sending_tier == expected_tier
+        reasons = [
+            (entry.detail or {})["context"]["reason"]
+            for entry in ActivityLog.objects.filter(
+                scope="Team", team_id=self.team.id, activity="email_sending_tier_changed"
+            )
+        ]
+        assert reasons == (["trusted_account"] if expected_tier else [])
+
+    @parameterized.expand(
+        [
+            ("trusted account", 7, 0, False, "NONE", 3),
+            ("trusted account with no reputation record yet", 7, 0, False, None, 3),
+            ("untrusted account", 3, 0, False, "NONE", 0),
+            ("dirty recent rates wait for the sweep", 7, 1, True, "NONE", 1),
+        ]
+    )
+    def test_aws_first_enabling_the_tenant_raises_only_the_trusted_floor(
+        self, _name: str, trust_score: int, tier: int, dirty: bool, impact: str | None, expected_tier: int
+    ) -> None:
+        self.organization.has_active_subscription = True
+        self.organization.customer_trust_scores = {"workflow_emails": trust_score}
+        self.organization.save()
+        self._config(email_sending_tier=tier)
+        recent = {self.team.id: history(team_id=self.team.id, sent=1000, hard_bounced=100)} if dirty else {}
+
+        with (
+            patch(
+                "products.workflows.backend.services.email_sending_tier.build_sending_history_windows",
+                return_value=SendingHistoryWindows(window={}, recent=recent),
+            ) as histories,
+            patch(
+                "products.workflows.backend.services.email_sending_tier.reload_team_workflows_config_on_workers"
+            ) as reload,
+            patch("products.workflows.backend.services.ses_tenant_state.reload_team_workflows_config_on_workers"),
+            self.captureOnCommitCallbacks(execute=True),
+        ):
+            apply_ses_tenant_state(self.team.id, sending_status="ENABLED", reputation_impact=impact)
+
+        assert TeamWorkflowsConfig.objects.get(team=self.team).email_sending_tier == expected_tier
+        assert histories.called == (trust_score == 7)
+        assert reload.called == (expected_tier != tier)
+
+    @parameterized.expand([("staff_suspension",), ("ses_tenant_pause",)])
+    def test_reinstated_team_does_not_regain_the_trusted_floor(self, suspension: str) -> None:
+        self.organization.has_active_subscription = True
+        self.organization.customer_trust_scores = {"workflow_emails": 7}
+        self.organization.save()
+        self._config(
+            email_sending_tier=0,
+            email_sending_tier_updated_at=timezone.now() - timedelta(days=30),
+            ses_tenant_sending_status="ENABLED",
+            ses_tenant_reputation_impact="NONE",
+        )
+        if suspension == "staff_suspension":
+            suspend_email_sending(self.team.id, "bounces")
+            unsuspend_email_sending(self.team.id)
+        else:
+            apply_ses_tenant_state(self.team.id, sending_status="DISABLED", reputation_impact="HIGH")
+            apply_ses_tenant_state(self.team.id, sending_status="ENABLED", reputation_impact="NONE")
+
+        self._run({self.team.id: history(team_id=self.team.id, sent=5, daily_sends=clean_days(1, 5))})
+
+        assert TeamWorkflowsConfig.objects.get(team=self.team).email_sending_tier == 0
+
+    def test_aws_pause_between_sweeps_does_not_shield_a_dirty_sender(self) -> None:
+        self._config(
+            email_sending_tier=3,
+            email_sending_tier_updated_at=timezone.now() - timedelta(days=30),
+            ses_tenant_sending_status="ENABLED",
+            ses_tenant_reputation_impact="NONE",
+        )
+        apply_ses_tenant_state(self.team.id, sending_status="DISABLED", reputation_impact="HIGH")
+        apply_ses_tenant_state(self.team.id, sending_status="ENABLED", reputation_impact="NONE")
+
+        self._run({self.team.id: history(team_id=self.team.id, sent=1000, hard_bounced=100)})
+
+        assert TeamWorkflowsConfig.objects.get(team=self.team).email_sending_tier == 0
+        entry = ActivityLog.objects.get(scope="Team", team_id=self.team.id, activity="email_sending_tier_changed")
+        assert (entry.detail or {})["context"] == {"reason": "ses_tenant_paused"}
+
+    def test_floor_decision_read_before_an_aws_pause_is_not_applied(self) -> None:
+        config = self._config(email_sending_tier=0, ses_tenant_sending_status="ENABLED")
+        apply_ses_tenant_state(self.team.id, sending_status="DISABLED", reputation_impact="HIGH")
+
+        decision = TierDecision(team_id=self.team.id, previous_tier=0, new_tier=3, reason="trusted_account")
+        assert apply_tier_decision(config, decision) is False
+        assert TeamWorkflowsConfig.objects.get(team=self.team).email_sending_tier == 0
 
     def test_suspended_team_is_demoted_even_with_no_recent_sending(self) -> None:
         self._config(
@@ -431,6 +649,7 @@ class TestRecomputeEmailSendingTiers(BaseTest):
         decision = TierDecision(team_id=self.team.id, previous_tier=1, new_tier=2, reason="clean_and_used")
         assert apply_tier_decision(config, decision) is False
         assert TeamWorkflowsConfig.objects.get(team=self.team).email_sending_tier == expected_tier
+        assert not ActivityLog.objects.filter(scope="Team", activity="email_sending_tier_changed").exists()
 
     @parameterized.expand([("promotion", 0), ("demotion", 3)])
     def test_pinned_team_never_moves(self, _name: str, tier: int) -> None:
@@ -470,15 +689,21 @@ class TestBackfillEmailSendingTiers(BaseTest):
         decisions = BackfillCommand()._decide(histories={}, team_ids=[self.team.id])
         assert [(d.new_tier, d.reason) for d in decisions] == [(0, "staff_suspension")]
 
-    def test_apply_does_not_overwrite_a_concurrent_staff_change(self) -> None:
+    @parameterized.expand([("unchanged_row", False, 4), ("pinned_by_staff_during_scan", True, 1)])
+    def test_apply_audits_only_the_writes_it_makes(self, _name: str, pinned: bool, expected_tier: int) -> None:
         # The fleet scan computes decisions before it writes. A staff pin landing in that gap must
         # win over the stale decision, matching the daily sweep's compare-and-set.
         TeamWorkflowsConfig.objects.update_or_create(
-            team=self.team, defaults={"email_sending_tier": 1, "email_sending_tier_pinned": True}
+            team=self.team, defaults={"email_sending_tier": 1, "email_sending_tier_pinned": pinned}
         )
-        stale = TierDecision(team_id=self.team.id, previous_tier=1, new_tier=4, reason="clean_and_used")
-        assert BackfillCommand()._apply([stale]) == 0
-        assert TeamWorkflowsConfig.objects.get(team=self.team).email_sending_tier == 1
+        decision = TierDecision(team_id=self.team.id, previous_tier=1, new_tier=4, reason="clean_and_used")
+        assert BackfillCommand()._apply([decision]) == (0 if pinned else 1)
+        assert TeamWorkflowsConfig.objects.get(team=self.team).email_sending_tier == expected_tier
+
+        entries = ActivityLog.objects.filter(scope="Team", team_id=self.team.id, activity="email_sending_tier_changed")
+        assert [(entry.detail or {})["trigger"]["job_type"] for entry in entries] == (
+            [] if pinned else ["backfill_workflows_email_sending_tiers"]
+        )
 
     def test_history_for_a_deleted_team_is_dropped(self) -> None:
         # app_metrics2 in ClickHouse outlives a team deleted from Postgres, so its history can name a

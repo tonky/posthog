@@ -1,8 +1,17 @@
 import { useMemo, useState } from 'react'
 
+import { IconPlus } from '@posthog/icons'
 import { LemonButton } from '@posthog/lemon-ui'
+import { Button } from '@posthog/quill'
 
-import { CyclotronJobFiltersType, HogFunctionSubTemplateIdType, HogFunctionTypeType } from '~/types'
+import { useQuillSurface } from 'lib/ui/QuillSurface/quillSurfaceContext'
+
+import {
+    CyclotronJobFiltersType,
+    HogFunctionSubTemplateIdType,
+    HogFunctionSubTemplateType,
+    HogFunctionTypeType,
+} from '~/types'
 
 import { HOG_FUNCTION_SUB_TEMPLATE_COMMON_PROPERTIES } from '../sub-templates/sub-templates'
 import { HogFunctionList } from './HogFunctionsList'
@@ -18,11 +27,15 @@ export type LinkedHogFunctionsProps = {
     queryParams?: Record<string, string>
 }
 
+// A sub-template can widen the filters its trigger shares with the other destinations. A PagerDuty
+// alert also runs on the resolved event, so the incident it opened closes again. Its own filters
+// therefore win over the common ones, which carry the trigger event alone.
 export const getFiltersFromSubTemplateId = (
-    subTemplateId: HogFunctionSubTemplateIdType
+    subTemplateId: HogFunctionSubTemplateIdType,
+    subTemplate?: HogFunctionSubTemplateType | null
 ): CyclotronJobFiltersType | undefined => {
     const commonProperties = HOG_FUNCTION_SUB_TEMPLATE_COMMON_PROPERTIES[subTemplateId]
-    return commonProperties.filters ?? undefined
+    return subTemplate?.filters ?? commonProperties.filters ?? undefined
 }
 
 export function LinkedHogFunctions({
@@ -38,6 +51,7 @@ export function LinkedHogFunctions({
     const logicKey = useMemo(() => {
         return JSON.stringify({ type, subTemplateIds, forceFilterGroups })
     }, [type, subTemplateIds, forceFilterGroups])
+    const quillSurface = useQuillSurface()
 
     // TRICKY: All templates are destinations - internal destinations are just a different source
     // and set by the subtemplate modifier
@@ -58,7 +72,7 @@ export function LinkedHogFunctions({
 
     const hogFunctionFilterList =
         forceFilterGroups ??
-        (subTemplateIds?.map(getFiltersFromSubTemplateId).filter((filters) => !!filters) as
+        (subTemplateIds?.map((id) => getFiltersFromSubTemplateId(id)).filter((filters) => !!filters) as
             | CyclotronJobFiltersType[]
             | undefined)
 
@@ -69,11 +83,17 @@ export function LinkedHogFunctions({
             getConfigurationOverrides={getConfigurationOverrides}
             queryParams={queryParams}
             extraControls={
-                <>
-                    <LemonButton type="secondary" size="small" onClick={() => setShowNewDestination(false)}>
+                quillSurface ? (
+                    <Button variant="outline" onClick={() => setShowNewDestination(false)}>
                         Cancel
-                    </LemonButton>
-                </>
+                    </Button>
+                ) : (
+                    <>
+                        <LemonButton type="secondary" size="small" onClick={() => setShowNewDestination(false)}>
+                            Cancel
+                        </LemonButton>
+                    </>
+                )
             }
         />
     ) : (
@@ -85,16 +105,27 @@ export function LinkedHogFunctions({
             hideFeedback={hideFeedback}
             emptyText={emptyText}
             extraControls={
-                <>
-                    <LemonButton
-                        type="primary"
-                        size="small"
+                quillSurface ? (
+                    <Button
+                        variant="primary"
                         disabledReason={newDisabledReason}
                         onClick={() => setShowNewDestination(true)}
                     >
+                        <IconPlus />
                         New notification
-                    </LemonButton>
-                </>
+                    </Button>
+                ) : (
+                    <>
+                        <LemonButton
+                            type="primary"
+                            size="small"
+                            disabledReason={newDisabledReason}
+                            onClick={() => setShowNewDestination(true)}
+                        >
+                            New notification
+                        </LemonButton>
+                    </>
+                )
             }
         />
     )

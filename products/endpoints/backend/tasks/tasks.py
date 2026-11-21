@@ -10,8 +10,10 @@ from structlog import get_logger
 from posthog.celery_queues import CeleryQueue
 from posthog.scoping_audit import skip_team_scope_audit
 
+from products.data_modeling.backend.facade.api import HasDependentsError
 from products.data_modeling.backend.facade.models import DataModelingJob, DataModelingJobStatus
 from products.endpoints.backend.logic.ducklake_shadow import run_ducklake_shadow_comparison
+from products.endpoints.backend.logic.materialization_dependencies import EndpointMaterializationDependencyService
 from products.endpoints.backend.metrics import ENDPOINT_MATERIALIZATION_EVENT_TOTAL
 from products.endpoints.backend.models import EndpointVersion
 
@@ -62,8 +64,9 @@ def deactivate_stale_materializations() -> None:
     1. The version has an active materialization (saved_query.is_materialized = True)
     2. The materialization has run in the past 24h (a finished job, or saved_query.last_run_at)
     3. The materialization was enabled at least 30 days ago (saved_query.created_at)
-    4. The version was last executed over 30 days ago (via API key), or it is a superseded
-       version that was never executed
+    4. The version was last executed over 30 days ago, or it was never executed and either
+       the endpoint was never executed or the version is superseded
+    5. No other view, endpoint or metric reads the saved query
 
     For matching versions, the materialization is reverted to save resources.
     """
@@ -78,15 +81,16 @@ def deactivate_stale_materializations() -> None:
     ).exclude(status=DataModelingJobStatus.RUNNING)
     ran_recently = Q(saved_query__last_run_at__gte=twenty_four_hours_ago) | Q(Exists(recent_job))
 
-    # Both stamps are written together on every API-key call, so a superseded version with no stamp
-    # of its own has not been called since the stamp existed. The endpoint stamp belongs to the
-    # version that replaced it.
+    # Both stamps are written together on every programmatic call, so a version with no stamp of its
+    # own has not been called since the stamp existed. The endpoint stamp belongs to the version that
+    # replaced it, and an endpoint with no stamp at all was never called from code. Only playground
+    # and UI calls go unstamped, and those do not justify a running materialization; the 30-day gate on
+    # saved_query.created_at below keeps a freshly materialized version safe.
     superseded = ~Q(version=F("endpoint__current_version"))
-    version_stale = (
-        Q(last_executed_at__lt=stale_threshold)
-        | Q(last_executed_at__isnull=True, endpoint__last_executed_at__lt=stale_threshold)
-        | (Q(last_executed_at__isnull=True) & superseded)
+    never_called_version = Q(last_executed_at__isnull=True) & (
+        Q(endpoint__last_executed_at__lt=stale_threshold) | Q(endpoint__last_executed_at__isnull=True) | superseded
     )
+    version_stale = Q(last_executed_at__lt=stale_threshold) | never_called_version
 
     stale_versions = EndpointVersion.objects.filter(
         ran_recently,
@@ -103,18 +107,42 @@ def deactivate_stale_materializations() -> None:
         return
 
     deactivated_count = 0
+    skipped_count = 0
+    dependency_services: dict[int, EndpointMaterializationDependencyService] = {}
 
     for version in stale_versions:
+        team_id = version.endpoint.team_id
+        log_context = {
+            "endpoint_id": str(version.endpoint.id),
+            "endpoint_name": version.endpoint.name,
+            "version": version.version,
+            "team_id": team_id,
+            "saved_query_name": version.saved_query.name if version.saved_query else None,
+        }
+        dependency_service = dependency_services.setdefault(team_id, EndpointMaterializationDependencyService(team_id))
+        try:
+            dependency_service.check_deletable(version)
+        except HasDependentsError as error:
+            logger.info(
+                "deactivate_stale_materialization_skipped_dependents",
+                dependents=len(error.dependents),
+                **log_context,
+            )
+            skipped_count += 1
+            ENDPOINT_MATERIALIZATION_EVENT_TOTAL.labels(action="deactivate_stale", status="skipped_dependents").inc()
+            continue
+        except Exception:
+            logger.exception("deactivate_stale_materialization_dependents_check_failed", **log_context)
+            skipped_count += 1
+            ENDPOINT_MATERIALIZATION_EVENT_TOTAL.labels(action="deactivate_stale", status="skipped_dependents").inc()
+            continue
         try:
             _deactivate_version_materialization(version)
         except Exception as e:
             logger.exception(
                 "deactivate_stale_materialization_failed",
-                endpoint_id=str(version.endpoint.id),
-                endpoint_name=version.endpoint.name,
-                version=version.version,
-                team_id=version.endpoint.team_id,
                 error=str(e),
+                **log_context,
             )
             ENDPOINT_MATERIALIZATION_EVENT_TOTAL.labels(action="deactivate_stale", status="error").inc()
             continue
@@ -124,6 +152,7 @@ def deactivate_stale_materializations() -> None:
     logger.info(
         "deactivate_stale_materializations_completed",
         deactivated_count=deactivated_count,
+        skipped_count=skipped_count,
     )
 
 

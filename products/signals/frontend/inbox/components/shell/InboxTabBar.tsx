@@ -3,19 +3,21 @@ import { router } from 'kea-router'
 
 import { LemonTabs } from '@posthog/lemon-ui'
 
+import { useFeatureFlag } from 'lib/hooks/useFeatureFlag'
 import { urls } from 'scenes/urls'
 
 import { inboxSceneLogic } from '../../inboxSceneLogic'
 import { INBOX_TAB_KEYS, INBOX_TAB_LABEL, InboxTabKey } from '../../types'
 
 /**
- * Page tab bar: Reports / Scouts / Settings. The report sections (Review and merge / Needs decision /
- * Resolved) live inside the Reports tab, so no counts sit here.
+ * The report sections (Review and merge / Needs decision / Resolved) live inside the Reports tab,
+ * so no counts sit here.
  */
 export function InboxTabBar(): JSX.Element {
     const { activeTab } = useValues(inboxSceneLogic)
 
-    const tabs = INBOX_TAB_KEYS.map((key) => ({
+    const monitoringEnabled = useFeatureFlag('SIGNALS_REPORT_MONITORING')
+    const tabs = INBOX_TAB_KEYS.filter((key) => key !== 'monitoring' || monitoringEnabled).map((key) => ({
         key,
         label: INBOX_TAB_LABEL[key],
         content: <></>,

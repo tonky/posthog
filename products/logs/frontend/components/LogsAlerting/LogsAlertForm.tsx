@@ -1,21 +1,14 @@
-import { BindLogic, useActions, useValues } from 'kea'
-import { memo, useCallback, useMemo, useRef, useState } from 'react'
+import { useActions, useValues } from 'kea'
+import { useCallback, useMemo } from 'react'
 
 import { IconInfo } from '@posthog/icons'
-import { LemonDropdown, LemonInput, LemonSegmentedButton, LemonSelect } from '@posthog/lemon-ui'
+import { LemonInput, LemonSegmentedButton, LemonSelect } from '@posthog/lemon-ui'
 
-import { InfiniteSelectResults } from 'lib/components/TaxonomicFilter/InfiniteSelectResults'
-import { TaxonomicFilterSearchInput } from 'lib/components/TaxonomicFilter/TaxonomicFilter'
-import { taxonomicFilterLogic } from 'lib/components/TaxonomicFilter/taxonomicFilterLogic'
-import { TaxonomicFilterGroupType, TaxonomicFilterLogicProps } from 'lib/components/TaxonomicFilter/types'
-import UniversalFilters from 'lib/components/UniversalFilters/UniversalFilters'
-import { universalFiltersLogic } from 'lib/components/UniversalFilters/universalFiltersLogic'
-import { isUniversalGroupFilterLike } from 'lib/components/UniversalFilters/utils'
 import { LemonField } from 'lib/lemon-ui/LemonField'
 import { Tooltip } from 'lib/lemon-ui/Tooltip'
 import { teamLogic } from 'scenes/teamLogic'
 
-import { AnyPropertyFilter, PropertyFilterType, PropertyOperator, UniversalFiltersGroup } from '~/types'
+import { UniversalFiltersGroup } from '~/types'
 
 import { AlertAdvancedOptions } from 'products/alerts/frontend/components/AlertAdvancedOptions'
 import { AlertDefinitionRow } from 'products/alerts/frontend/components/AlertDefinition'
@@ -25,34 +18,16 @@ import { ServiceFilter } from 'products/logs/frontend/components/LogsViewer/Filt
 import { SeverityLevelsFilter } from 'products/logs/frontend/components/LogsViewer/Filters/SeverityLevelsFilter'
 import { LogsAlertConfigurationThresholdOperatorEnumApi } from 'products/logs/frontend/generated/api.schemas'
 
+import { AlertFilterGroup } from './LogsAlertFilterGroup'
 import { logsAlertFormLogic } from './logsAlertFormLogic'
-
-const WINDOW_OPTIONS = [
-    { value: 5, label: '5 minutes' },
-    { value: 10, label: '10 minutes' },
-    { value: 15, label: '15 minutes' },
-    { value: 30, label: '30 minutes' },
-    { value: 60, label: '60 minutes' },
-]
-
-const taxonomicFilterLogicKey = 'logs-alert'
-const taxonomicGroupTypes = [
-    TaxonomicFilterGroupType.Logs,
-    TaxonomicFilterGroupType.LogResourceAttributes,
-    TaxonomicFilterGroupType.LogAttributes,
-]
-
-function buildCheckPattern(datapoints: number, periods: number): boolean[] {
-    // Last check is always matched — it's the one that tips the alert over.
-    // Distribute OK checks evenly across the remaining positions.
-    const result: boolean[] = Array(periods).fill(true)
-    const okCount = periods - datapoints
-    for (let i = 0; i < okCount; i++) {
-        const pos = Math.round((i * (periods - 2)) / Math.max(okCount - 1, 1))
-        result[pos] = false
-    }
-    return result
-}
+import { LogsAlertGroupByField } from './LogsAlertGroupByField'
+import { GROUPING_NEEDS_ABOVE } from './logsAlertGrouping'
+import {
+    applyEvaluationPeriods,
+    buildCheckPattern,
+    countEnabledAdvancedOptions,
+    WINDOW_OPTIONS,
+} from './logsAlertTriggerUtils'
 
 function CheckDots({ checks }: { checks: boolean[] }): JSX.Element {
     return (
@@ -157,10 +132,7 @@ export function LogsAlertTrigger(): JSX.Element {
     const { alertForm } = useValues(logsAlertFormLogic)
     const { timezone } = useValues(teamLogic)
     const { setAlertFormValue } = useActions(logsAlertFormLogic)
-    const enabledAdvancedOptionsCount =
-        Number(alertForm.evaluationPeriods > 1 || alertForm.datapointsToAlarm > 1) +
-        Number(alertForm.cooldownMinutes > 0) +
-        Number(alertForm.scheduleRestriction !== null)
+    const enabledAdvancedOptionsCount = countEnabledAdvancedOptions(alertForm)
 
     return (
         <div className="space-y-4">
@@ -172,7 +144,11 @@ export function LogsAlertTrigger(): JSX.Element {
                         onChange={(value) => setAlertFormValue('thresholdOperator', value)}
                         options={[
                             { value: LogsAlertConfigurationThresholdOperatorEnumApi.Above, label: 'above' },
-                            { value: LogsAlertConfigurationThresholdOperatorEnumApi.Below, label: 'below' },
+                            {
+                                value: LogsAlertConfigurationThresholdOperatorEnumApi.Below,
+                                label: 'below',
+                                disabledReason: alertForm.groupBy === 'none' ? undefined : GROUPING_NEEDS_ABOVE,
+                            },
                         ]}
                         size="small"
                     />
@@ -194,6 +170,7 @@ export function LogsAlertTrigger(): JSX.Element {
                     />
                 </AlertDefinitionRow>
             </div>
+            <LogsAlertGroupByField />
             <AlertAdvancedOptions enabledCount={enabledAdvancedOptionsCount}>
                 <LemonField.Pure
                     label={
@@ -222,13 +199,7 @@ export function LogsAlertTrigger(): JSX.Element {
                                 min={alertForm.datapointsToAlarm}
                                 max={10}
                                 value={alertForm.evaluationPeriods}
-                                onChange={(value) => {
-                                    const newPeriods = value ?? alertForm.datapointsToAlarm
-                                    setAlertFormValue('evaluationPeriods', newPeriods)
-                                    if (alertForm.datapointsToAlarm > newPeriods) {
-                                        setAlertFormValue('datapointsToAlarm', newPeriods)
-                                    }
-                                }}
+                                onChange={(value) => applyEvaluationPeriods(alertForm, value, setAlertFormValue)}
                                 className="w-16"
                                 size="small"
                             />
@@ -245,7 +216,18 @@ export function LogsAlertTrigger(): JSX.Element {
                 </LemonField.Pure>
                 <LemonField.Pure
                     label="Notification cooldown"
-                    help="After firing, wait this long before sending another notification. Set to 0 to notify on every check."
+                    help={
+                        <div className="flex flex-col gap-1">
+                            <span>Set to 0 for no minimum.</span>
+                            <span>The alert notifies once when it starts firing, and once when it resolves.</span>
+                            <span>It does not re-notify unless it resolves and then fires again.</span>
+                            <span>
+                                Cooldown sets the minimum time between notifications. No notifications are sent during
+                                cooldown.
+                            </span>
+                            <span>Cooldown does not apply to PagerDuty incidents.</span>
+                        </div>
+                    }
                 >
                     <div className="flex items-center gap-2">
                         <LemonInput
@@ -266,147 +248,6 @@ export function LogsAlertTrigger(): JSX.Element {
                     onChange={(next) => setAlertFormValue('scheduleRestriction', next)}
                 />
             </AlertAdvancedOptions>
-        </div>
-    )
-}
-
-const AlertFilterGroup = memo(function AlertFilterGroup({
-    filterGroup,
-    onChange,
-}: {
-    filterGroup: UniversalFiltersGroup
-    onChange: (group: UniversalFiltersGroup) => void
-}): JSX.Element {
-    const newlyAddedFilterIndex = useRef<number | null>(null)
-    const markBlankFilterAsNew = useCallback((index: number): void => {
-        newlyAddedFilterIndex.current = index
-    }, [])
-
-    return (
-        <UniversalFilters
-            rootKey={taxonomicFilterLogicKey}
-            group={filterGroup}
-            taxonomicGroupTypes={taxonomicGroupTypes}
-            onChange={onChange}
-        >
-            <div className="space-y-2">
-                <AlertFilterSearch onAddBlankFilter={markBlankFilterAsNew} />
-                <AlertAppliedFilters initiallyOpenFilterIndex={newlyAddedFilterIndex.current} />
-            </div>
-        </UniversalFilters>
-    )
-})
-
-function AlertFilterSearch({ onAddBlankFilter }: { onAddBlankFilter: (index: number) => void }): JSX.Element {
-    const [visible, setVisible] = useState<boolean>(false)
-    const { addGroupFilter, setGroupValues } = useActions(universalFiltersLogic)
-    const { filterGroup } = useValues(universalFiltersLogic)
-
-    const searchInputRef = useRef<HTMLInputElement | null>(null)
-    const floatingRef = useRef<HTMLDivElement | null>(null)
-    const filterGroupRef = useRef(filterGroup)
-    filterGroupRef.current = filterGroup
-
-    const onClose = useCallback((): void => {
-        searchInputRef.current?.blur()
-        setVisible(false)
-    }, [])
-
-    const taxonomicFilterLogicProps: TaxonomicFilterLogicProps = useMemo(
-        () => ({
-            taxonomicFilterLogicKey,
-            taxonomicGroupTypes,
-            onChange: (taxonomicGroup, value, item) => {
-                if (item.value === undefined) {
-                    onAddBlankFilter(filterGroupRef.current.values.length)
-                    addGroupFilter(taxonomicGroup, value, item)
-                    setVisible(false)
-                    return
-                }
-
-                const newValues = [...filterGroupRef.current.values]
-                const newPropertyFilter = {
-                    key: item.key,
-                    value: item.value,
-                    operator: PropertyOperator.IContains,
-                    type: item.propertyFilterType,
-                } as AnyPropertyFilter
-                newValues.push(newPropertyFilter)
-                setGroupValues(newValues)
-                setVisible(false)
-            },
-            onEnter: () => {
-                searchInputRef.current?.blur()
-                setVisible(false)
-            },
-            autoSelectItem: true,
-        }),
-        [addGroupFilter, onAddBlankFilter, setGroupValues]
-    )
-
-    const showDropdown = useCallback(() => setVisible(true), [])
-
-    return (
-        <BindLogic logic={taxonomicFilterLogic} props={taxonomicFilterLogicProps}>
-            <LemonDropdown
-                overlay={
-                    <div className="w-[400px]">
-                        <InfiniteSelectResults
-                            focusInput={() => searchInputRef.current?.focus()}
-                            taxonomicFilterLogicProps={taxonomicFilterLogicProps}
-                            popupAnchorElement={floatingRef.current}
-                        />
-                    </div>
-                }
-                visible={visible}
-                closeOnClickInside={false}
-                floatingRef={floatingRef}
-                onClickOutside={onClose}
-            >
-                <TaxonomicFilterSearchInput
-                    onClick={showDropdown}
-                    searchInputRef={searchInputRef}
-                    onClose={onClose}
-                    onChange={showDropdown}
-                    autoFocus={false}
-                />
-            </LemonDropdown>
-        </BindLogic>
-    )
-}
-
-function AlertAppliedFilters({
-    initiallyOpenFilterIndex = null,
-}: {
-    initiallyOpenFilterIndex?: number | null
-}): JSX.Element | null {
-    const { filterGroup } = useValues(universalFiltersLogic)
-    const { replaceGroupValue, removeGroupValue } = useActions(universalFiltersLogic)
-
-    if (filterGroup.values.length === 0) {
-        return null
-    }
-
-    return (
-        <div className="flex gap-1 items-center flex-wrap">
-            {filterGroup.values.map((filterOrGroup, index) => {
-                return isUniversalGroupFilterLike(filterOrGroup) ? (
-                    <UniversalFilters.Group index={index} key={index} group={filterOrGroup}>
-                        <AlertAppliedFilters />
-                    </UniversalFilters.Group>
-                ) : (
-                    <UniversalFilters.Value
-                        key={index}
-                        index={index}
-                        filter={filterOrGroup}
-                        onRemove={() => removeGroupValue(index)}
-                        onChange={(value) => replaceGroupValue(index, value)}
-                        initiallyOpen={
-                            index === initiallyOpenFilterIndex && filterOrGroup.type !== PropertyFilterType.HogQL
-                        }
-                    />
-                )
-            })}
         </div>
     )
 }

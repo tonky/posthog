@@ -59,7 +59,7 @@ redis_db=$(( 5 + (shard_idx - 1) % 10 ))
 results="$root/.enact/state/e2e/shard-$shard_idx"
 live_setup "${ENACT_COMPONENT:-e2e}" "${ENACT_JOB:-test}" "$redis_db" "$results/logs"
 capture_port=$(live_free_port) capture_ai_port=$(live_free_port) proxy_port=$(live_free_port)
-ingestion_port=$(live_free_port)
+ingestion_port=$(live_free_port) temporal_metrics_port=$(live_free_port) temporal_health_port=$(live_free_port)
 site="http://localhost:$live_web_port"
 # ci-e2e-playwright.yml's own environment.
 live_run+=(E2E_TESTING=1 OPT_OUT_CAPTURE=0 CLOUD_DEPLOYMENT=E2E SITE_URL="$site" SECURE_COOKIES=0
@@ -166,7 +166,8 @@ fi
 e2e_app() {
     live_start_celery
     live_start temporal-worker 0 - "${live_run[@]}" uv run --no-sync python manage.py start_temporal_worker \
-        --task-queue analytics-platform-task-queue
+        --task-queue analytics-platform-task-queue \
+        --metrics-port "$temporal_metrics_port" --health-port "$temporal_health_port"
     live_start_web "${GRANIAN_WORKERS:-4}"
 }
 

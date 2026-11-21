@@ -6,13 +6,15 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.request import Request
 from rest_framework.response import Response
 
+from posthog.api.documentation import PostHogAutoSchema
 from posthog.api.routing import TeamAndOrgViewSetMixin
 
+from products.replay_vision.backend.api.cloud_only import ReplayVisionCloudOnly
 from products.replay_vision.backend.api.observations import ReplayObservationSerializer
+from products.replay_vision.backend.api.scout_permissions import ScoutDataAccessPermission
 from products.replay_vision.backend.experiment_variants import experiment_variants_readout
 from products.replay_vision.backend.models.replay_scanner import ScannerType
 from products.replay_vision.backend.scanner_access import scanner_for_recording_derived_read
-from products.signals.backend.scout_harness.views import ScoutCanonicalTeamAccessPermission
 
 
 class VariantsExperimentSerializer(serializers.Serializer):
@@ -48,6 +50,10 @@ class VariantAnalysisLineSerializer(serializers.Serializer):
     count = serializers.IntegerField(
         help_text="How many of this variant's summaries the analysis read show the theme, as the scout counted them."
     )
+    read = serializers.IntegerField(
+        allow_null=True,
+        help_text="How many of this variant's summaries the theme was counted over, when that is fewer than the analysis read in total. Null when the theme was counted over every summary the analysis read.",
+    )
     example_observation_ids = serializers.ListField(
         child=serializers.UUIDField(),
         help_text="Observations of this variant the scout cited for the theme. Ids it can't back are dropped.",
@@ -60,6 +66,10 @@ class VariantAnalysisDifferenceSerializer(serializers.Serializer):
     counts = serializers.DictField(
         child=serializers.IntegerField(),
         help_text="Summaries the analysis read that show the theme, per variant key, as the scout counted them.",
+    )
+    read = serializers.DictField(
+        child=serializers.IntegerField(),
+        help_text="Per variant key, how many summaries the theme was counted over, for a theme counted over fewer summaries than the analysis read in total. Empty when it was counted over all of them.",
     )
 
 
@@ -130,17 +140,28 @@ class ExperimentVariantsReadoutSerializer(serializers.Serializer):
     )
 
 
+class _ReadoutSchema(PostHogAutoSchema):
+    """Keeps drf-spectacular from wrapping the ``list`` response in an array: the readout is one object."""
+
+    def _is_list_view(self, serializer: object = None) -> bool:
+        return False
+
+
 class ReplayScannerVariantsViewSet(TeamAndOrgViewSetMixin, viewsets.ViewSet):
     """What users in each variant of an experiment scanner's experiment do, side by side."""
 
     # The variant analysis is read from the scout's canonical-team records, so access is checked
     # against that team and not just the environment in the URL.
     # Appended to the standard stack by `TeamAndOrgViewSetMixin.get_permissions`.
-    permission_classes = [ScoutCanonicalTeamAccessPermission]
+    permission_classes = [ReplayVisionCloudOnly, ScoutDataAccessPermission]
+    schema = _ReadoutSchema()
     scope_object = "replay_scanner"
     required_scopes = ["replay_scanner:read", "session_recording:read"]
 
     @extend_schema(
+        # Pinned: the schema override renames the operation to `_retrieve`, and the MCP tool and its
+        # callers use the `_list` name.
+        operation_id="vision_scanners_variants_list",
         responses={
             200: ExperimentVariantsReadoutSerializer,
             400: OpenApiResponse(description="The scanner is not an experiment scanner."),

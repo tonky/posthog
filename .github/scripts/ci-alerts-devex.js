@@ -22,7 +22,9 @@
 // Most gating workflows have only a push lane. Backend CI has two, because its master-push run
 // carries the per-commit checks while the test matrices run from an hourly `schedule` trigger.
 // Each lane gets its own streak, its own thresholds, and its own line in the incident, so a
-// green push run cannot mask a red matrix run.
+// green push run cannot mask a red matrix run. Backend CI's schedule splits again: its 3-hourly
+// run takes the full matrix and the hourly runs between take only Core, so a green Core-only run
+// cannot mask a red full-matrix run.
 //
 // Message model (chosen for UX: never lose history, never orphan a stuck message):
 //   - Anchor: one top-level message, edited silently each tick to keep the live
@@ -34,6 +36,8 @@
 //
 // GitHub API rate-limit observability is handled by the separate
 // monitor-github-rate-limit workflow, which emits to PostHog as time series.
+
+const fs = require('node:fs')
 
 const SLACK_API = 'https://slack.com/api'
 const INCIDENT_EVENT_TYPE = 'master_ci_incident'
@@ -60,6 +64,7 @@ const RUN_INDEX_MAX_LAG_MINUTES = 180
 const SCHEDULED_RUN_INDEX_MAX_LAG_MINUTES = 360
 // Suffix that separates a scheduled lane from its workflow's push lane in the incident.
 const SCHEDULED_LANE_LABEL = '(scheduled)'
+const FULL_MATRIX_LANE_LABEL = '(scheduled, full matrix)'
 const STALE_PAGE_RETRIES = 2
 const STALE_PAGE_RETRY_DELAY_MS = 15000
 // The workflow behind the webhook reads `properties.channel` and `properties.ts` to reply in the
@@ -96,23 +101,76 @@ function buildLanes(env) {
         // active hours.
         countNeedsActivity: false,
     }))
-    for (const workflowFile of list(env.SCHEDULED_GATING_WORKFLOWS)) {
+    const depotWorkflows = new Set(list(env.DEPOT_WORKFLOWS))
+    // Depot writes a split schedule as one file per cron. A GitHub-hosted workflow has a single
+    // stream of scheduled runs, so it cannot be split.
+    const fullMatrixWorkflows = new Set(
+        list(env.SCHEDULED_FULL_MATRIX_WORKFLOWS).filter((workflowFile) => depotWorkflows.has(workflowFile))
+    )
+    const scheduled = list(env.SCHEDULED_GATING_WORKFLOWS).flatMap((workflowFile) =>
+        fullMatrixWorkflows.has(workflowFile)
+            ? [
+                  { workflowFile, label: SCHEDULED_LANE_LABEL, runsFileKey: 'schedule-core-only' },
+                  { workflowFile, label: FULL_MATRIX_LANE_LABEL, runsFileKey: 'schedule-full', hoursPerTick: 3 },
+              ]
+            : [{ workflowFile, label: SCHEDULED_LANE_LABEL, runsFileKey: 'schedule' }]
+    )
+    for (const source of scheduled) {
         lanes.push({
-            workflowFile,
+            ...source,
             event: 'schedule',
-            label: SCHEDULED_LANE_LABEL,
             maxLagMinutes: SCHEDULED_RUN_INDEX_MAX_LAG_MINUTES,
             // Own thresholds: at one run per cron tick, the push streak threshold of 5 needs five
             // hours to trip, while the push wall-clock arm pages on a single flaky run held for one
-            // tick. Both scheduled arms need more than one red tick behind them.
+            // tick. Both scheduled arms need more than one red tick behind them, so the wall-clock
+            // threshold scales with a lane's tick length.
             streakThreshold: parseInt(env.SCHEDULED_FAILURE_STREAK_THRESHOLD || '2', 10),
-            minutesThreshold: parseInt(env.SCHEDULED_FAILURE_MINUTES_THRESHOLD || '150', 10),
+            minutesThreshold:
+                parseInt(env.SCHEDULED_FAILURE_MINUTES_THRESHOLD || '150', 10) * (source.hoursPerTick || 1),
             // A cron keeps firing through a quiet weekend, so this lane's run streak needs the same
             // activity gate the wall-clock arm has, because otherwise it pages with nobody pushing.
             countNeedsActivity: true,
         })
     }
-    return lanes
+    // A workflow that runs on Depot CI has no GitHub runs to list. Each of its lanes reads the
+    // file that .github/scripts/depot_backend_runs.py wrote for that trigger, which holds the runs
+    // in GitHub's shape. A missing or unparseable file throws, so the lane reads as unreadable,
+    // never green.
+    return lanes.map((lane) =>
+        depotWorkflows.has(lane.workflowFile)
+            ? {
+                  ...lane,
+                  ...depotRunSource(`${env.DEPOT_RUNS_DIR}/${lane.workflowFile}-${lane.runsFileKey || lane.event}.json`),
+              }
+            : lane
+    )
+}
+
+function depotRunSource(file) {
+    return {
+        listRuns: (page) => {
+            if (page !== 1) {
+                return []
+            }
+            const runs = JSON.parse(fs.readFileSync(file, 'utf8'))
+            if (
+                !Array.isArray(runs) ||
+                runs.length === 0 ||
+                runs.some(
+                    (run) =>
+                        !run ||
+                        !['completed', 'in_progress'].includes(run.status) ||
+                        !Number.isFinite(Date.parse(run.created_at)) ||
+                        (run.status === 'completed' && !['success', 'failure', 'cancelled'].includes(run.conclusion))
+                )
+            ) {
+                throw new Error('Depot runs file contains invalid run data')
+            }
+            return runs
+        },
+        // GitHub has no run history for this lane, so the alert links its failing run.
+        linkFailingRun: true,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -141,11 +199,19 @@ async function fetchWorkflowRuns(
     repo,
     workflowFile,
     perPage,
-    { event = 'push', maxLagMinutes = RUN_INDEX_MAX_LAG_MINUTES, freshAsOf = null, sleep = defaultSleep } = {}
+    { event = 'push', maxLagMinutes = RUN_INDEX_MAX_LAG_MINUTES, freshAsOf = null, sleep = defaultSleep, listRuns } = {}
 ) {
+    // One raw page of the lane's runs, newest first. A lane brings its own source when its runs
+    // are not GitHub workflow runs.
+    const listPage =
+        listRuns ||
+        ((page) =>
+            github.rest.actions
+                .listWorkflowRuns({ owner, repo, workflow_id: workflowFile, branch: 'master', event, per_page: perPage, page })
+                .then(({ data }) => data.workflow_runs))
     for (let attempt = 0; ; attempt++) {
         try {
-            return await fetchSettledRuns(github, owner, repo, workflowFile, perPage, { event, maxLagMinutes, freshAsOf })
+            return await fetchSettledRuns(listPage, workflowFile, perPage, { event, maxLagMinutes, freshAsOf })
         } catch (err) {
             if (!err.staleIndex || attempt >= STALE_PAGE_RETRIES) {throw err}
             await sleep(STALE_PAGE_RETRY_DELAY_MS)
@@ -153,23 +219,15 @@ async function fetchWorkflowRuns(
     }
 }
 
-async function fetchSettledRuns(github, owner, repo, workflowFile, perPage, { event, maxLagMinutes, freshAsOf }) {
+async function fetchSettledRuns(listPage, workflowFile, perPage, { event, maxLagMinutes, freshAsOf }) {
     const MAX_PAGES = 5
     const settled = []
     for (let page = 1; page <= MAX_PAGES; page++) {
-        const { data } = await github.rest.actions.listWorkflowRuns({
-            owner,
-            repo,
-            workflow_id: workflowFile,
-            branch: 'master',
-            event,
-            per_page: perPage,
-            page,
-        })
+        const runs = await listPage(page)
         // Freshness is judged on the raw page-1 head (any status) before paging deeper; an empty
         // page is the same anomaly — every lane has master run history.
         if (page === 1 && freshAsOf) {
-            const head = data.workflow_runs[0]
+            const head = runs[0]
             // Empty page → Infinity (stale); NaN (unparseable dates) falls through to fresh.
             const lagMins = head
                 ? (new Date(freshAsOf).getTime() - new Date(head.created_at).getTime()) / 60000
@@ -182,7 +240,7 @@ async function fetchSettledRuns(github, owner, repo, workflowFile, perPage, { ev
                 throw err
             }
         }
-        for (const run of data.workflow_runs) {
+        for (const run of runs) {
             // In-progress/queued must neither count as nor break a failure streak (mirroring how
             // unreported commits classify 'unknown'); cancelled/skipped never reflect real health.
             if (run.status !== 'completed') {continue}
@@ -201,7 +259,7 @@ async function fetchSettledRuns(github, owner, repo, workflowFile, perPage, { ev
         // Once a kept run is a non-failure it terminates the leading streak, so we have all we need.
         // A short raw page means there are no older runs to fetch.
         const streakBounded = settled.some((r) => !isFailure(r))
-        if (streakBounded || data.workflow_runs.length < perPage) {break}
+        if (streakBounded || runs.length < perPage) {break}
     }
     return settled
 }
@@ -541,6 +599,7 @@ module.exports = async ({ context, github, core }, { now: _now, slack: _slack, f
                           maxLagMinutes: lane.maxLagMinutes,
                           freshAsOf,
                           sleep,
+                          listRuns: lane.listRuns,
                       }).catch((err) => {
                           core.warning(`No usable ${lane.event} runs for ${lane.workflowFile}: ${err.message}`)
                           return null
@@ -564,7 +623,7 @@ module.exports = async ({ context, github, core }, { now: _now, slack: _slack, f
             const redForMins = Math.round((now.getTime() - new Date(f.since).getTime()) / 60000)
             return {
                 ...f,
-                runsUrl: runsUrlFor(owner, repo, f.workflowName),
+                runsUrl: f.lane.linkFailingRun ? f.run_url : runsUrlFor(owner, repo, f.workflowName),
                 redForMins, // detection: byDuration + open/resolve thresholds
                 displayRedForMins: Math.round((now.getTime() - new Date(f.displaySince).getTime()) / 60000),
                 byCount: f.consecutive_failures >= f.lane.streakThreshold,

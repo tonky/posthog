@@ -1,10 +1,12 @@
 import { RESOURCE_URI_META_KEY } from '@modelcontextprotocol/ext-apps/server'
 
-import { type DiscoveryHint, type DiscoveryHintKind, getDiscoveryHint, isEmptyToolResult } from '@/lib/discovery-hints'
+import { isEmptyToolResult } from '@/lib/empty-tool-result'
 import { estimateTokens } from '@/lib/estimate-tokens'
+import { getNextPageHint } from '@/lib/next-page-hint'
 import { formatResponse } from '@/lib/response'
+import { buildTimeSeriesChartData } from '@/lib/time-series-chart-data'
 import { isPrepareConfirmedActionResult } from '@/tools/confirmed-action-runtime'
-import { POSTHOG_FORMATTED_RESULTS_OVERRIDE_KEY, POSTHOG_META_KEY } from '@/tools/types'
+import { POSTHOG_FORMATTED_RESULTS_OVERRIDE_KEY, POSTHOG_META_KEY, POSTHOG_TEXT_PROJECTION_KEY } from '@/tools/types'
 import { APP_DATA_META_KEY, type AnalyticsMetadata, type WithAnalytics } from '@/ui-apps/types'
 
 export interface ToolResultMeta {
@@ -36,6 +38,7 @@ export interface BuildToolResultOptions {
     includeAppData?: boolean | undefined
     /** PostHog distinctId for analytics metadata (only read when a UI resource is present). */
     distinctId?: string | undefined
+    mcpClientName?: string | undefined
     /**
      * When set, the inner tool's `_meta.ui.resourceUri` is placed on the response payload
      * under both the new (`ui.resourceUri`) and legacy (`ui/resourceUri`) keys. Used by the
@@ -44,6 +47,7 @@ export interface BuildToolResultOptions {
      */
     includeUiResponseMeta?: boolean
     includeRenderNote?: boolean
+    appendTimeSeriesChartData?: boolean | undefined
 }
 
 /**
@@ -79,7 +83,6 @@ export function isToolCallPayload(value: unknown): value is ToolResultPayload {
 interface BuiltResponseText {
     structuredContentOnly: boolean
     footers: string[]
-    discoveryHint: DiscoveryHintKind | undefined
     resultEmpty: boolean
 }
 
@@ -97,10 +100,7 @@ export function markExecPayload(payload: ToolResultPayload): ToolResultPayload {
 
 export function toolResultAnalyticsProperties(response: ToolResultPayload): Record<string, unknown> {
     const built = builtResponseText.get(response)
-    return {
-        ...(built?.discoveryHint ? { mcp_discovery_hint: built.discoveryHint } : {}),
-        ...(built?.resultEmpty ? { mcp_result_empty: true } : {}),
-    }
+    return built?.resultEmpty ? { mcp_result_empty: true } : {}
 }
 
 /**
@@ -157,8 +157,10 @@ export function buildToolResultPayload(opts: BuildToolResultOptions): ToolResult
         forceUiDataToMeta,
         includeAppData,
         distinctId,
+        mcpClientName,
         includeUiResponseMeta,
         includeRenderNote,
+        appendTimeSeriesChartData,
     } = opts
 
     const isStringResult = typeof handlerResult === 'string'
@@ -188,12 +190,15 @@ export function buildToolResultPayload(opts: BuildToolResultOptions): ToolResult
     const effectiveOutputFormat = callerOutputFormat ?? toolMeta?.[POSTHOG_META_KEY]?.outputFormat
     const useJson = effectiveOutputFormat === 'json'
     const callerWantsJson = callerOutputFormat === 'json'
+    const isTextProjection =
+        !isStringResult && (handlerResult as Record<string, unknown> | null)?.[POSTHOG_TEXT_PROJECTION_KEY] === true
 
     let structuredContent: WithAnalytics<typeof rawResult> | typeof rawResult = rawResult
     if (hasUiResource && !isStringResult) {
         const analyticsMetadata: AnalyticsMetadata = {
             distinctId: distinctId ?? '',
             toolName,
+            ...(mcpClientName ? { mcpClientName } : {}),
         }
         structuredContent = {
             ...(rawResult as Record<string, unknown>),
@@ -226,16 +231,20 @@ export function buildToolResultPayload(opts: BuildToolResultOptions): ToolResult
 
     const body = structuredContentOnly
         ? STRUCTURED_CONTENT_ONLY_TEXT
-        : ((includeAppData && useJson ? undefined : formattedResults) ??
+        : ((useJson && (includeAppData || isTextProjection) ? undefined : formattedResults) ??
           (useJson ? JSON.stringify(rawResult) : formatResponse(rawResult)))
 
     const footers: string[] = []
 
-    let discoveryHint: DiscoveryHint | undefined
+    const chartData = appendTimeSeriesChartData && !useJson ? buildTimeSeriesChartData(handlerResult) : undefined
+    if (chartData) {
+        footers.push(chartData)
+    }
+
     if (!isStringResult && !useJson && !structuredContentOnly && !isPrepareConfirmedActionResult(handlerResult)) {
-        discoveryHint = getDiscoveryHint({ toolName, handlerResult })
-        if (discoveryHint) {
-            footers.push(discoveryHint.text)
+        const nextPageHint = getNextPageHint(toolName, rawResult)
+        if (nextPageHint) {
+            footers.push(nextPageHint)
         }
     }
 
@@ -251,8 +260,7 @@ export function buildToolResultPayload(opts: BuildToolResultOptions): ToolResult
     builtResponseText.set(payload, {
         structuredContentOnly,
         footers,
-        discoveryHint: discoveryHint?.kind,
-        resultEmpty: isEmptyToolResult(handlerResult),
+        resultEmpty: isEmptyToolResult(handlerResult, toolName),
     })
     if (hasUiResource && !suppressStructuredContent) {
         payload.structuredContent = structuredContent as Record<string, unknown>

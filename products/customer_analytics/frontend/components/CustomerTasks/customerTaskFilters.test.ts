@@ -9,7 +9,9 @@ import {
     hasCustomerTaskFilters,
     parseCustomerTaskSearchParams,
 } from './customerTaskFilters'
-import type { CustomerTaskDueFilter, CustomerTasksContext } from './customerTaskFilters'
+import type { CustomerTaskAssigneeFilter, CustomerTaskDueFilter, CustomerTasksContext } from './customerTaskFilters'
+
+const ROLE_ID = '0199ed4a-5c03-0000-3220-df21df612e95'
 
 describe('customer task filter helpers', () => {
     test.each([
@@ -72,6 +74,23 @@ describe('customer task filter helpers', () => {
         })
     })
 
+    test.each([
+        ['no tags', [], undefined],
+        ['tags persisted before the tag filter existed', undefined, undefined],
+        ['selected tags', ['renewal', 'urgent'], '["renewal","urgent"]'],
+    ])('sends %s as the tags param', (_, tags, expected) => {
+        const query = customerTasksQuery(
+            { ...defaultCustomerTaskFilters('inbox'), tags },
+            'inbox',
+            undefined,
+            1,
+            50,
+            'UTC'
+        )
+
+        expect(query.tags).toBe(expected)
+    })
+
     test('keeps an assignee and omits due filters in account context', () => {
         const query = customerTasksQuery(
             { ...defaultCustomerTaskFilters('account'), assignee: 42, due: 'overdue' },
@@ -102,12 +121,14 @@ describe('customer task filter helpers', () => {
     })
 
     test.each([
-        ['a resource viewer', true, 'unassigned'],
-        ['an assignment-only user', false, 'me'],
-    ])('keeps %s within their allowed assignee scope', (_, canViewAll, assignedTo) => {
+        ['a resource viewer', true, 'unassigned', { assigned_to: 'unassigned' }],
+        ['an assignment-only user', false, 'unassigned', { assigned_to: 'me' }],
+        ['a resource viewer filtering by role', true, { roleId: ROLE_ID }, { assigned_to: `role:${ROLE_ID}` }],
+        ['an assignment-only user filtering by role', false, { roleId: ROLE_ID }, { assigned_to: 'me' }],
+    ])('keeps %s within their allowed assignee scope', (_, canViewAll, assignee, expected) => {
         expect(
             customerTasksQuery(
-                { ...defaultCustomerTaskFilters('inbox'), assignee: 'unassigned' },
+                { ...defaultCustomerTaskFilters('inbox'), assignee: assignee as CustomerTaskAssigneeFilter },
                 'inbox',
                 undefined,
                 1,
@@ -115,7 +136,7 @@ describe('customer task filter helpers', () => {
                 'UTC',
                 canViewAll
             )
-        ).toMatchObject({ assigned_to: assignedTo })
+        ).toMatchObject(expected)
     })
     test.each([
         ['the inbox defaults', {}],
@@ -124,8 +145,10 @@ describe('customer task filter helpers', () => {
             'a named member and an account',
             { assignee: '42', account: '0199ed4a-5c03-0000-3220-df21df612e95', sort: '-updated_at' },
         ],
+        ['a role', { assignee: `role:${ROLE_ID}` }],
         ['a search', { search: 'renewal' }],
         ['a whitespace search the query still sends', { search: '  ' }],
+        ['tags', { tags: '["renewal","urgent"]' }],
     ])('round-trips %s through the search params', (_, params) => {
         expect(customerTaskSearchParams(parseCustomerTaskSearchParams(params))).toEqual(params)
     })
@@ -137,8 +160,11 @@ describe('customer task filter helpers', () => {
         ['a non-member assignee', { assignee: 'someone' }, { assignee: 'me' }],
         ['a negative member id', { assignee: '-1' }, { assignee: 'me' }],
         ['an out-of-range member id', { assignee: '2147483648' }, { assignee: 'me' }],
+        ['a malformed role id', { assignee: 'role:../x' }, { assignee: 'me' }],
         ['an empty account', { account: '' }, { account: null }],
         ['a path-shaped account', { account: '../../x' }, { account: null }],
+        ['malformed tags', { tags: '[renewal' }, { tags: [] }],
+        ['tags the router already parsed', { tags: ['renewal', 3] }, { tags: ['renewal'] }],
     ])('falls back to the inbox default for %s', (_, params, expected) => {
         expect(parseCustomerTaskSearchParams(params).filters).toMatchObject(expected)
     })

@@ -156,7 +156,7 @@ export interface experimentsLogicValues {
         hash: string
     } // router
     currentTeam: TeamPublicType | TeamType | null // teamLogic
-    hasAvailableFeature: (feature: AvailableFeature, currentUsage?: number | undefined) => boolean // userLogic
+    hasAvailableFeature: (feature: AvailableFeature, currentUsage?: number) => boolean // userLogic
     user: UserType | null // userLogic
     breadcrumbs: Breadcrumb[]
     count: number
@@ -177,16 +177,16 @@ export interface experimentsLogicValues {
     hasLoadedExperiments: boolean
     pagination: PaginationManual
     paramsFromFilters: {
-        archived?: boolean | undefined
-        created_by_id?: number[] | undefined
-        excluded_tags?: string[] | undefined
+        archived?: boolean
+        created_by_id?: number[]
+        excluded_tags?: string[]
         limit: number
         offset: number
-        order?: string | undefined
-        page?: number | undefined
-        search?: string | undefined
-        status?: ExperimentStatus | 'all' | undefined
-        tags?: string[] | undefined
+        order?: string
+        page?: number
+        search?: string
+        status?: ExperimentStatus | 'all'
+        tags?: string[]
     }
     sidePanelContext: SidePanelSceneContext
     tab: ExperimentsTabs
@@ -207,6 +207,9 @@ export interface experimentsLogicActions {
         hasSearch: boolean
         page: number
         statusFilter: string
+    } // eventUsageLogic
+    reportExperimentsSettingsViewed: () => {
+        value: true
     } // eventUsageLogic
     loadCurrentTeamSuccess: (
         currentTeam: TeamPublicType | null,
@@ -233,18 +236,18 @@ export interface experimentsLogicActions {
     addToExperimentsSuccess: (
         experiments: {
             count: number
-            filters?: ExperimentsFilters | null | undefined
-            next?: string | null | undefined
-            previous?: string | null | undefined
+            filters?: ExperimentsFilters | null
+            next?: string | null
+            previous?: string | null
             results: Experiment[]
         },
         payload?: Experiment
     ) => {
         experiments: {
             count: number
-            filters?: ExperimentsFilters | null | undefined
-            next?: string | null | undefined
-            previous?: string | null | undefined
+            filters?: ExperimentsFilters | null
+            next?: string | null
+            previous?: string | null
             results: Experiment[]
         }
         payload?: Experiment
@@ -263,9 +266,9 @@ export interface experimentsLogicActions {
     archiveExperimentSuccess: (
         experiments: {
             count: number
-            filters?: ExperimentsFilters | null | undefined
-            next?: string | null | undefined
-            previous?: string | null | undefined
+            filters?: ExperimentsFilters | null
+            next?: string | null
+            previous?: string | null
             results: Experiment[]
         },
         payload?: {
@@ -275,9 +278,9 @@ export interface experimentsLogicActions {
     ) => {
         experiments: {
             count: number
-            filters?: ExperimentsFilters | null | undefined
-            next?: string | null | undefined
-            previous?: string | null | undefined
+            filters?: ExperimentsFilters | null
+            next?: string | null
+            previous?: string | null
             results: Experiment[]
         }
         payload?: {
@@ -343,9 +346,9 @@ export interface experimentsLogicActions {
     duplicateExperimentSuccess: (
         experiments: {
             count: number
-            filters?: ExperimentsFilters | null | undefined
-            next?: string | null | undefined
-            previous?: string | null | undefined
+            filters?: ExperimentsFilters | null
+            next?: string | null
+            previous?: string | null
             results: any[]
         },
         payload?: {
@@ -356,9 +359,9 @@ export interface experimentsLogicActions {
     ) => {
         experiments: {
             count: number
-            filters?: ExperimentsFilters | null | undefined
-            next?: string | null | undefined
-            previous?: string | null | undefined
+            filters?: ExperimentsFilters | null
+            next?: string | null
+            previous?: string | null
             results: any[]
         }
         payload?: {
@@ -449,18 +452,18 @@ export interface experimentsLogicActions {
     unarchiveExperimentSuccess: (
         experiments: {
             count: number
-            filters?: ExperimentsFilters | null | undefined
-            next?: string | null | undefined
-            previous?: string | null | undefined
+            filters?: ExperimentsFilters | null
+            next?: string | null
+            previous?: string | null
             results: Experiment[]
         },
         payload?: number
     ) => {
         experiments: {
             count: number
-            filters?: ExperimentsFilters | null | undefined
-            next?: string | null | undefined
-            previous?: string | null | undefined
+            filters?: ExperimentsFilters | null
+            next?: string | null
+            previous?: string | null
             results: Experiment[]
         }
         payload?: number
@@ -476,18 +479,18 @@ export interface experimentsLogicActions {
     updateExperimentsSuccess: (
         experiments: {
             count: number
-            filters?: ExperimentsFilters | null | undefined
-            next?: string | null | undefined
-            previous?: string | null | undefined
+            filters?: ExperimentsFilters | null
+            next?: string | null
+            previous?: string | null
             results: Experiment[]
         },
         payload?: Experiment
     ) => {
         experiments: {
             count: number
-            filters?: ExperimentsFilters | null | undefined
-            next?: string | null | undefined
-            previous?: string | null | undefined
+            filters?: ExperimentsFilters | null
+            next?: string | null
+            previous?: string | null
             results: Experiment[]
         }
         payload?: Experiment
@@ -499,16 +502,16 @@ export interface experimentsLogicMeta {
     __keaTypeGenInternalSelectorTypes: {
         count: (experiments: ExperimentsResult) => number
         paramsFromFilters: (filters: ExperimentsFilters) => {
-            archived?: boolean | undefined
-            created_by_id?: number[] | undefined
-            excluded_tags?: string[] | undefined
+            archived?: boolean
+            created_by_id?: number[]
+            excluded_tags?: string[]
             limit: number
             offset: number
-            order?: string | undefined
-            page?: number | undefined
-            search?: string | undefined
-            status?: ExperimentStatus | 'all' | undefined
-            tags?: string[] | undefined
+            order?: string
+            page?: number
+            search?: string
+            status?: ExperimentStatus | 'all'
+            tags?: string[]
         }
         featureFlagModalParamsFromFilters: (
             featureFlagModalFilters: FeatureFlagModalFilters,
@@ -554,7 +557,7 @@ export const experimentsLogic = kea<experimentsLogicType>([
             teamLogic,
             ['loadCurrentTeamSuccess', 'updateCurrentTeamSuccess'],
             eventUsageLogic,
-            ['reportExperimentsListViewed'],
+            ['reportExperimentsListViewed', 'reportExperimentsSettingsViewed'],
         ],
     })),
     actions({
@@ -605,6 +608,11 @@ export const experimentsLogic = kea<experimentsLogicType>([
         ],
     }),
     listeners(({ actions, values }) => ({
+        setExperimentsTab: ({ tabKey }) => {
+            if (tabKey === ExperimentsTabs.Settings) {
+                actions.reportExperimentsSettingsViewed()
+            }
+        },
         setExperimentsFilters: async (_, breakpoint) => {
             // Only debounce after the first load — the debounce is for search input,
             // but the initial load from urlToAction should fire immediately.

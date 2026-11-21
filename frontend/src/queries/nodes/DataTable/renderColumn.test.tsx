@@ -4,11 +4,11 @@ import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Provider } from 'kea'
 
+import { setLatestVersionsOnQuery } from '~/queries/schema/query-versions'
 import { DataTableNode, NodeKind } from '~/queries/schema/schema-general'
-import { setLatestVersionsOnQuery } from '~/queries/utils'
 import { initKeaTests } from '~/test/init'
 
-import { renderColumn } from './renderColumn'
+import { getPersonForDeleteColumn, renderColumn } from './renderColumn'
 import { defaultDataTableColumns } from './utils'
 
 const select = defaultDataTableColumns(NodeKind.EventsQuery)
@@ -21,6 +21,10 @@ const personSelect = ['*', 'event', 'person', 'timestamp']
 const personColumnTable = setLatestVersionsOnQuery({
     kind: NodeKind.DataTableNode,
     source: { kind: NodeKind.EventsQuery, select: personSelect },
+}) as DataTableNode
+const hogqlTable = setLatestVersionsOnQuery({
+    kind: NodeKind.DataTableNode,
+    source: { kind: NodeKind.HogQLQuery, query: 'select min(timestamp) from events' },
 }) as DataTableNode
 const actorsTable = setLatestVersionsOnQuery({
     kind: NodeKind.DataTableNode,
@@ -64,6 +68,24 @@ function renderPersonCell(displayName: string): void {
 describe('renderColumn', () => {
     beforeEach(() => initKeaTests())
     afterEach(() => cleanup())
+
+    it.each<[string, string | undefined, boolean]>([
+        ['Claude Code', 'mcp_harness', true],
+        ['Other', 'mcp_harness', true],
+        ['Claude Code', undefined, false],
+    ])('renders %s with format %s and icon %s', (label, format, hasIcon) => {
+        const query = setLatestVersionsOnQuery({
+            kind: NodeKind.DataTableNode,
+            source: { kind: NodeKind.HogQLQuery, query: 'SELECT properties.$virt_mcp_harness AS client FROM events' },
+        }) as DataTableNode
+
+        const { container } = render(
+            <Provider>{renderColumn('client', label, [label], 0, 1, query, undefined, undefined, format)}</Provider>
+        )
+
+        expect(screen.getByText(label)).toBeInTheDocument()
+        expect(container.querySelector('svg') !== null).toBe(hasIcon)
+    })
 
     it.each([
         ['a person profile supplied the name', 'someone@example.com', 1],
@@ -114,5 +136,57 @@ describe('renderColumn', () => {
 
         expect(screen.getByText('someone@example.com')).toBeInTheDocument()
         expect(screen.queryByText('Unknown')).toBeNull()
+    })
+
+    const personUUID = 'c3b1f6a2-0000-0000-0000-000000000000'
+    const displayNameCell = { display_name: 'someone@example.com', id: personUUID }
+    const personCell = { id: personUUID, distinct_ids: ['the-distinct-id'], properties: {} }
+
+    it.each<[string, string[] | undefined, unknown[], unknown]>([
+        [
+            'the ID column comes before the Person column',
+            ['id', 'person_display_name -- Person', 'created_at', 'person.$delete'],
+            [personUUID, displayNameCell, '2024-01-01T00:00:00Z', null],
+            displayNameCell,
+        ],
+        [
+            'the person column is not first',
+            ['created_at', 'person', 'person.$delete'],
+            ['2024-01-01T00:00:00Z', personCell, null],
+            personCell,
+        ],
+        [
+            'only the ID column identifies the person',
+            ['created_at', 'id', 'person.$delete'],
+            ['2024-01-01T00:00:00Z', personUUID, null],
+            { id: personUUID, distinct_ids: [], properties: {} },
+        ],
+        ['the query has no select', undefined, [personCell, personUUID, null], personCell],
+        ['no column identifies the person', ['created_at', 'person.$delete'], ['2024-01-01T00:00:00Z', null], null],
+    ])('delete column finds the person when %s', (_case, columns, row, expectedPerson) => {
+        const query = setLatestVersionsOnQuery({
+            kind: NodeKind.DataTableNode,
+            source: { kind: NodeKind.ActorsQuery, select: columns },
+        }) as DataTableNode
+
+        expect(getPersonForDeleteColumn(row, query)).toEqual(expectedPerson)
+    })
+
+    it.each([
+        ['UTC', '1970-01-01T00:00:00Z'],
+        ['an offset', '1970-01-01T01:00:00+01:00'],
+        ['microseconds', '1970-01-01T00:00:00.000000Z'],
+    ])('renders the epoch from a HogQL aggregate over no rows as the raw value, with %s', (_case, value) => {
+        render(<Provider>{renderColumn('min(timestamp)', value, [value], 0, 1, hogqlTable)}</Provider>)
+
+        expect(screen.getByText(value)).toBeInTheDocument()
+        expect(screen.queryByText(/years ago/)).toBeNull()
+    })
+
+    it('renders a sub-millisecond timestamp after the epoch as a time, not as the epoch', () => {
+        const value = '1970-01-01T00:00:00.000001Z'
+        render(<Provider>{renderColumn('min(timestamp)', value, [value], 0, 1, hogqlTable)}</Provider>)
+
+        expect(screen.queryByText(value)).toBeNull()
     })
 })

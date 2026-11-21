@@ -3,13 +3,15 @@ use std::sync::Arc;
 use dashmap::DashMap;
 use metrics::counter;
 
-#[cfg(test)]
-use super::persons::approx_person_bytes;
-use super::persons::{CachedPerson, PersonCache, PersonCacheKey};
+use super::codec::PropertiesCodec;
+use super::persons::{CachedPerson, CachedVersion, PersonCache, PersonCacheKey};
+
+/// About 15 MB of keys per partition; a partition churning past it does not need a fill.
+const MAX_TRACKED_KEYS: usize = 500_000;
 
 /// Result of a cache lookup that distinguishes partition ownership from person existence.
 pub enum CacheLookup {
-    Found(Arc<CachedPerson>),
+    Found(CachedPerson),
     PersonNotFound,
     PartitionNotOwned,
 }
@@ -17,15 +19,16 @@ pub enum CacheLookup {
 /// Per-partition cache manager. Each partition gets its own independent
 /// Foyer cache so that releasing a partition drops all its entries cleanly.
 pub struct PartitionedCache {
-    partitions: DashMap<u32, PersonCache>,
+    partitions: DashMap<u32, Arc<PersonCache>>,
     /// Partitions mid-warm: built here record by record — evicting under
     /// the same per-partition byte budget as a serving cache — and moved
     /// to `partitions` in a single insert when the warm's range
     /// completes. Entirely invisible to readers: `get`/`has_partition`
     /// consult `partitions` only, so a partition under construction
     /// answers `PartitionNotOwned` on every path.
-    warming: DashMap<u32, PersonCache>,
+    warming: DashMap<u32, Arc<PersonCache>>,
     per_partition_capacity: usize,
+    codec: Arc<PropertiesCodec>,
 }
 
 impl PartitionedCache {
@@ -34,13 +37,26 @@ impl PartitionedCache {
             partitions: DashMap::new(),
             warming: DashMap::new(),
             per_partition_capacity,
+            codec: Arc::new(PropertiesCodec::disabled()),
         }
+    }
+
+    fn new_cache(&self) -> PersonCache {
+        PersonCache::new(self.per_partition_capacity, Arc::clone(&self.codec))
+    }
+
+    /// Call before any partition exists.
+    pub fn with_properties_compression(mut self, enabled: bool) -> Self {
+        if enabled {
+            self.codec = Arc::new(PropertiesCodec::enabled());
+        }
+        self
     }
 
     /// Create a new cache for the given partition. Called during warm-up.
     pub fn create_partition(&self, partition: u32) {
         self.partitions
-            .insert(partition, PersonCache::new(self.per_partition_capacity));
+            .insert(partition, Arc::new(self.new_cache()));
     }
 
     /// Atomically install a fully-populated partition cache. The records
@@ -76,8 +92,22 @@ impl PartitionedCache {
             !self.partitions.contains_key(&partition),
             "warm began for published partition {partition}"
         );
-        self.warming
-            .insert(partition, PersonCache::new(self.per_partition_capacity));
+        self.warming.insert(partition, Arc::new(self.new_cache()));
+    }
+
+    /// Record every key put into the build in flight, for a fill that will follow it.
+    pub fn track_puts(&self, partition: u32) {
+        if let Some(cache) = self.warming.get(&partition) {
+            cache.track_puts(MAX_TRACKED_KEYS);
+        }
+    }
+
+    /// A serving partition's cache, for the fill that follows its warm. A fill holds this
+    /// build alone, so it cannot reach a later build of the partition.
+    pub fn serving_cache(&self, partition: u32) -> Option<Arc<PersonCache>> {
+        self.partitions
+            .get(&partition)
+            .map(|cache| Arc::clone(&cache))
     }
 
     /// Insert one record into a partition cache under construction.
@@ -86,15 +116,6 @@ impl PartitionedCache {
             .get(&partition)
             .expect("warm_put before begin_warm_partition")
             .put(key, person);
-    }
-
-    /// Remove a key from a partition cache under construction. An applied
-    /// death record erases its predecessors from the build this way.
-    pub fn warm_remove(&self, partition: u32, key: &PersonCacheKey) {
-        self.warming
-            .get(&partition)
-            .expect("warm_remove before begin_warm_partition")
-            .remove(key);
     }
 
     /// Whether the partition is published (serving reads). The prune
@@ -175,7 +196,7 @@ impl PartitionedCache {
     }
 
     /// Counter-free read for bookkeeping passes; see [`PersonCache::peek`].
-    pub fn peek(&self, partition: u32, key: &PersonCacheKey) -> Option<Arc<CachedPerson>> {
+    pub fn peek(&self, partition: u32, key: &PersonCacheKey) -> Option<CachedVersion> {
         self.partitions
             .get(&partition)
             .and_then(|cache| cache.peek(key))
@@ -214,7 +235,6 @@ mod tests {
             is_identified: false,
             is_deleted: false,
             last_seen_at: None,
-            approx_bytes: approx_person_bytes(64),
         }
     }
 

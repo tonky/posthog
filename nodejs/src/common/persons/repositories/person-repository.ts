@@ -4,14 +4,7 @@ import type { PersonMessage } from '~/common/persons/person-message'
 import { PersonUpdate } from '~/common/persons/person-update-batch'
 import { CreatePersonResult } from '~/common/utils/db/db'
 import { Properties } from '~/plugin-scaffold'
-import {
-    InternalPerson,
-    PersonUpdateFields,
-    PropertiesLastOperation,
-    PropertiesLastUpdatedAt,
-    Team,
-    TeamId,
-} from '~/types'
+import { InternalPerson, PersonUpdateFields, Team, TeamId } from '~/types'
 
 import { PersonRepositoryTransaction } from './person-repository-transaction'
 
@@ -54,8 +47,7 @@ export class DistinctIdConflictError extends Error {
 /**
  * A tombstone delete found live distinct id rows still pointing at the person
  * (a concurrent merge added or moved them in after ours moved the known set).
- * The tombstone-mode equivalent of the FK violation a hard delete would raise;
- * callers refresh the person and retry, re-moving the new rows.
+ * Callers refresh the person and retry, re-moving the new rows.
  */
 export class PersonTombstoneBlockedError extends Error {
     constructor(
@@ -119,6 +111,11 @@ export interface PersonReadRepository {
     ): Promise<Record<string, string[]>>
 }
 
+export interface ConsistentPersonReader {
+    /** `personId` is the bigint row id, not the uuid. */
+    fetchPersonById(teamId: TeamId, personId: string, callerTag?: string): Promise<InternalPerson | null>
+}
+
 /**
  * Full person repository with read and write operations. Used by the
  * ingestion pipeline which creates, updates, merges, and deletes persons.
@@ -174,8 +171,6 @@ export interface PersonRepository {
     createPerson(
         createdAt: DateTime,
         properties: Properties,
-        propertiesLastUpdatedAt: PropertiesLastUpdatedAt,
-        propertiesLastOperation: PropertiesLastOperation,
         teamId: Team['id'],
         isUserId: number | null,
         isIdentified: boolean,
@@ -190,6 +185,12 @@ export interface PersonRepository {
         tag?: string
     ): Promise<[InternalPerson, PersonMessage[], boolean]>
 
+    /** Trims and writes a person whose stored properties already exceed the size limit, or rejects the update. */
+    handleOversizedPersonProperties(
+        person: InternalPerson,
+        update: PersonUpdateFields
+    ): Promise<[InternalPerson, PersonMessage[], boolean]>
+
     updatePersonAssertVersion(personUpdate: PersonUpdate): Promise<[number | undefined, PersonMessage[]]>
 
     /**
@@ -198,11 +199,21 @@ export interface PersonRepository {
      * - success: boolean indicating if the update succeeded
      * - version: the new version if successful
      * - kafkaMessage: the Kafka message to send if successful
+     * - person: the row after the update, if successful
      * - error: error details if the update failed
      */
-    updatePersonsBatch(
-        personUpdates: PersonUpdate[]
-    ): Promise<Map<string, { success: boolean; version?: number; kafkaMessage?: PersonMessage; error?: Error }>>
+    updatePersonsBatch(personUpdates: PersonUpdate[]): Promise<
+        Map<
+            string,
+            {
+                success: boolean
+                version?: number
+                kafkaMessage?: PersonMessage
+                person?: InternalPerson
+                error?: Error
+            }
+        >
+    >
 
     deletePerson(person: InternalPerson): Promise<PersonMessage[]>
 

@@ -8,9 +8,8 @@ from django.utils import timezone
 
 import structlog
 
-from posthog.api.uploaded_media import sniff_image_content_type
 from posthog.models import Team, UploadedMedia, User
-from posthog.models.uploaded_media import MEDIA_PURPOSE_DESKTOP_FEEDBACK
+from posthog.models.uploaded_media import MEDIA_PURPOSE_DESKTOP_FEEDBACK, sniff_image_content_type
 from posthog.ph_client import PH_EU_API_KEY, PH_US_API_KEY, get_client
 from posthog.storage import object_storage
 from posthog.storage.object_storage import ObjectStorageError
@@ -160,7 +159,6 @@ def _capture_feedback_event(*, user: User, properties: dict[str, Any]) -> str:
     client = get_client(
         region,
         sync_mode=True,
-        capture_mode="v1",
         timeout=5,
         max_retries=2,
     )

@@ -9,13 +9,15 @@ import { mswDecorator } from '~/mocks/browser'
 import { DataModelingEdge, DataModelingNode } from '~/types'
 
 import { LineageGraph } from './LineageGraph'
+import { bridgeHiddenNodes, nodesWithHubs } from './lineageHiddenNodes'
+import { modelsLineageLogic } from './modelsLineageLogic'
 import { ModelsLineageTab } from './ModelsLineageTab'
+import { QuillModelsLineageTab } from './QuillModelsLineageTab'
 
 function mockNode(
     partial: Pick<DataModelingNode, 'id' | 'name' | 'type'> & Partial<DataModelingNode>
 ): DataModelingNode {
     return {
-        dag: 'dag-1',
         created_at: '2024-01-01T00:00:00Z',
         updated_at: '2024-01-01T00:00:00Z',
         upstream_count: 0,
@@ -29,10 +31,6 @@ function mockEdge(id: string, sourceId: string, targetId: string): DataModelingE
         id,
         source_id: sourceId,
         target_id: targetId,
-        dag: 'dag-1',
-        properties: {},
-        created_at: '2024-01-01T00:00:00Z',
-        updated_at: '2024-01-01T00:00:00Z',
     }
 }
 
@@ -201,12 +199,95 @@ export const Full: Story = {
     render: () => (
         <LineageGraph nodes={GRAPH_NODES} edges={GRAPH_EDGES} currentNodeId="4" variant="full" showControls />
     ),
+    play: async ({ canvasElement }) => {
+        await expectNodeCentered(canvasElement, '4', 'The current node must be centered when the lineage opens')
+    },
 }
 
 export const Canvas: Story = {
     render: () => (
         <LineageGraph nodes={GRAPH_NODES} edges={GRAPH_EDGES} variant="canvas" showControls showMinimap interactive />
     ),
+}
+
+const HIDDEN_TYPES_NODES: DataModelingNode[] = [
+    mockNode({ id: 'orders', name: 'orders', type: 'table' }),
+    mockNode({ id: 'customers', name: 'customers', type: 'table' }),
+    mockNode({ id: 'payments', name: 'payments', type: 'table' }),
+    mockNode({ id: 'enriched_orders', name: 'enriched_orders', type: 'matview' }),
+    mockNode({ id: 'orders_api', name: 'orders_api', type: 'endpoint' }),
+    mockNode({ id: 'revenue_api', name: 'revenue_api', type: 'endpoint' }),
+    mockNode({ id: 'churn_api', name: 'churn_api', type: 'endpoint' }),
+    mockNode({ id: 'weekly_orders', name: 'weekly_orders', type: 'metric', metric_id: 'metric-weekly' }),
+    mockNode({ id: 'revenue_summary', name: 'revenue_summary', type: 'view', user_tag: 'finance' }),
+    mockNode({ id: 'monthly_report', name: 'monthly_report', type: 'matview' }),
+    mockNode({ id: 'forecast_api', name: 'forecast_api', type: 'endpoint' }),
+]
+const HIDDEN_TYPES_EDGES: DataModelingEdge[] = [
+    ...['orders', 'customers', 'payments'].map((source) => mockEdge(`${source}-hub`, source, 'enriched_orders')),
+    ...['orders_api', 'revenue_api', 'churn_api', 'weekly_orders'].map((target) =>
+        mockEdge(`hub-${target}`, 'enriched_orders', target)
+    ),
+    mockEdge('orders-summary', 'orders', 'revenue_summary'),
+    mockEdge('summary-report', 'revenue_summary', 'monthly_report'),
+    mockEdge('report-forecast', 'monthly_report', 'forecast_api'),
+]
+const HIDDEN_TYPES_VISIBLE_IDS = new Set(
+    HIDDEN_TYPES_NODES.filter((node) => ['table', 'view', 'endpoint'].includes(node.type)).map((node) => node.id)
+)
+const HIDDEN_TYPES_BRIDGING = bridgeHiddenNodes(
+    HIDDEN_TYPES_EDGES,
+    new Set(HIDDEN_TYPES_NODES.map((node) => node.id)),
+    HIDDEN_TYPES_VISIBLE_IDS
+)
+
+export const HiddenNodeTypes: Story = {
+    render: () => (
+        <LineageGraph
+            nodes={nodesWithHubs(HIDDEN_TYPES_NODES, HIDDEN_TYPES_VISIBLE_IDS, HIDDEN_TYPES_BRIDGING.hubNodeIds)}
+            edges={HIDDEN_TYPES_BRIDGING.edges}
+            variant="canvas"
+        />
+    ),
+}
+
+export const Selectable: Story = {
+    render: () => <LineageGraph nodes={GRAPH_NODES} edges={GRAPH_EDGES} variant="canvas" selectable interactive />,
+    play: async ({ canvasElement }) => {
+        const canvas = within(canvasElement)
+        const selectedNode = (await canvas.findByText('monthly_report')).closest<HTMLElement>(
+            '[data-attr="lineage-node"]'
+        )
+        const relatedNode = canvas.getByText('orders').closest<HTMLElement>('[data-attr="lineage-node"]')
+        const siblingNode = canvas
+            .getByText('weekly_active_accounts')
+            .closest<HTMLElement>('[data-attr="lineage-node"]')
+        const pane = canvasElement.querySelector<HTMLElement>('.react-flow__pane')
+
+        if (!selectedNode || !relatedNode || !siblingNode || !pane) {
+            throw new Error('The selectable graph must render its nodes and pane')
+        }
+
+        fireEvent.click(selectedNode)
+        await waitFor(() => {
+            if (!selectedNode.classList.contains('ring-4')) {
+                throw new Error('The clicked node must show the selected state')
+            }
+            if (relatedNode.classList.contains('opacity-30')) {
+                throw new Error('An upstream node must stay highlighted')
+            }
+            if (!siblingNode.classList.contains('opacity-30')) {
+                throw new Error('A node outside the selected lineage must be dimmed')
+            }
+        })
+
+        fireEvent.click(pane)
+        await waitFor(() => {
+            if (siblingNode.classList.contains('opacity-30')) {
+                throw new Error('Clicking the canvas must clear the lineage selection')
+            }
+        })
+    },
 }
 
 // The minimap is gated on the canvas container instead of the viewport, so a canvas that is narrow
@@ -233,17 +314,21 @@ export const NarrowCanvas: Story = {
     ],
 }
 
+const modelsTabDecorator = mswDecorator({
+    get: {
+        '/api/environments/:team_id/data_modeling_nodes/': { count: GRAPH_NODES.length, results: GRAPH_NODES },
+        '/api/environments/:team_id/data_modeling_edges/': { count: GRAPH_EDGES.length, results: GRAPH_EDGES },
+    },
+})
+
+const CATALOG_PARAMETERS = {
+    featureFlags: [FEATURE_FLAGS.TODAY_RAIL_NAV, FEATURE_FLAGS.DATA_CATALOG_RESTRUCTURE],
+    testOptions: { snapshotBrowsers: [] },
+}
+
 export const DraggableNodes: Story = {
-    parameters: { featureFlags: [FEATURE_FLAGS.DATA_MODELING_LINEAGE_NODE_DRAGGING] },
     render: () => <ModelsLineageTab />,
-    decorators: [
-        mswDecorator({
-            get: {
-                '/api/environments/:team_id/data_modeling_nodes/': { count: GRAPH_NODES.length, results: GRAPH_NODES },
-                '/api/environments/:team_id/data_modeling_edges/': { count: GRAPH_EDGES.length, results: GRAPH_EDGES },
-            },
-        }),
-    ],
+    decorators: [modelsTabDecorator],
     play: async ({ canvasElement }) => {
         const canvas = within(canvasElement)
         const openButton = await canvas.findByLabelText('Open orders in new tab')
@@ -257,8 +342,52 @@ export const DraggableNodes: Story = {
         ) {
             throw new Error('The explicit node link must open in a new tab')
         }
-        if (!nodeCard || nodeCard.getAttribute('role') === 'button' || nodeCard.tabIndex >= 0) {
-            throw new Error('A draggable node must not navigate as a card')
+        if (!nodeCard || !nodeCard.classList.contains('cursor-grab')) {
+            throw new Error('A draggable node must keep its drag affordance')
+        }
+        const selectionButton = within(nodeCard).getByRole('button', { name: /highlights its lineage/ })
+        if (selectionButton.tabIndex < 0) {
+            throw new Error('Lineage selection must be keyboard accessible')
+        }
+        if (getComputedStyle(openButton).opacity !== '0') {
+            throw new Error('The open link must stay hidden until the node has hover or focus')
+        }
+
+        selectionButton.focus()
+        await waitFor(() => {
+            if (getComputedStyle(openButton).opacity !== '1') {
+                throw new Error('Keyboard focus must reveal the open link')
+            }
+        })
+        selectionButton.blur()
+        await waitFor(() => {
+            if (getComputedStyle(openButton).opacity !== '0') {
+                throw new Error('The open link must hide after the node loses focus')
+            }
+        })
+    },
+}
+
+// The play function leaves the menu open, so this story takes no snapshot. Opening the menu in
+// DraggableNodes instead would paint it over that story's picture on every run.
+export const NodeMenu: Story = {
+    parameters: { testOptions: { snapshotBrowsers: [] } },
+    render: () => <ModelsLineageTab />,
+    decorators: [modelsTabDecorator],
+    play: async ({ canvasElement }) => {
+        const canvas = within(canvasElement)
+        const nodeCard = (await canvas.findByText('orders')).closest<HTMLElement>('[data-attr="lineage-node"]')
+
+        if (!nodeCard) {
+            throw new Error('A node must render as a card')
+        }
+
+        fireEvent.contextMenu(nodeCard)
+        const page = within(canvasElement.ownerDocument.body)
+        await page.findByRole('menuitem', { name: 'Open in new tab' })
+        await page.findByRole('menuitem', { name: 'Copy name' })
+        if (page.queryByText(/Highlight|Show only/)) {
+            throw new Error('The node menu must not duplicate the graph lineage behavior')
         }
     },
 }
@@ -380,6 +509,18 @@ export const SearchFocus: Story = {
     },
 }
 
+export const CatalogDraggableNodes: Story = {
+    ...DraggableNodes,
+    render: () => <QuillModelsLineageTab />,
+    parameters: CATALOG_PARAMETERS,
+}
+
+export const CatalogSearchFocus: Story = {
+    ...SearchFocus,
+    render: () => <QuillModelsLineageTab />,
+    parameters: CATALOG_PARAMETERS,
+}
+
 export const SelectorFocus: Story = {
     render: () => <ModelsLineageTab />,
     decorators: [
@@ -393,6 +534,7 @@ export const SelectorFocus: Story = {
     play: async ({ canvasElement }) => {
         const canvas = within(canvasElement)
         await canvas.findByText('revenue_summary')
+        modelsLineageLogic.actions.nodeDragStopped('4', { x: 100000, y: 100000 })
         const search = canvas.getByPlaceholderText('Search, or +name for upstream')
         fireEvent.change(search, { target: { value: 'revenue_summary+' } })
         await canvas.findByText('4 models · downstream')
@@ -407,6 +549,13 @@ export const SelectorFocus: Story = {
                 const graph = canvasElement.querySelector<HTMLElement>('.react-flow')
                 if (!graph || graph.querySelectorAll('.react-flow__node').length !== 4) {
                     throw new Error('A downstream selector must keep only its lineage cone visible')
+                }
+                if (Object.keys(modelsLineageLogic.values.nodePositions).length > 0) {
+                    throw new Error('A lineage filter must clear positions from the previous graph')
+                }
+                const model = graph.querySelector<HTMLElement>('.react-flow__node[data-id="4"]')
+                if (!model || model.style.transform.includes('100000')) {
+                    throw new Error('A lineage filter must place distant nodes in the new layout')
                 }
             },
             { timeout: VIEWPORT_SETTLE_MS }

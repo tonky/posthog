@@ -1,9 +1,7 @@
-# MCP tool definition — tool entries are scaffolded from the OpenAPI schema.
-# The tool list and operation IDs are kept in sync automatically:
-#   pnpm --filter=@posthog/mcp run scaffold-yaml -- --sync-all
-#
-# To enable a tool, set enabled: true and add required scopes + annotations.
-# All other fields (title, description, enrich_url, etc.) are yours to configure.
+# MCP tool definitions. Tools are opt-in: an operation is exposed only when it has an entry here.
+# List operations without an entry: pnpm --filter=@posthog/mcp run scaffold-yaml -- --candidates --product customer_analytics
+# Add one: pnpm --filter=@posthog/mcp run scaffold-yaml -- --add <operationId> --product customer_analytics
+# To keep an operation off on purpose, set enabled: false and give a disabled_reason.
 category: Customer analytics
 feature: customer_analytics
 url_prefix: /customer_analytics
@@ -11,7 +9,22 @@ ui_apps: {}
 tools:
     account-notes-list:
         operation: account_notes_list
-        enabled: false
+        enabled: true
+        scopes:
+            - account_note:read
+        annotations:
+            readOnly: true
+            destructive: false
+            idempotent: true
+        list: true
+        title: List account notes across accounts
+        description: >
+            Notes (internal notebooks) across every Customer Analytics account the caller can read, newest modified
+            first. Each row carries `short_id`, `title`, `account_id`, `account_name`, `created_by` and `tags`. Filter
+            with `tags` (JSON-encoded array, any match), `account_id`, `created_by`, `assigned_to` and `search`; sort
+            with `ordering` (`last_modified_at`, `created_at`, `title`, `account_name`, `-` prefix for descending). Use
+            `accounts-notebooks-retrieve` with the row's `account_id` and `short_id` to read a note's content.
+        feature_flag: customer-analytics-csp
     account-relationship-definitions-create:
         operation: account_relationship_definitions_create
         enabled: true
@@ -105,42 +118,6 @@ tools:
             PostHog user and an account; the users holding it on a specific account are managed via the account
             relationship tools.
         feature_flag: customer-analytics-csp
-    account-relationship-definitions-update:
-        operation: account_relationship_definitions_update
-        enabled: false
-    account-track-rules-list:
-        operation: account_track_rules_list
-        enabled: false
-    account-track-rules-preview-create:
-        operation: account_track_rules_preview_create
-        enabled: false
-    account-track-rules-run-create:
-        operation: account_track_rules_run_create
-        enabled: false
-    account-track-rules-runs-list:
-        operation: account_track_rules_runs_list
-        enabled: false
-    account-track-rules-update:
-        operation: account_track_rules_update
-        enabled: false
-    account-views-create:
-        operation: account_views_create
-        enabled: false
-    account-views-destroy:
-        operation: account_views_destroy
-        enabled: false
-    account-views-list:
-        operation: account_views_list
-        enabled: false
-    account-views-partial-update:
-        operation: account_views_partial_update
-        enabled: false
-    account-views-retrieve:
-        operation: account_views_retrieve
-        enabled: false
-    accounts-by-external-id-retrieve:
-        operation: accounts_by_external_id_retrieve
-        enabled: false
     accounts-create:
         operation: accounts_create
         enabled: true
@@ -189,6 +166,23 @@ tools:
             text for text. List or create definitions with `custom-property-definitions-list` and
             `custom-property-definitions-create`.
         feature_flag: customer-analytics-csp
+    accounts-custom-property-values-history:
+        operation: accounts_custom_property_values_history_retrieve
+        enabled: true
+        annotations:
+            readOnly: true
+            destructive: false
+            idempotent: true
+        list: true
+        title: List account custom property value history
+        description: >
+            List every value a Customer Analytics account has held for one custom property, oldest first. Use it to see
+            how a property such as MRR or plan changed over time. Each entry has the `value`, `set_at`, `replaced_at`
+            (when the next value replaced it), `is_current`, and `set_by_id`. Repeated sets of the same value count as
+            one entry. A cleared value has no recorded clear time. Pass the property's `definition` ID, found with
+            `custom-property-definitions-list`. Pass `since` (YYYY-MM-DD) to limit a long history to a time window. The
+            first entry is then the value in place on that date.
+        feature_flag: customer-analytics-csp
     accounts-custom-property-values-list:
         operation: accounts_custom_property_values_list
         enabled: true
@@ -204,7 +198,8 @@ tools:
             List the current custom property values for a single Customer Analytics account. Each result pairs a custom
             property definition (via `definition_id`) with the account's `value` for it — typed per the definition's
             display_type (string, number, boolean, or ISO-8601 datetime) — plus `created_at` and who set it. Only
-            current values are returned; superseded history is not. Resolve a `definition_id` to its name and type with
+            current values are returned. For the values a property held before, use
+            `accounts-custom-property-values-history`. Resolve a `definition_id` to its name and type with
             `custom-property-definitions-list` or `custom-property-definitions-retrieve`.
         feature_flag: customer-analytics-csp
     accounts-destroy:
@@ -220,12 +215,6 @@ tools:
         description: |
             Permanently delete a Customer Analytics account by id.
         feature_flag: customer-analytics-csp
-    accounts-email-thread-messages-list:
-        operation: accounts_email_thread_messages_list
-        enabled: false
-    accounts-email-threads-list:
-        operation: accounts_email_threads_list
-        enabled: false
     accounts-list:
         operation: accounts_list
         enabled: true
@@ -292,7 +281,7 @@ tools:
         operation: accounts_notebooks_create
         enabled: true
         scopes:
-            - account:write
+            - account_note:write
         annotations:
             readOnly: false
             destructive: false
@@ -305,13 +294,15 @@ tools:
             fenced code blocks, `**bold**`, `*italic*`, `` `code` ``, and `[label](url)` links). Pass `content`
             (ProseMirror JSON) only if you already have a structured document; the server converts it into the same
             markdown notebook format. In most cases leave it unset and write Markdown in `text_content`. The notebook is
-            created with internal visibility so it does not appear in the global notebooks list.
+            created with internal visibility so it does not appear in the global notebooks list. Pass `tags` (array of
+            tag names, shared with account tags) to tag the note at creation time. A note a scout writes is also tagged
+            `scout` and `scout-<skill name>` by the server, so pass only topic tags.
         feature_flag: customer-analytics-csp
     accounts-notebooks-destroy:
         operation: accounts_notebooks_destroy
         enabled: true
         scopes:
-            - account:write
+            - account_note:write
         annotations:
             readOnly: false
             destructive: true
@@ -324,7 +315,7 @@ tools:
         operation: accounts_notebooks_list
         enabled: true
         scopes:
-            - account:read
+            - account_note:read
         annotations:
             readOnly: true
             destructive: false
@@ -332,14 +323,32 @@ tools:
         list: true
         title: List account notebooks
         description: >
-            List notebooks attached to a Customer Analytics account, ordered by most recently modified. Each result
-            includes the notebook `short_id`, `title`, `content`, and authorship metadata.
+            List notebooks attached to a Customer Analytics account, newest first by default. Each result includes the
+            notebook `short_id`, `title`, `content`, `tags` and authorship metadata. Pass `tags` (JSON-encoded array,
+            e.g. `["renewal","risk"]`) to keep notebooks carrying any of those tags, `created_by` (user IDs) to keep
+            notebooks by those authors, `search` for full text, and `ordering` (`title`, `created_at`,
+            `last_modified_at`, `created_by`, each with a `-` prefix for descending) to sort.
+        feature_flag: customer-analytics-csp
+    accounts-notebooks-partial-update:
+        operation: accounts_notebooks_partial_update
+        enabled: true
+        scopes:
+            - account_note:write
+        annotations:
+            readOnly: false
+            destructive: false
+            idempotent: true
+        title: Update account notebook tags
+        description: >
+            Replace an account notebook's `tags` by its `short_id`. `tags` replaces the whole tag set, so read the
+            notebook first and send the full list to add one. The title and content are not edited here: a note's title
+            comes from its first line, so use `notebooks-partial-update` to change the content.
         feature_flag: customer-analytics-csp
     accounts-notebooks-retrieve:
         operation: accounts_notebooks_retrieve
         enabled: true
         scopes:
-            - account:read
+            - account_note:read
         annotations:
             readOnly: true
             destructive: false
@@ -377,12 +386,6 @@ tools:
                     Tag names to set on the account. Replaces the full existing tag set — pass the complete list, not a
                     delta. Tags are created on demand if they do not already exist for the team.
         feature_flag: customer-analytics-csp
-    accounts-presence-create:
-        operation: accounts_presence_create
-        enabled: false
-    accounts-presence-list:
-        operation: accounts_presence_list
-        enabled: false
     accounts-relationships-create:
         operation: accounts_relationships_create
         enabled: true
@@ -401,9 +404,6 @@ tools:
             assignment is returned unchanged. For single-holder definitions, assigning a new user automatically ends the
             current holder's assignment.
         feature_flag: customer-analytics-csp
-    accounts-relationships-destroy:
-        operation: accounts_relationships_destroy
-        enabled: false
     accounts-relationships-end-create:
         operation: accounts_relationships_end_create
         enabled: true
@@ -456,9 +456,11 @@ tools:
             (CSM, account executive, ...) live on account relationships — see `accounts-relationships-list`. These are
             the built-in fields only; a team's own typed attributes are custom properties and are not returned here.
             Call `custom-property-definitions-list` to see what the team tracks, then
-            `accounts-custom-property-values-list` for this account's values. To link a user to this account rather than
-            the bare list, deep-link it with the path `/customer_analytics/accounts/<id>/<tab>` (using the account `id`;
-            tab is optional — one of notes/users/usage/spend, e.g. `/customer_analytics/accounts/<id>/usage`).
+            `accounts-custom-property-values-list` for this account's values, or
+            `accounts-custom-property-values-history` to see how one changed over time. To link a user to this account
+            rather than the bare list, deep-link it with the path `/customer_analytics/accounts/<id>/<tab>` (using the
+            account `id`; tab is optional — one of notes/users/usage/spend, e.g.
+            `/customer_analytics/accounts/<id>/usage`).
         feature_flag: customer-analytics-csp
     accounts-summaries-list:
         operation: accounts_summaries_list
@@ -480,15 +482,6 @@ tools:
             covered, even if the account is later rebound to another channel. Returns an empty list when the account has
             no bound channel, summaries are off (`slack_summary_cadence` is null), or nothing has been generated yet.
         feature_flag: customer-analytics-csp
-    accounts-support-ticket-messages-list:
-        operation: accounts_support_ticket_messages_list
-        enabled: false
-    accounts-support-tickets-list:
-        operation: accounts_support_tickets_list
-        enabled: false
-    accounts-update:
-        operation: accounts_update
-        enabled: false
     announcements-channels-list:
         operation: announcements_channels_list
         enabled: true
@@ -571,18 +564,6 @@ tools:
             when it failed, and `slack_message_ts` plus `sent_at` when it succeeded. Use this to check delivery progress
             after `announcements-create-execute`.
         feature_flag: customer-analytics-csp
-    calendar-sync-backfill-create:
-        operation: calendar_sync_backfill_create
-        enabled: false
-    calendar-sync-interval-create:
-        operation: calendar_sync_interval_create
-        enabled: false
-    calendar-sync-list:
-        operation: calendar_sync_list
-        enabled: false
-    calendar-sync-sync-now-create:
-        operation: calendar_sync_sync_now_create
-        enabled: false
     custom-property-definitions-create:
         operation: custom_property_definitions_create
         enabled: true
@@ -635,19 +616,20 @@ tools:
         list: true
         title: List custom property definitions
         description: >
-            List Customer Analytics custom property definitions for the project. A definition is the shape of a custom
-            attribute — its `name`, optional `description`, `display_type` (one of text, number, currency, percent,
-            date, datetime, boolean), `is_big_number` flag, and `target_type` (`account`, `person`, or `group`, with
-            `group_type_index` set for group targets). Definitions are team-scoped; for account targets, the value a
-            specific account holds is managed separately via the account custom property value tools. Group-target
-            definitions are only listed for callers holding the `group:read` scope. Use
-            `custom-property-definitions-retrieve` to fetch a single definition by id. To list or filter accounts by a
-            custom property value in bulk, take a definition `id` from this tool and query it via HogQL against
-            `system.accounts`, selecting ``custom_properties.values.`<definition_id>` `` (backtick-quote the id) and
-            filtering it `IS NOT NULL`. The per-account value tools return one account at a time; this HogQL path scales
-            to all accounts. Match a requested field against this project's definition names and descriptions rather
-            than assuming the same name or data type in every project. Use `custom-property-definitions-retrieve` when
-            you need source details or select options omitted from this compact list.
+            List the fields a team tracks on its Customer Analytics accounts, such as plan, revenue, or health. Call
+            this first for a question about an account's data, before metrics, SQL, events, or warehouse tables. A
+            definition is the shape of a custom attribute — its `name`, optional `description`, `display_type` (one of
+            text, number, currency, percent, date, datetime, boolean), `is_big_number` flag, and `target_type`
+            (`account`, `person`, or `group`, with `group_type_index` set for group targets). Definitions are
+            team-scoped; for account targets, the value a specific account holds is managed separately via the account
+            custom property value tools. Group-target definitions are only listed for callers holding the `group:read`
+            scope. Use `custom-property-definitions-retrieve` to fetch a single definition by id. To list or filter
+            accounts by a custom property value in bulk, take a definition `id` from this tool and query it via HogQL
+            against `system.accounts`, selecting ``custom_properties.values.`<definition_id>` `` (backtick-quote the id)
+            and filtering it `IS NOT NULL`. The per-account value tools return one account at a time; this HogQL path
+            scales to all accounts. Match a requested field against this project's definition names and descriptions
+            rather than assuming the same name or data type in every project. Use `custom-property-definitions-retrieve`
+            when you need source details or select options omitted from this compact list.
         feature_flag: customer-analytics-csp
         response:
             include:
@@ -694,12 +676,6 @@ tools:
             holds is managed separately via the account custom property value tools. A group-target definition is only
             returned to callers holding the `group:read` scope.
         feature_flag: customer-analytics-csp
-    custom-property-definitions-update:
-        operation: custom_property_definitions_update
-        enabled: false
-    custom-property-definitions-values-retrieve:
-        operation: custom_property_definitions_values_retrieve
-        enabled: false
     custom-property-sources-backfill:
         operation: custom_property_sources_backfill
         enabled: true
@@ -834,57 +810,6 @@ tools:
             enabled person- or group-property source, and for a view whose data-modeling DAG is not on the v2 schedule
             (use backfill there instead). Syncing a group-target source additionally requires the `group:write` scope.
         feature_flag: warehouse-person-properties
-    custom-property-sources-update:
-        operation: custom_property_sources_update
-        enabled: false
-    customer-analytics-accounts-table-query-create:
-        operation: customer_analytics_accounts_table_query_create
-        enabled: false
-    customer-analytics-external-account-create:
-        operation: customer_analytics_external_account_create
-        enabled: false
-    customer-analytics-external-account-retrieve:
-        operation: customer_analytics_external_account_retrieve
-        enabled: false
-    customer-analytics-external-accounts-retrieve:
-        operation: customer_analytics_external_accounts_retrieve
-        enabled: false
-    customer-journeys-create:
-        operation: customer_journeys_create
-        enabled: false
-    customer-journeys-destroy:
-        operation: customer_journeys_destroy
-        enabled: false
-    customer-journeys-list:
-        operation: customer_journeys_list
-        enabled: false
-    customer-journeys-partial-update:
-        operation: customer_journeys_partial_update
-        enabled: false
-    customer-journeys-retrieve:
-        operation: customer_journeys_retrieve
-        enabled: false
-    customer-journeys-update:
-        operation: customer_journeys_update
-        enabled: false
-    customer-profile-configs-create:
-        operation: customer_profile_configs_create
-        enabled: false
-    customer-profile-configs-destroy:
-        operation: customer_profile_configs_destroy
-        enabled: false
-    customer-profile-configs-list:
-        operation: customer_profile_configs_list
-        enabled: false
-    customer-profile-configs-partial-update:
-        operation: customer_profile_configs_partial_update
-        enabled: false
-    customer-profile-configs-retrieve:
-        operation: customer_profile_configs_retrieve
-        enabled: false
-    customer-profile-configs-update:
-        operation: customer_profile_configs_update
-        enabled: false
     customer-tasks-activities-list:
         operation: customerTasksActivitiesList
         enabled: true
@@ -926,7 +851,7 @@ tools:
         title: Create customer task
         description: >
             Create a Customer analytics task with a name and optional description, account UUID, project member assignee
-            ID, ISO 8601 deadline, and initial status. This is a customer follow-up task, not an AI coding task.
+            ID, ISO 8601 deadline, initial status, and tags. This is a customer follow-up task, not an AI coding task.
         feature_flag: customer-analytics-customer-tasks
     customer-tasks-list:
         operation: customer_tasks_list
@@ -940,8 +865,10 @@ tools:
         list: true
         title: List customer tasks
         description: >
-            List accessible Customer analytics tasks. Filter by search, account UUID, assignee (me, unassigned, or user
-            ID), comma-separated statuses, deadline, or archive state. Active tasks are returned by default.
+            List accessible Customer analytics tasks. Filter by search, account UUID, assignee (me, unassigned, a user
+            ID, or role:<role UUID> for tasks assigned to any current member of that role), comma-separated statuses,
+            deadline, archive state, or `tags` (JSON-encoded array such as `["renewal","urgent"]`, matching tasks with
+            any of the tags). Active tasks are returned by default. Use roles-list to find role UUIDs.
         feature_flag: customer-analytics-customer-tasks
     customer-tasks-partial-update:
         operation: customer_tasks_partial_update
@@ -956,7 +883,8 @@ tools:
         description: >
             Update a Customer analytics task by ID. Supply only fields to change. Use null to clear the account,
             assignee, description, or deadline. Statuses are open, in_progress, completed, and canceled. Reopen a
-            completed or canceled task before moving it to another status. Restore archived tasks before editing.
+            completed or canceled task before moving it to another status. `tags` replaces every tag on the task, and an
+            empty list removes them all. Restore archived tasks before editing.
         feature_flag: customer-analytics-customer-tasks
     customer-tasks-restore-create:
         operation: customer_tasks_restore_create
@@ -983,11 +911,8 @@ tools:
         title: Get customer task
         description: >
             Retrieve one accessible Customer analytics task by ID, including its linked account, assignee, deadline,
-            status, and archive state.
+            status, tags, and archive state.
         feature_flag: customer-analytics-customer-tasks
-    customer-tasks-update:
-        operation: customer_tasks_update
-        enabled: false
     event-streams-add-account:
         operation: event_streams_add_account_create
         enabled: true
@@ -1095,9 +1020,6 @@ tools:
             end to end. Fails with a validation error when the stream has no saved Slack workspace + channel, or when
             Slack rejects the message (e.g. the PostHog bot is not in the channel).
         feature_flag: customer-analytics-csp
-    event-streams-update:
-        operation: event_streams_update
-        enabled: false
     feature-request-product-areas-create:
         operation: feature_request_product_areas_create
         enabled: true
@@ -1144,9 +1066,6 @@ tools:
             subset of `name`, `display_order`, and `is_active`. Inactive areas remain on requests that already use them,
             but editors cannot add them to new requests.
         feature_flag: customer-analytics-feature-requests
-    feature-request-product-areas-update:
-        operation: feature_request_product_areas_update
-        enabled: false
     feature-requests-add-account-create:
         operation: feature_requests_add_account_create
         enabled: true
@@ -1232,7 +1151,23 @@ tools:
         feature_flag: customer-analytics-feature-requests
     feature-requests-link-github-create:
         operation: feature_requests_link_github_create
-        enabled: false
+        enabled: true
+        scopes:
+            - customer_analytics:write
+        annotations:
+            readOnly: false
+            destructive: false
+            idempotent: false
+        enrich_url: feature-requests/{id}
+        title: Link feature request to GitHub issue
+        description: >
+            Link a Customer analytics feature request to one GitHub issue. Pass the request id, its current
+            `expected_version`, the id of a GitHub integration connected to the project, and the issue URL. Pull request
+            URLs are rejected, and a request can have only one linked issue. Link an issue only when it describes the
+            same customer problem and one feature would close both. The link syncs the issue state to the request: a
+            closed issue sets the status to completed or won't fix, and a reopened issue restores the earlier status.
+            The response contains the request with its `github_link` and the next version.
+        feature_flag: customer-analytics-feature-requests
     feature-requests-list:
         operation: feature_requests_list
         enabled: true
@@ -1271,9 +1206,6 @@ tools:
             expected_version:
                 required: true
         feature_flag: customer-analytics-feature-requests
-    feature-requests-pause-github-create:
-        operation: feature_requests_pause_github_create
-        enabled: false
     feature-requests-remove-evidence-create:
         operation: feature_requests_remove_evidence_create
         enabled: true
@@ -1305,9 +1237,6 @@ tools:
             Restore an archived Customer analytics feature request so editors can change it again. Pass the request `id`
             and its current `expected_version`. Account links, evidence, product areas, and history remain attached.
         feature_flag: customer-analytics-feature-requests
-    feature-requests-resume-github-create:
-        operation: feature_requests_resume_github_create
-        enabled: false
     feature-requests-retrieve:
         operation: feature_requests_retrieve
         enabled: true
@@ -1340,12 +1269,6 @@ tools:
             previous status, resulting status, actor, source, and change time. HogQL `system.feature_request_history`
             exposes when changes occurred and which fields changed, but not status values.
         feature_flag: customer-analytics-feature-requests
-    feature-requests-unlink-github-create:
-        operation: feature_requests_unlink_github_create
-        enabled: false
-    feature-requests-update:
-        operation: feature_requests_update
-        enabled: false
     feature-requests-update-evidence-create:
         operation: feature_requests_update_evidence_create
         enabled: true
@@ -1486,12 +1409,3 @@ tools:
                 description: >
                     Legacy URL parameter retained for backward compatibility. Pass `0`. The stored value does not scope
                     the metric — usage metrics apply to both groups and persons regardless of this value.
-    usage-metrics-update:
-        operation: groups_types_metrics_update
-        enabled: false
-    user-customer-analytics-config-partial-update:
-        operation: user_customer_analytics_config_partial_update
-        enabled: false
-    user-customer-analytics-config-retrieve:
-        operation: user_customer_analytics_config_retrieve
-        enabled: false

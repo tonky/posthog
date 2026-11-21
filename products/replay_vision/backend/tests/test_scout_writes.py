@@ -33,18 +33,38 @@ class TestScoutScannerCreditLimit(SimpleTestCase):
                 {"sampling_rate": 1.0},
                 False,
             ),
-            (
-                "change_sampling_mode_without_a_limit",
-                {"credit_limit": None, "sampling_mode": "focused"},
-                {"sampling_mode": "comprehensive"},
-                False,
-            ),
             ("change_model_without_a_limit", {"credit_limit": None, "model": "old"}, {"model": "new"}, False),
             (
                 "clear_targeting_without_a_limit",
                 {"credit_limit": None, "experiment_targeting": {"experiment_id": 1}},
                 {"experiment_targeting": None},
                 False,
+            ),
+            (
+                "clear_scope_without_a_limit",
+                {"credit_limit": None, "scope": {"kind": "experiment", "experiment_id": 1, "variants": ["control"]}},
+                {"scope": None},
+                False,
+            ),
+            (
+                "widen_scope_without_a_limit",
+                {"credit_limit": None, "scope": {"kind": "experiment", "experiment_id": 1, "variants": ["control"]}},
+                {"scope": {"kind": "experiment", "experiment_id": 1, "variants": ["control", "test"]}},
+                False,
+            ),
+            (
+                # The editor resends the scope it read, so an unchanged one must not demand a limit.
+                "resend_an_unchanged_scope",
+                {"credit_limit": None, "scope": {"kind": "experiment", "experiment_id": 1, "variants": ["control"]}},
+                {"scope": {"kind": "experiment", "experiment_id": 1, "variants": ["control"]}},
+                True,
+            ),
+            (
+                # A defaulted key stays out of the stored blob, so a resend carrying it is unchanged.
+                "resend_a_scope_carrying_a_defaulted_key",
+                {"credit_limit": None, "scope": {"kind": "experiment", "experiment_id": 1, "variants": ["control"]}},
+                {"scope": {"kind": "experiment", "experiment_id": 1, "variants": ["control"], "balance": True}},
+                True,
             ),
             (
                 "change_with_a_limit",
@@ -113,6 +133,39 @@ class TestScoutScannerCreditLimit(SimpleTestCase):
                 "enabling_an_uncapped_scanner_with_a_limit",
                 {"credit_limit": None, "enabled": False},
                 {"enabled": True, "credit_limit": 500},
+                True,
+            ),
+            (
+                "arming_an_uncapped_experiment_scanner_to_start_on_launch",
+                {
+                    "credit_limit": None,
+                    "enabled": False,
+                    "scanner_type": "experiment",
+                    "scanner_config": {"experiment_id": 1},
+                },
+                {"scanner_config": {"experiment_id": 1, "start_on_launch": True}},
+                False,
+            ),
+            (
+                "arming_a_capped_experiment_scanner_to_start_on_launch",
+                {
+                    "credit_limit": 500,
+                    "enabled": False,
+                    "scanner_type": "experiment",
+                    "scanner_config": {"experiment_id": 1},
+                },
+                {"scanner_config": {"experiment_id": 1, "start_on_launch": True}},
+                True,
+            ),
+            (
+                "editing_an_uncapped_scanner_someone_else_armed",
+                {
+                    "credit_limit": None,
+                    "enabled": False,
+                    "scanner_type": "experiment",
+                    "scanner_config": {"experiment_id": 1, "start_on_launch": True},
+                },
+                {"scanner_config": {"prompt": "p", "experiment_id": 1, "start_on_launch": True}},
                 True,
             ),
             (

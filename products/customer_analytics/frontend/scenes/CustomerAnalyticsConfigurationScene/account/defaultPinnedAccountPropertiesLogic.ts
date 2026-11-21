@@ -3,9 +3,11 @@ import { MakeLogicType, actions, connect, kea, listeners, path, reducers, select
 import { teamLogic } from 'scenes/teamLogic'
 
 import type { CustomerAnalyticsConfig } from '~/queries/schema/schema-general'
+import type { TeamPublicType, TeamType } from '~/types'
 
 import type { PinnedAccountPropertyApi } from 'products/customer_analytics/frontend/generated/api.schemas'
 import {
+    buildPinnedPropertyOptions,
     configuratorKeysToPinnedProperties,
     pinnedPropertyToConfiguratorKey,
 } from 'products/customer_analytics/frontend/scenes/CustomerAnalyticsAccountScene/accountSidebarConfigLogic'
@@ -41,7 +43,7 @@ export interface defaultPinnedAccountPropertiesLogicValues {
 export interface defaultPinnedAccountPropertiesLogicActions {
     loadCustomPropertyDefinitions: () => any // customPropertyDefinitionsLogic
     loadRelationshipDefinitions: () => any // relationshipDefinitionsLogic
-    updateCurrentTeam: (payload: Partial<import('~/types').TeamType>) => Partial<import('~/types').TeamType> // teamLogic
+    updateCurrentTeam: (payload: Partial<TeamType>) => Partial<TeamType> // teamLogic
     updateCurrentTeamFailure: (
         error: string,
         errorObject?: any
@@ -50,11 +52,11 @@ export interface defaultPinnedAccountPropertiesLogicActions {
         errorObject?: any
     } // teamLogic
     updateCurrentTeamSuccess: (
-        currentTeam: import('~/types').TeamPublicType | import('~/types').TeamType,
-        payload?: Partial<import('~/types').TeamType> | undefined
+        currentTeam: TeamPublicType | TeamType,
+        payload?: Partial<TeamType> | undefined
     ) => {
-        currentTeam: import('~/types').TeamPublicType | import('~/types').TeamType
-        payload?: Partial<import('~/types').TeamType>
+        currentTeam: TeamPublicType | TeamType
+        payload?: Partial<TeamType>
     } // teamLogic
     closeConfigurator: () => {
         value: true
@@ -212,22 +214,13 @@ export const defaultPinnedAccountPropertiesLogic = kea<defaultPinnedAccountPrope
         propertyOptions: [
             (s) => [s.customPropertyDefinitions, s.relationshipDefinitions],
             (
-                customProperties: import('products/customer_analytics/frontend/generated/api.schemas').CustomPropertyDefinitionApi[],
-                relationships: import('products/customer_analytics/frontend/generated/api.schemas').AccountRelationshipDefinitionApi[]
-            ): AccountPropertyOption[] => [
-                ...customProperties
-                    .filter(({ target_type }) => target_type === 'account')
-                    .map((definition) => ({
-                        key: pinnedPropertyToConfiguratorKey({ kind: 'custom_property', id: definition.id }),
-                        label: definition.name,
-                        kind: 'custom' as const,
-                    })),
-                ...relationships.map((definition) => ({
-                    key: pinnedPropertyToConfiguratorKey({ kind: 'relationship', id: definition.id }),
-                    label: definition.name,
-                    kind: 'relationship' as const,
-                })),
-            ],
+                customProperties: CustomPropertyDefinitionApi[],
+                relationships: AccountRelationshipDefinitionApi[]
+            ): AccountPropertyOption[] =>
+                buildPinnedPropertyOptions({
+                    customProperties: customProperties.filter(({ target_type }) => target_type === 'account'),
+                    relationships,
+                }),
         ],
         resolvedPinnedPropertyKeys: [
             (s) => [s.defaultPinnedProperties, s.propertyOptions],

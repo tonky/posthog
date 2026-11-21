@@ -24,6 +24,8 @@ from posthog.schema import (
     TrendsQuery,
 )
 
+from posthog.hogql_queries.utils.result_series import get_action_names
+
 from .boxplot import BoxPlotResultsFormatter
 from .funnel import FunnelResultsFormatter
 from .lifecycle import LifecycleResultsFormatter
@@ -73,6 +75,33 @@ def format_access_control_warnings(response: dict[str, Any]) -> str:
     return _format_warnings(response, "access_control", "[Access control]")
 
 
+def format_row_limit_notice(response: dict[str, Any]) -> str:
+    # `hasMore` is set only when the default row limit cut a query without its own LIMIT. Without this
+    # block an agent reads the first page as the whole result and charts or reports partial data.
+    if not response.get("hasMore"):
+        return ""
+    limit = response.get("limit")
+    shown = f"only the first {limit} rows" if isinstance(limit, int) else "only the first page of rows"
+    return (
+        f"[Row limit] The query has no LIMIT, so the results below are {shown}. More rows exist. "
+        "Aggregate or filter to fewer rows, set an explicit LIMIT, or page with LIMIT and OFFSET "
+        "and a stable ORDER BY.\n\n"
+    )
+
+
+WAREHOUSE_SUGGESTIONS_HEADER = (
+    "[Warehouse suggestions for views this query read. Mention them to the person; "
+    "do not act on them unless the person asks.]"
+)
+
+
+def format_warehouse_suggestions(response: dict[str, Any]) -> str:
+    notes = response.get("warehouse_suggestions") or []
+    if not notes:
+        return ""
+    return "\n".join(["", "", WAREHOUSE_SUGGESTIONS_HEADER, *(f"- {note['message']}" for note in notes)])
+
+
 def format_query_results_for_llm(
     query: BaseModel,
     response: dict[str, Any],
@@ -99,24 +128,38 @@ def format_query_results_for_llm(
         if is_boxplot_query(query):
             formatted = BoxPlotResultsFormatter(get_boxplot_results(response)).format()
         else:
-            formatted = TrendsResultsFormatter(query, response["results"], team, utc_now).format()
+            formatted = TrendsResultsFormatter(
+                query,
+                response["results"],
+                team,
+                utc_now,
+                resolved_date_range=response.get("resolved_date_range"),
+                resolved_compare_date_range=response.get("resolved_compare_date_range"),
+                action_names=get_action_names(team, query.model_dump(mode="json")),
+            ).format()
     elif isinstance(query, AssistantFunnelsQuery | FunnelsQuery):
         formatted = FunnelResultsFormatter(query, response["results"], team, utc_now).format()
     elif isinstance(query, AssistantLifecycleQuery | LifecycleQuery):
-        formatted = LifecycleResultsFormatter(query, response["results"]).format()
+        formatted = LifecycleResultsFormatter(
+            query, response["results"], action_names=get_action_names(team, query.model_dump(mode="json"))
+        ).format()
     elif isinstance(query, AssistantPathsQuery | PathsQuery):
         formatted = PathsResultsFormatter(response["results"]).format()
     elif isinstance(query, AssistantStickinessQuery | StickinessQuery):
-        formatted = StickinessResultsFormatter(query, response["results"]).format()
+        formatted = StickinessResultsFormatter(
+            query, response["results"], action_names=get_action_names(team, query.model_dump(mode="json"))
+        ).format()
     elif isinstance(query, AssistantRetentionQuery | RetentionQuery):
         formatted = RetentionResultsFormatter(query, response["results"]).format()
     elif isinstance(query, AssistantHogQLQuery | HogQLQuery):
         formatted = SQLResultsFormatter(query, response["results"], response["columns"]).format()
+        formatted = format_row_limit_notice(response) + formatted
 
     if formatted is None:
         return None
     warning_prefix = format_warehouse_sync_warnings(response) + format_access_control_warnings(response)
-    return warning_prefix + formatted if warning_prefix else formatted
+    result = warning_prefix + formatted if warning_prefix else formatted
+    return result + format_warehouse_suggestions(response)
 
 
 __all__ = [
@@ -132,5 +175,7 @@ __all__ = [
     "NULL_MARKER",
     "format_access_control_warnings",
     "format_query_results_for_llm",
+    "format_row_limit_notice",
+    "format_warehouse_suggestions",
     "format_warehouse_sync_warnings",
 ]

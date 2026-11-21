@@ -5,6 +5,7 @@ import { cva, type VariantProps } from 'class-variance-authority'
 import { CheckIcon, MinusIcon } from 'lucide-react'
 import * as React from 'react'
 
+import { useDisabledControl } from './disabled-reason'
 import { cn } from './lib/utils'
 
 const checkboxIndicatorVariants = cva('quill-checkbox-indicator flex shrink-0 items-center justify-center', {
@@ -31,13 +32,13 @@ const checkIconVariants = cva('', {
     },
 })
 
-function CheckboxIndicator({
-    checked,
-    className,
-    size = 'default',
-}: { checked?: boolean; className?: string } & VariantProps<typeof checkboxIndicatorVariants>): React.ReactElement {
+const CheckboxIndicator = React.forwardRef<
+    HTMLSpanElement,
+    { checked?: boolean; className?: string } & VariantProps<typeof checkboxIndicatorVariants>
+>(function CheckboxIndicator({ checked, className, size = 'default' }, ref) {
     return (
         <span
+            ref={ref}
             data-slot="checkbox-indicator"
             className={cn(
                 checkboxIndicatorVariants({ size }),
@@ -48,7 +49,7 @@ function CheckboxIndicator({
             {checked && <CheckIcon className={checkIconVariants({ size })} />}
         </span>
     )
-}
+})
 
 const checkboxVariants = cva('quill-checkbox peer flex shrink-0 items-center justify-center', {
     variants: {
@@ -62,17 +63,30 @@ const checkboxVariants = cva('quill-checkbox peer flex shrink-0 items-center jus
     },
 })
 
-function Checkbox({
-    className,
-    size = 'default',
-    ...props
-}: CheckboxPrimitive.Root.Props & VariantProps<typeof checkboxVariants>): React.ReactElement {
-    return (
+const Checkbox = React.forwardRef<
+    React.ComponentRef<typeof CheckboxPrimitive.Root>,
+    Omit<CheckboxPrimitive.Root.Props, 'children'> &
+        VariantProps<typeof checkboxVariants> & {
+            /** Disables the checkbox and says why in a tooltip. */
+            disabledReason?: React.ReactNode
+            /** The label. It wraps the checkbox, so the label also toggles it and shows the disabled reason. */
+            children?: React.ReactNode
+        }
+>(function Checkbox({ className, size = 'default', disabled, disabledReason, children, ...props }, ref) {
+    const { rootProps, wrap } = useDisabledControl({
+        disabled,
+        disabledReason,
+        label: children,
+        ariaDescribedBy: props['aria-describedby'],
+    })
+    return wrap(
         <CheckboxPrimitive.Root
+            ref={ref}
             data-quill
             data-slot="checkbox"
             className={cn(checkboxVariants({ size }), className)}
             {...props}
+            {...rootProps}
         >
             <CheckboxPrimitive.Indicator
                 data-slot="checkbox-primitive-indicator"
@@ -86,6 +100,6 @@ function Checkbox({
             </CheckboxPrimitive.Indicator>
         </CheckboxPrimitive.Root>
     )
-}
+})
 
 export { Checkbox, CheckboxIndicator }

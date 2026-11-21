@@ -3,15 +3,14 @@ import { router } from 'kea-router'
 import posthog from 'posthog-js'
 
 import { SetupTaskId } from 'lib/components/ProductSetup'
+import { inviteLogic } from 'lib/logic/inviteLogic'
 import { preflightLogic } from 'lib/logic/preflightLogic'
 import { organizationLogic } from 'scenes/organizationLogic'
-import { inviteLogic } from 'scenes/settings/organization/inviteLogic'
 import { teamLogic } from 'scenes/teamLogic'
 
 import { ProductKey } from '~/queries/schema/schema-general'
 import { ActivationTaskStatus } from '~/types'
 
-import type { AvailableSetupTaskIdsEnumApi } from '../../../generated/core/api.schemas'
 import type { TeamPublicType, TeamType } from '../../../types'
 import { reverseProxyCheckerLogic } from '../ReverseProxyChecker/reverseProxyCheckerLogic'
 import { globalSetupLogic } from './globalSetupLogic'
@@ -39,7 +38,6 @@ export interface productSetupLogicValues {
     completionPercent: number
     firstAvailableTask: SetupTaskWithState | null
     isDismissed: boolean
-    isModalOpen: boolean
     isSetupComplete: boolean
     productConfig: ProductSetupConfig | null
     remainingCount: number
@@ -60,10 +58,10 @@ export interface productSetupLogicActions {
         value: true
     } // globalSetupLogic
     markTaskAsCompleted: (taskIdOrIds: SetupTaskId | SetupTaskId[]) => {
-        taskIdOrIds: AvailableSetupTaskIdsEnumApi | AvailableSetupTaskIdsEnumApi[]
+        taskIdOrIds: SetupTaskId | SetupTaskId[]
     } // globalSetupLogic
     markTaskAsSkipped: (taskIdOrIds: SetupTaskId | SetupTaskId[]) => {
-        taskIdOrIds: AvailableSetupTaskIdsEnumApi | AvailableSetupTaskIdsEnumApi[]
+        taskIdOrIds: SetupTaskId | SetupTaskId[]
     } // globalSetupLogic
     openGlobalSetup: () => {
         value: true
@@ -76,32 +74,25 @@ export interface productSetupLogicActions {
         selector: string
     } // globalSetupLogic
     unmarkTaskAsCompleted: (taskIdOrIds: SetupTaskId | SetupTaskId[]) => {
-        taskIdOrIds: AvailableSetupTaskIdsEnumApi | AvailableSetupTaskIdsEnumApi[]
+        taskIdOrIds: SetupTaskId | SetupTaskId[]
     } // globalSetupLogic
     unmarkTaskAsSkipped: (taskIdOrIds: SetupTaskId | SetupTaskId[]) => {
-        taskIdOrIds: AvailableSetupTaskIdsEnumApi | AvailableSetupTaskIdsEnumApi[]
+        taskIdOrIds: SetupTaskId | SetupTaskId[]
     } // globalSetupLogic
     showInviteModal: () => {
         value: true
     } // inviteLogic
-    loadHasReverseProxy: () => any // reverseProxyCheckerLogic
-    closeSetupModal: () => {
-        value: true
-    }
     dismissSetup: () => {
         value: true
     }
     loadCompletionData: () => {
         value: true
     }
-    openSetupModal: () => {
-        value: true
-    }
     runTask: (taskId: SetupTaskId) => {
-        taskId: AvailableSetupTaskIdsEnumApi
+        taskId: SetupTaskId
     }
     setExpandedTaskId: (taskId: SetupTaskId | null) => {
-        taskId: AvailableSetupTaskIdsEnumApi | null
+        taskId: SetupTaskId | null
     }
     setShowCelebration: (show: boolean) => {
         show: boolean
@@ -157,7 +148,7 @@ export type productSetupLogicType = MakeLogicType<
  * This logic is keyed by productKey and handles:
  * 1. Reading task state (selectors derive from team.onboarding_tasks)
  * 2. Running task actions (navigation, opening modals, etc.)
- * 3. Product-specific UI state (isDismissed, isModalOpen)
+ * 3. Product-specific UI state (isDismissed)
  * 4. Product-specific loaders (customEventsCount, hasSentAIEvent)
  *
  * Task completion is handled by globalSetupLogic - this logic just reads and displays state.
@@ -182,8 +173,6 @@ export const productSetupLogic = kea<productSetupLogicType>([
         actions: [
             inviteLogic,
             ['showInviteModal'],
-            reverseProxyCheckerLogic,
-            ['loadHasReverseProxy'],
             globalSetupLogic,
             [
                 'openGlobalSetup',
@@ -203,8 +192,6 @@ export const productSetupLogic = kea<productSetupLogicType>([
 
         // UI actions
         setExpandedTaskId: (taskId: SetupTaskId | null) => ({ taskId }),
-        openSetupModal: true,
-        closeSetupModal: true,
         dismissSetup: true,
         undismissSetup: true,
         setShowCelebration: (show: boolean) => ({ show }),
@@ -213,13 +200,6 @@ export const productSetupLogic = kea<productSetupLogicType>([
         loadCompletionData: true,
     }),
     reducers(({ props }) => ({
-        isModalOpen: [
-            false,
-            {
-                openSetupModal: () => true,
-                closeSetupModal: () => false,
-            },
-        ],
         isDismissed: [
             false,
             { persist: true, prefix: `${DISMISSED_STORAGE_KEY}_${props.productKey}` },
@@ -420,15 +400,6 @@ export const productSetupLogic = kea<productSetupLogicType>([
                 product: props.productKey,
                 completed_count: values.completedCount,
                 total_count: values.totalTasks,
-            })
-        },
-        openSetupModal: () => {
-            // Attempt to capture whether reverse proxy is enabled
-            actions.loadHasReverseProxy()
-
-            posthog.capture('product setup modal opened', {
-                product: props.productKey,
-                remaining_tasks: values.remainingCount,
             })
         },
     })),

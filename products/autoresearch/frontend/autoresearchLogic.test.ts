@@ -1,6 +1,8 @@
 import { router } from 'kea-router'
 import { expectLogic } from 'kea-test-utils'
 
+import { LemonDialog } from '@posthog/lemon-ui'
+
 import { productSetupStatusLogic } from 'lib/components/ProductEmptyState/productSetupStatusLogic'
 import { FEATURE_FLAGS } from 'lib/constants'
 import { featureFlagLogic } from 'lib/logic/featureFlagLogic'
@@ -15,6 +17,8 @@ import {
     autoresearchList,
     autoresearchPauseCreate,
     autoresearchResumeCreate,
+    autoresearchTrainCreate,
+    autoresearchValidateCreate,
 } from './generated/api'
 import { AutoresearchPipelineApi } from './generated/api.schemas'
 
@@ -23,9 +27,13 @@ jest.mock('./generated/api', () => ({
     autoresearchDestroy: jest.fn(),
     autoresearchPauseCreate: jest.fn(),
     autoresearchResumeCreate: jest.fn(),
+    autoresearchTrainCreate: jest.fn(),
+    autoresearchValidateCreate: jest.fn(),
 }))
 
 const mockList = autoresearchList as jest.Mock
+const mockTrain = autoresearchTrainCreate as jest.Mock
+const mockValidate = autoresearchValidateCreate as jest.Mock
 
 type Settle = { resolve: (value: unknown) => void; reject: (reason: unknown) => void }
 
@@ -59,6 +67,7 @@ describe('autoresearchLogic', () => {
         await expectLogic(logic).toFinishAllListeners()
         expect(statusLogicValues()).toBe('unknown')
         expect(logic.values.pipelinesLoadFailed).toBe(true)
+        expect(logic.values.pipelines).toEqual([])
 
         mockList.mockReturnValue(new Promise(() => {}))
         logic.actions.loadPipelines()
@@ -103,6 +112,7 @@ describe('autoresearchLogic', () => {
         ['deletePipeline', autoresearchDestroy],
         ['pausePipeline', autoresearchPauseCreate],
         ['resumePipeline', autoresearchResumeCreate],
+        ['startTraining', autoresearchTrainCreate],
     ] as const)('sends one %s request while the first is in flight', async (action, apiCall) => {
         mockList.mockResolvedValue({ results: [] })
         ;(apiCall as jest.Mock).mockReturnValue(new Promise(() => {}))
@@ -154,4 +164,47 @@ describe('autoresearchLogic', () => {
         await expectLogic(logic).toFinishAllListeners()
         expect(mockList).toHaveBeenCalledTimes(1)
     })
+
+    it.each([
+        ['a draft that never trained and passes the check', 'draft', 0, { can_proceed: true, error: null }, 1, false],
+        [
+            'a draft that never trained and fails the check',
+            'draft',
+            0,
+            { can_proceed: false, error: 'Validation ran out of time', error_code: 'too_expensive' },
+            0,
+            true,
+        ],
+        ['a draft that trained before', 'draft', 1, null, 1, false],
+        ['a running model', 'running', 3, null, 1, false],
+    ] as const)(
+        'checks %s before Start training, and asks before a run the check failed',
+        async (_, status, trainingRunCount, validation, trainsBeforeConfirm, asks) => {
+            mockList.mockResolvedValue({ results: [] })
+            mockValidate.mockResolvedValue({ warnings: [], error_code: null, ...validation })
+            mockTrain.mockResolvedValue({ id: 'run-1' })
+            const openDialog = jest.spyOn(LemonDialog, 'open').mockImplementation(() => {})
+            const logic = autoresearchLogic()
+            logic.mount()
+            await expectLogic(logic).toFinishAllListeners()
+            const pipeline = {
+                id: 'p1',
+                name: 'Model',
+                status,
+                training_run_count: trainingRunCount,
+            } as unknown as AutoresearchPipelineApi
+
+            logic.actions.requestTraining(pipeline)
+            await expectLogic(logic).toFinishAllListeners()
+
+            expect(mockValidate).toHaveBeenCalledTimes(validation ? 1 : 0)
+            expect(mockTrain).toHaveBeenCalledTimes(trainsBeforeConfirm)
+            expect(openDialog).toHaveBeenCalledTimes(asks ? 1 : 0)
+
+            // Confirming the dialog, when there is one, starts the run the check did not pass.
+            openDialog.mock.calls[0]?.[0].primaryButton?.onClick?.({} as any)
+            await expectLogic(logic).toFinishAllListeners()
+            expect(mockTrain).toHaveBeenCalledTimes(1)
+        }
+    )
 })

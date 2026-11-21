@@ -3,6 +3,7 @@ import { useActions, useValues } from 'kea'
 import { LemonBanner, LemonButton, LemonDialog, Spinner } from '@posthog/lemon-ui'
 
 import { PayGateMini } from 'lib/components/PayGateMini/PayGateMini'
+import { useFeatureFlag } from 'lib/hooks/useFeatureFlag'
 import { pluralize } from 'lib/utils/strings'
 import { userLogic } from 'scenes/userLogic'
 
@@ -11,6 +12,7 @@ import { AvailableFeature } from '~/types'
 import { NOTIFICATION_CONCEPTS } from '../shared/notificationSettingDescriptors'
 import { NotificationConceptRow } from './NotificationConceptRow'
 import { notificationGovernanceLogic } from './notificationGovernanceLogic'
+import { QuillMemberNotifications } from './QuillMemberNotifications'
 
 export function NotificationGovernanceSetting(): JSX.Element {
     const { hasAvailableFeature } = useValues(userLogic)
@@ -30,6 +32,24 @@ function MemberNotifications(): JSX.Element {
     const { members, pendingChangeCount, affectedMemberCount, savingChanges, loadFailed } =
         useValues(notificationGovernanceLogic)
     const { discardChanges, saveChanges, loadMembers } = useActions(notificationGovernanceLogic)
+    const { hasAvailableFeature } = useValues(userLogic)
+    const todayRailNav = useFeatureFlag('TODAY_RAIL_NAV')
+
+    const confirmSave = (): void => {
+        LemonDialog.open({
+            title: 'Save these notification settings?',
+            description: `This changes email notifications for ${pluralize(
+                affectedMemberCount,
+                'member'
+            )}. Everyone affected gets a notification in the app.`,
+            primaryButton: { children: 'Save', onClick: saveChanges },
+            secondaryButton: { children: 'Cancel' },
+        })
+    }
+
+    if (todayRailNav) {
+        return <QuillMemberNotifications onDiscard={discardChanges} onSave={confirmSave} onRetry={loadMembers} />
+    }
 
     if (loadFailed) {
         return (
@@ -56,26 +76,17 @@ function MemberNotifications(): JSX.Element {
         return <p className="text-muted text-sm">This organization has no members yet.</p>
     }
 
-    const confirmSave = (): void => {
-        LemonDialog.open({
-            title: 'Save these notification settings?',
-            description: `This changes email notifications for ${pluralize(
-                affectedMemberCount,
-                'member'
-            )}. Everyone affected gets a notification in the app.`,
-            primaryButton: { children: 'Save', onClick: saveChanges },
-            secondaryButton: { children: 'Cancel' },
-        })
-    }
-
     return (
         <div className="deprecated-space-y-3">
             <LemonBanner type="info">
-                These settings belong to the person rather than to one organization, so an override you set here also
-                applies to that member's other organizations, if they belong to any.
+                An override you set here changes only the emails this organization sends. The member's other
+                organizations still use the member's own choice, which they can't change while your override is in
+                place.
             </LemonBanner>
 
-            {NOTIFICATION_CONCEPTS.map((concept) => (
+            {NOTIFICATION_CONCEPTS.filter(
+                (concept) => !concept.requiredFeature || hasAvailableFeature(concept.requiredFeature)
+            ).map((concept) => (
                 <NotificationConceptRow key={concept.setting} concept={concept} />
             ))}
 

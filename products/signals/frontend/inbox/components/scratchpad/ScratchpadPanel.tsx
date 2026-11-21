@@ -14,9 +14,10 @@ import {
 import { Tooltip } from 'lib/lemon-ui/Tooltip'
 import { pluralize } from 'lib/utils/strings'
 
+import { scoutFleetLogic } from '../../logics/scoutFleetLogic'
 import type { ScratchpadFacet, ScratchpadTimeFilter } from '../../logics/scratchpadLogic'
 import { scratchpadLogic } from '../../logics/scratchpadLogic'
-import { stripScoutPrefix } from '../../utils/scoutRunsWindow'
+import { isPipelineWriter, scoutNameForSkill } from '../../utils/scoutRunsWindow'
 import { BOOKKEEPING_KINDS } from '../../utils/scratchpadKeys'
 import { ScratchpadLedger } from './ScratchpadLedger'
 
@@ -64,6 +65,7 @@ export function ScratchpadPanel(): JSX.Element {
         timeFilter,
         hideBookkeeping,
     } = useValues(scratchpadLogic)
+    const { scoutNamesBySkill } = useValues(scoutFleetLogic)
     const {
         setSearchText,
         setScoutFilter,
@@ -111,7 +113,9 @@ export function ScratchpadPanel(): JSX.Element {
                         facets={scoutFacets}
                         value={scoutFilter}
                         onChange={setScoutFilter}
-                        labelOf={stripScoutPrefix}
+                        labelOf={(skillName) =>
+                            isPipelineWriter(skillName) ? skillName : scoutNameForSkill(scoutNamesBySkill, skillName)
+                        }
                     />
                     <FacetSelect
                         placeholder="Kind: any"
@@ -262,7 +266,7 @@ function ScratchpadHeader({
                 settled on, things they ruled out, and the bookkeeping that keeps them from repeating themselves.
             </p>
             <div className="flex flex-wrap gap-x-6 gap-y-2">
-                {/* The count is what's loaded, not what exists: the endpoint caps at 1,000 newest-first,
+                {/* The count is what's loaded, not what exists: the first page is the newest few hundred,
                     which on a busy project is a few hours. Labelling it with the span it covers is what
                     stops it reading as the whole memory. */}
                 <Stat

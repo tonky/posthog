@@ -16,10 +16,72 @@ from dataclasses import (
 )
 from datetime import date, datetime
 from enum import Enum
-from typing import Any, Literal, TypedDict
+from typing import TYPE_CHECKING, Any, Literal, TypedDict
 from uuid import UUID
 
 from pydantic.dataclasses import dataclass
+
+from posthog.dataclasses import frozen
+
+if TYPE_CHECKING:
+    from posthog.schema import PersonPropertyFilter
+
+
+class PersonAccount(TypedDict):
+    id: str
+    name: str
+
+
+class PersonAccounts(TypedDict):
+    person_id: str
+    accounts: list[PersonAccount]
+
+
+class AccountPersonsPropertyAccessError(Exception):
+    pass
+
+
+@frozen
+class AccountPersonsOptions:
+    limit: int
+    offset: int
+    search: str
+    properties: list[str]
+    filters: list["PersonPropertyFilter"]
+    sort_column: str
+    sort_direction: Literal["asc", "desc"]
+
+
+@frozen
+class AccountPerson:
+    id: str
+    display_name: str
+    distinct_ids: list[str]
+    properties: dict[str, object]
+    account_first_seen: datetime
+    account_last_seen: datetime
+
+
+@frozen
+class AccountPersonsPage:
+    results: list[AccountPerson]
+    columns: list[str]
+    limit: int
+    offset: int
+    has_more: bool
+    next_offset: int | None
+
+
+@frozen
+class AccountAutomation:
+    workflow_id: str
+    workflow_name: str
+    invocation_id: str
+    status: str
+    triggered_at: datetime
+    last_completed_step_at: datetime | None
+    expected_resume_at: datetime | None
+    last_completed_step_name: str | None = None
 
 
 class InvalidCustomPropertyOptions(ValueError):
@@ -53,10 +115,14 @@ class AccountRelationshipDefinition:
     is_controlled: bool = False
 
 
+PinnedAccountPropertyKind = Literal["custom_property", "relationship", "account_field"]
+
+
 @dataclass(frozen=True)
 class PinnedAccountProperty:
-    kind: Literal["custom_property", "relationship"]
-    id: UUID
+    kind: PinnedAccountPropertyKind
+    # A definition UUID for custom properties and relationships, or a field name for account fields.
+    id: str
 
 
 class InvalidPinnedAccountProperties(ValueError):
@@ -227,6 +293,7 @@ class MeetingView:
 
     id: UUID
     title: str
+    is_recurring: bool
     gong_url: str | None
     start_time: datetime
     end_time: datetime | None
@@ -264,6 +331,7 @@ class AccountTableField(str, Enum):
 
 @dataclass(frozen=True, kw_only=True)
 class AccountTableColumnSelection:
+    use_default_columns: bool = False
     account_fields: frozenset[AccountTableField] = frozenset()
     include_tags: bool = False
     include_note_count: bool = False
@@ -527,7 +595,22 @@ class AccountTableRow:
 
 
 @dataclass(frozen=True, kw_only=True)
+class AccountTableCustomPropertyDefinition:
+    id: UUID
+    name: str
+    description: str | None
+    display_type: str
+    is_big_number: bool
+    is_canonical: bool
+    has_workflow_reference: bool
+    source_id: UUID | None
+    options: list[dict[str, str]] | None
+
+
+@dataclass(frozen=True, kw_only=True)
 class AccountTablePage:
+    relationship_definitions: list[AccountRelationshipDefinition] = field(default_factory=list)
+    custom_property_definitions: list[AccountTableCustomPropertyDefinition] = field(default_factory=list)
     rows: list[AccountTableRow]
     has_more: bool
     limit: int
@@ -1200,6 +1283,7 @@ class AccountNotebookView:
     created_by: UserBasicInfo | None = None
     last_modified_at: datetime | None = None
     last_modified_by: UserBasicInfo | None = None
+    tags: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -1215,6 +1299,7 @@ class AccountNoteView:
     account_id: UUID
     account_name: str
     created_by: UserBasicInfo | None = None
+    tags: list[str] = field(default_factory=list)
 
 
 # --- Presentation wave: input contracts for the CRUD write paths ---
@@ -1235,6 +1320,7 @@ class CreateAccountInput:
     tags: list[str] | None = None
     slack_summary_cadence: str | None = None
     churned_at: datetime | None = None
+    ignored_at: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -1252,11 +1338,13 @@ class UpdateAccountInput:
     tags: list[str] | None = None
     slack_summary_cadence: str | None = None
     churned_at: datetime | None = None
+    ignored_at: datetime | None = None
     # Distinguishes omitted fields from fields explicitly set to null.
     external_id_provided: bool = False
     properties_provided: bool = False
     slack_summary_cadence_provided: bool = False
     churned_at_provided: bool = False
+    ignored_at_provided: bool = False
 
 
 @dataclass(frozen=True)
@@ -1272,6 +1360,14 @@ class CreateAccountNotebookInput:
     content: Any
     text_content: str | None
     synthesized_content: Any = None
+    tags: list[str] | None = None
+
+
+@dataclass(frozen=True)
+class UpdateAccountNotebookInput:
+    """Validated body for a partial update of an account notebook. ``None`` leaves the tags untouched."""
+
+    tags: list[str] | None = None
 
 
 @dataclass(frozen=True)
@@ -1284,6 +1380,17 @@ class CustomPropertyValue:
     value: float | bool | str | datetime | None
     created_at: datetime
     created_by_id: int | None
+
+
+@dataclass(frozen=True)
+class CustomPropertyValueHistoryEntry:
+    """One value an account held for a custom property, and when it held it."""
+
+    value: float | bool | str | datetime | None
+    set_at: datetime
+    set_by_id: int | None
+    replaced_at: datetime | None
+    is_current: bool
 
 
 class ExternalAccountCustomPropertiesError(Enum):
@@ -1393,6 +1500,10 @@ class CustomerTaskAssigneeCannotViewAccount(Exception):
     pass
 
 
+class CustomerTaskRoleNotFound(Exception):
+    pass
+
+
 class CustomerTaskInvalidTransition(Exception):
     def __init__(self, current: str, requested: str) -> None:
         self.current = current
@@ -1404,7 +1515,15 @@ class CustomerTaskArchived(Exception):
     pass
 
 
+class CustomerTaskTagLimitExceeded(Exception):
+    pass
+
+
 class CustomerTaskAccessDenied(Exception):
+    pass
+
+
+class CustomerTaskBulkUpdateConflict(Exception):
     pass
 
 
@@ -1439,6 +1558,7 @@ class CustomerTaskView:
     updated_at: datetime
     can_edit: bool
     can_restore: bool
+    tags: list[str]
 
 
 @stdlib_dataclass(frozen=True)
@@ -1462,12 +1582,14 @@ class CustomerTaskListFilters:
     search: str | None = None
     account_id: UUID | None = None
     assigned_to: str | None = None
+    assigned_role_id: UUID | None = None
     statuses: tuple[str, ...] = ()
     archive_state: str = "active"
     due_after: datetime | None = None
     due_before: datetime | None = None
     has_due_at: bool | None = None
     ordering: str | None = None
+    tags: tuple[str, ...] = ()
 
 
 @stdlib_dataclass(frozen=True)
@@ -1478,6 +1600,7 @@ class CreateCustomerTaskInput:
     assigned_to_id: int | None = None
     due_at: datetime | None = None
     status: str = "open"
+    tags: tuple[str, ...] = ()
 
 
 @stdlib_dataclass(frozen=True)
@@ -1494,3 +1617,17 @@ class UpdateCustomerTaskInput:
     assigned_to_id_provided: bool = False
     due_at_provided: bool = False
     status_provided: bool = False
+    tags: tuple[str, ...] = ()
+    tags_provided: bool = False
+    tags_mode: str = "set"
+
+
+@dataclass(frozen=True)
+class KeyMetric:
+    key: str
+    name: str
+    people: bool
+    daily: list[tuple[date, float]]
+    this_week: float
+    last_week: float
+    node: dict[str, Any]

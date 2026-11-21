@@ -56,6 +56,7 @@ for var in GITHUB_REPOSITORY GITHUB_REF_NAME GITHUB_REF GITHUB_HEAD_REF GITHUB_B
 done
 
 if [ -x "$root/.venv/bin/python" ]; then
+    export PATH="$root/.venv/bin:$PATH"
     pytest_cmd=("$root/.venv/bin/python" -m pytest)
 else
     pytest_cmd=(uv run --no-sync pytest)

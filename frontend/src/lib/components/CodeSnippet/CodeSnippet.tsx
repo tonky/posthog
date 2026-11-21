@@ -6,10 +6,12 @@ import React, { Suspense, lazy, useState } from 'react'
 import { IconCollapse, IconCopy, IconExpand } from '@posthog/icons'
 
 import { LemonButton } from 'lib/lemon-ui/LemonButton'
+import { useQuillSurface } from 'lib/ui/QuillSurface/quillSurfaceContext'
 import { copyToClipboard } from 'lib/utils/copyToClipboard'
 import { retryImport } from 'lib/utils/retryImport'
 
 import { PlainCodeLine } from './PlainCodeLine'
+import { QuillCodeSnippet } from './QuillCodeSnippet'
 
 // highlight.js grammars are large, and markdown renders code snippets on pages that every
 // logged-in user loads. Show the plain text first and add the highlighting when it arrives.
@@ -57,18 +59,23 @@ export enum Language {
 export const getLanguage = (lang: string): Language => {
     switch (lang) {
         case 'bash':
+        case 'sh':
+        case 'shell':
             return Language.Bash
         case 'csharp':
             return Language.CSharp
         case 'javascript':
+        case 'js':
         case 'jsx':
             return Language.JavaScript
         case 'typescript':
+        case 'ts':
         case 'tsx':
             return Language.TypeScript
         case 'java':
             return Language.Java
         case 'ruby':
+        case 'rb':
             return Language.Ruby
         case 'objectivec':
             return Language.ObjectiveC
@@ -79,6 +86,7 @@ export const getLanguage = (lang: string): Language => {
         case 'php':
             return Language.PHP
         case 'python':
+        case 'py':
             return Language.Python
         case 'dart':
             return Language.Dart
@@ -87,6 +95,7 @@ export const getLanguage = (lang: string): Language => {
         case 'json':
             return Language.JSON
         case 'yaml':
+        case 'yml':
             return Language.YAML
         case 'html':
             return Language.HTML
@@ -153,6 +162,7 @@ export const CodeSnippet = React.memo(function CodeSnippet({
     onCopy,
 }: CodeSnippetProps): JSX.Element | null {
     const [expanded, setExpanded] = useState(false)
+    const quillSurface = useQuillSurface()
 
     // These all derive from props, so compute them during render rather than mirroring props into
     // state via a useEffect (https://react.dev/learn/you-might-not-need-an-effect).
@@ -164,6 +174,41 @@ export const CodeSnippet = React.memo(function CodeSnippet({
         return null
     }
 
+    const copyText = (e: React.MouseEvent): void => {
+        if (text) {
+            e.stopPropagation()
+            // Only report a copy the user actually got: copyToClipboard resolves
+            // false when the clipboard is unavailable (no navigator.clipboard over
+            // plain HTTP) or the write is denied, and callers treat onCopy as
+            // evidence of a successful copy.
+            void copyToClipboard(text, thing).then((copied) => {
+                if (copied) {
+                    onCopy?.()
+                }
+            })
+        }
+    }
+
+    const expandLabel = expanded
+        ? `Collapse to ${maxLinesWithoutExpansion!} lines`
+        : `Show ${lineCount - maxLinesWithoutExpansion!} more lines`
+
+    if (quillSurface) {
+        return (
+            <QuillCodeSnippet
+                className={className}
+                actions={actions}
+                onCopy={copyText}
+                expandable={indexOfLimitNewline !== -1}
+                expanded={expanded}
+                expandLabel={expandLabel}
+                onToggleExpanded={() => setExpanded(!expanded)}
+            >
+                <CodeLine text={displayedText} language={language} wrapLines={wrap} />
+            </QuillCodeSnippet>
+        )
+    }
+
     return (
         <div className={clsx('CodeSnippet', compact && 'CodeSnippet--compact', className)}>
             <div className="CodeSnippet__actions">
@@ -171,20 +216,7 @@ export const CodeSnippet = React.memo(function CodeSnippet({
                 <LemonButton
                     data-attr="copy-code-button"
                     icon={<IconCopy />}
-                    onClick={(e) => {
-                        if (text) {
-                            e.stopPropagation()
-                            // Only report a copy the user actually got: copyToClipboard resolves
-                            // false when the clipboard is unavailable (no navigator.clipboard over
-                            // plain HTTP) or the write is denied, and callers treat onCopy as
-                            // evidence of a successful copy.
-                            void copyToClipboard(text, thing).then((copied) => {
-                                if (copied) {
-                                    onCopy?.()
-                                }
-                            })
-                        }
-                    }}
+                    onClick={copyText}
                     size={compact ? 'small' : 'medium'}
                     noPadding
                     tooltip="Copy to clipboard"
@@ -201,9 +233,7 @@ export const CodeSnippet = React.memo(function CodeSnippet({
                     icon={expanded ? <IconCollapse /> : <IconExpand />}
                     className="mt-1 mb-0"
                 >
-                    {expanded
-                        ? `Collapse to ${maxLinesWithoutExpansion!} lines`
-                        : `Show ${lineCount - maxLinesWithoutExpansion!} more lines`}
+                    {expandLabel}
                 </LemonButton>
             )}
         </div>

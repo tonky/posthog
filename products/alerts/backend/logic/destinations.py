@@ -3,24 +3,26 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Collection
+from collections.abc import Callable, Collection, Sequence
 from datetime import datetime
 from typing import Any, NamedTuple, cast
 from uuid import UUID
 
 from django.db import transaction
-from django.db.models import Q, QuerySet
+from django.db.models import BooleanField, F, Func, JSONField, Q, QuerySet, Value
 
 import structlog
 import posthoganalytics
 from prometheus_client import Counter
+from rest_framework.exceptions import ValidationError as DRFValidationError
 
-from posthog.cdp.internal_events import InternalEventEvent, flush_internal_events_producer, produce_internal_event
 from posthog.exceptions_capture import capture_exception
 from posthog.kafka_client.client import ProduceResult
 from posthog.plugins.plugin_server_api import reload_hog_functions_on_workers
 
-from products.alerts.backend.logic.destination_configs import SPEC_BY_TEMPLATE_ID, url_hostname
+from products.alerts.backend.facade.contracts import AlertInternalEvent, AlertInternalEventsNotDelivered
+from products.alerts.backend.logic.destination_configs import SPEC_BY_TEMPLATE_ID, _WebhookUrlDestination, url_hostname
+from products.alerts.backend.logic.insight_alert_destinations import with_secret_inputs
 from products.alerts_platform.backend.facade.contracts import (
     ActiveAlertDestination,
     AlertDestinationConfig,
@@ -30,7 +32,12 @@ from products.alerts_platform.backend.facade.contracts import (
     OwnedAlertDestination,
 )
 from products.cdp.backend.facade.api import create_hog_functions
-from products.cdp.backend.facade.models import HogFunction
+from products.cdp.backend.facade.models import HogFunction, HogFunctionType
+from products.cdp.backend.internal_events import (
+    InternalEventEvent,
+    flush_internal_events_producer,
+    produce_internal_event,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -56,13 +63,31 @@ class AlertDestinationRow(NamedTuple):
     inputs: dict[str, Any] | None
 
 
+def stored_inputs(inputs: dict[str, Any] | None, encrypted_inputs: dict[str, Any] | None) -> dict[str, Any]:
+    """The inputs a destination was built with. A HogFunction keeps its secret inputs in a
+    separate encrypted column, and a read that tells destinations apart needs them back."""
+    return {**(inputs or {}), **(encrypted_inputs or {})}
+
+
 def alert_destination_group_key(*, template_id: str, inputs: dict[str, Any] | None) -> AlertDestinationGroupKey:
     spec = SPEC_BY_TEMPLATE_ID.get(template_id)
     if spec is None:
         return AlertDestinationGroupKey(template_id, None)
     data = spec.read(inputs or {})
-    config = {key: value for key, value in data.items() if key != "type"}
+    config = {key: _hashable(value) for key, value in data.items() if key != "type"}
     return AlertDestinationGroupKey(template_id, tuple(sorted(config.items())) if config else None)
+
+
+class _FrozenMapping(tuple):
+    """A dict value, such as added webhook headers, held as sorted pairs so a group key stays hashable."""
+
+
+def _hashable(value: Any) -> Any:
+    return _FrozenMapping(sorted(value.items())) if isinstance(value, dict) else value
+
+
+def _thawed(value: Any) -> Any:
+    return dict(value) if isinstance(value, _FrozenMapping) else value
 
 
 def group_alert_destination_rows(rows: Collection[AlertDestinationRow]) -> dict[AlertDestinationGroupKey, set[UUID]]:
@@ -89,18 +114,23 @@ def list_alert_destination_groups(
     raw_rows = list(
         owned_alert_destinations_qs(team_id=team_id, alert_ids=[alert_id], allowed_event_ids=allowed_event_ids)
         .order_by("created_at", "id")
-        .values_list("id", "template_id", "inputs", "enabled")
+        .values_list("id", "template_id", "inputs", "encrypted_inputs", "enabled")
     )
-    rows = [AlertDestinationRow(row_id, template_id, inputs) for row_id, template_id, inputs, _ in raw_rows]
+    rows = [
+        AlertDestinationRow(row_id, template_id, stored_inputs(inputs, encrypted_inputs))
+        for row_id, template_id, inputs, encrypted_inputs, _ in raw_rows
+    ]
     grouped_ids = group_alert_destination_rows(rows)
-    enabled_by_id = {row_id: enabled for row_id, _, _, enabled in raw_rows}
+    enabled_by_id = {row_id: enabled for row_id, _, _, _, enabled in raw_rows}
 
     groups: list[AlertDestinationGroup] = []
     for key, ids in grouped_ids.items():
         spec = SPEC_BY_TEMPLATE_ID.get(key.template_id)
         if spec is None:
             continue
-        data = cast(AlertDestinationData, {"type": spec.type, **dict(key.config or ())})
+        data = cast(
+            AlertDestinationData, {"type": spec.type, **{name: _thawed(value) for name, value in key.config or ()}}
+        )
         groups.append(
             AlertDestinationGroup(
                 hog_function_ids=tuple(sorted(ids)),
@@ -112,17 +142,62 @@ def list_alert_destination_groups(
 
 
 def owned_alert_destinations_qs(
-    *, team_id: int, alert_ids: Collection[str], allowed_event_ids: Collection[str]
+    *,
+    team_id: int,
+    alert_ids: Collection[str],
+    allowed_event_ids: Collection[str],
+    known_templates_only: bool = True,
 ) -> QuerySet[HogFunction]:
     alert_id_filter = Q(pk__in=[])
     for alert_id in alert_ids:
         alert_id_filter |= Q(filters__properties__contains=[{"key": "alert_id", "value": alert_id}])
-    return HogFunction.objects.filter(
+    functions = HogFunction.objects.filter(
         alert_id_filter,
         _allowed_event_filter(allowed_event_ids),
         team_id=team_id,
         deleted=False,
-        template_id__in=SPEC_BY_TEMPLATE_ID,
+    )
+    return functions.filter(template_id__in=SPEC_BY_TEMPLATE_ID) if known_templates_only else functions
+
+
+def live_hog_function_ids(*, team_id: int, hog_function_ids: Collection[UUID]) -> frozenset[UUID]:
+    """The named HogFunctions that are not deleted, whatever their filters say."""
+    return frozenset(
+        HogFunction.objects.filter(team_id=team_id, id__in=list(hog_function_ids), deleted=False).values_list(
+            "id", flat=True
+        )
+    )
+
+
+def terraform_read_hog_function_ids(*, team_id: int, hog_function_ids: Collection[UUID]) -> frozenset[UUID]:
+    """The HogFunctions that a Terraform state has read at least once, so a state may still manage them."""
+    return frozenset(
+        HogFunction.objects.filter(
+            team_id=team_id, id__in=list(hog_function_ids), last_terraform_read_at__isnull=False
+        ).values_list("id", flat=True)
+    )
+
+
+def owned_alert_destination_ids(
+    *, team_id: int, alert_id: str, allowed_event_ids: Collection[str], hog_function_ids: Collection[UUID]
+) -> frozenset[UUID]:
+    """The named HogFunctions that are destinations of this alert, without reading their inputs."""
+    return frozenset(
+        owned_alert_destinations_qs(team_id=team_id, alert_ids=[alert_id], allowed_event_ids=allowed_event_ids)
+        .filter(pk__in=list(hog_function_ids))
+        .values_list("id", flat=True)
+    )
+
+
+def lock_alert_destinations(*, team_id: int, alert_id: str, allowed_event_ids: Collection[str]) -> None:
+    """Locks the alert's HogFunction destinations until the caller's transaction ends, so an edit
+    through the HogFunction API waits instead of landing between a read and a write."""
+    list(
+        owned_alert_destinations_qs(
+            team_id=team_id, alert_ids=[alert_id], allowed_event_ids=allowed_event_ids, known_templates_only=False
+        )
+        .select_for_update()
+        .values_list("id", flat=True)
     )
 
 
@@ -170,12 +245,59 @@ def configured_destination_template_ids(
     return frozenset(cast(Collection[str], template_ids))
 
 
+# An `alert_id` condition on event properties. A person or group condition reads other
+# properties, so it neither binds nor excludes the alert. A missing or null type is an event
+# filter, and a missing or null operator is `exact`, as the consumer reads them.
+_EVENT_ALERT_ID = '@.key == "alert_id" && (!(exists(@.type)) || @.type == null || @.type == "event")'
+_EXACT_OPERATOR = '(!(exists(@.operator)) || @.operator == null || @.operator == "exact")'
+# The consumer compares a list value by membership, and treats an empty list as no filter.
+_VALUE_IS_AN_ID = '(@.value.type() == "string" || (@.value.type() == "array" && exists(@.value[*])))'
+_VALUE_MATCHES_THIS_ALERT = (
+    '((@.value.type() == "string" && @.value == $alert_id)'
+    ' || (@.value.type() == "array" && exists(@.value[*] ? (@ == $alert_id))))'
+)
+# Only a single string id binds a function to one alert.
+_BOUND_TO_THIS_ALERT_PATH = (
+    f'$.properties[*] ? ({_EVENT_ALERT_ID} && {_EXACT_OPERATOR} && @.value.type() == "string" && @.value == $alert_id)'
+)
+# The consumer ANDs every property filter, so a second alert_id condition that this alert fails
+# (exact on other ids, or `is_not` this one) means the function never runs for it. Conditions
+# this alert passes, such as `is_not` another id, are kept.
+_EXCLUDES_THIS_ALERT_PATH = (
+    f"$.properties[*] ? ({_EVENT_ALERT_ID} && (({_EXACT_OPERATOR} && {_VALUE_IS_AN_ID}"
+    f' && !{_VALUE_MATCHES_THIS_ALERT}) || (@.operator == "is_not" && {_VALUE_MATCHES_THIS_ALERT})))'
+)
+
+
+def _alert_id_path_exists(path: str, alert_id: str) -> Func:
+    return Func(
+        F("filters"),
+        Value(path),
+        Value({"alert_id": alert_id}, output_field=JSONField()),
+        function="jsonb_path_exists",
+        output_field=BooleanField(),
+    )
+
+
 def _active_alert_destinations_qs(
     *, team_id: int, alert_id: str, allowed_event_ids: Collection[str]
 ) -> QuerySet[HogFunction]:
-    return owned_alert_destinations_qs(
-        team_id=team_id, alert_ids=[alert_id], allowed_event_ids=allowed_event_ids
-    ).filter(enabled=True)
+    return (
+        owned_alert_destinations_qs(
+            team_id=team_id, alert_ids=[alert_id], allowed_event_ids=allowed_event_ids, known_templates_only=False
+        )
+        .annotate(
+            bound_to_this_alert=_alert_id_path_exists(_BOUND_TO_THIS_ALERT_PATH, alert_id),
+            excludes_this_alert=_alert_id_path_exists(_EXCLUDES_THIS_ALERT_PATH, alert_id),
+        )
+        .filter(
+            bound_to_this_alert=True,
+            excludes_this_alert=False,
+            type="internal_destination",
+            filters__source="internal-events",
+            enabled=True,
+        )
+    )
 
 
 def _raise_if_alert_already_has_these_destination_configs(
@@ -196,11 +318,12 @@ def _raise_if_alert_already_has_these_destination_configs(
     stored_rows = (
         owned_alert_destinations_qs(team_id=team_id, alert_ids=[alert_id], allowed_event_ids=allowed_event_ids)
         .filter(template_id__in={key.template_id for key in readable_keys})
-        .values_list("template_id", "inputs")
+        .values_list("template_id", "inputs", "encrypted_inputs")
     )
     if any(
-        alert_destination_group_key(template_id=template_id or "", inputs=inputs) in readable_keys
-        for template_id, inputs in stored_rows
+        alert_destination_group_key(template_id=template_id or "", inputs=stored_inputs(inputs, encrypted_inputs))
+        in readable_keys
+        for template_id, inputs, encrypted_inputs in stored_rows
     ):
         raise AlertDestinationValidationError("This destination is already configured for this alert.")
 
@@ -209,7 +332,7 @@ def create_alert_destination_hog_functions(
     configs: list[AlertDestinationConfig],
     *,
     team_id: int,
-    created_by_id: int,
+    created_by_id: int | None,
     alert_id: str,
     allowed_event_ids: Collection[str],
 ) -> tuple[UUID, ...]:
@@ -234,6 +357,56 @@ def create_alert_destination_hog_functions(
         )
         _reload_hog_functions_after_commit(team_id=team_id, hog_function_ids=created_ids)
     return tuple(created_ids)
+
+
+def rebuild_source_destination_hog_functions(
+    *,
+    team_id: int,
+    alert_id: UUID,
+    created_by_id: int | None,
+    allowed_event_ids: Collection[str],
+    build_configs: Callable[[AlertDestinationData], Sequence[AlertDestinationConfig]],
+) -> tuple[UUID, ...]:
+    """Gives every `AlertDestination` row of the alert that no live HogFunction stands behind the
+    HogFunctions its source's route would create for it, and links the row to them. Returns the rows
+    rebuilt. Call it in the caller's transaction, because a refused row raises
+    `AlertDestinationValidationError` after earlier rows were written."""
+    # The platform facade pulls the query stack, and `AppConfig.ready()` loads this module.
+    from products.alerts_platform.backend.facade.api import (  # noqa: PLC0415
+        link_source_destination,
+        source_destinations_without_hog_functions,
+    )
+
+    rebuilt: list[UUID] = []
+    for destination in source_destinations_without_hog_functions(team_id=team_id, public_id=alert_id):
+        # A row delivery disabled stays off on the source too, rather than sending again after the handback.
+        configs = [
+            AlertDestinationConfig(payload=_with_secret_url({**config.payload, "enabled": destination.enabled}))
+            for config in build_configs(destination.data)
+        ]
+        try:
+            hog_function_ids = create_alert_destination_hog_functions(
+                configs,
+                team_id=team_id,
+                created_by_id=created_by_id,
+                alert_id=str(alert_id),
+                allowed_event_ids=allowed_event_ids,
+            )
+        except DRFValidationError as error:
+            raise AlertDestinationValidationError(str(error.detail)) from error
+        link_source_destination(team_id=team_id, destination_id=destination.id, hog_function_ids=hog_function_ids)
+        rebuilt.append(destination.id)
+    return tuple(rebuilt)
+
+
+def _with_secret_url(payload: dict[str, Any]) -> dict[str, Any]:
+    """The row keeps a URL destination's address encrypted, and the URL is the channel's credential.
+    Marking it secret stores it in `encrypted_inputs` and masks it in the HogFunction API, as the insight
+    URL route does. A builder that already sets a schema keeps it."""
+    spec = SPEC_BY_TEMPLATE_ID.get(payload.get("template_id", ""))
+    if not isinstance(spec, _WebhookUrlDestination) or "inputs_schema" in payload:
+        return payload
+    return {**payload, "inputs_schema": with_secret_inputs(spec.template_id, spec.address_input_keys)}
 
 
 def _report_unreadable_destination_configs(
@@ -272,16 +445,18 @@ def soft_delete_alert_destinations(
     alert_id: str,
     allowed_event_ids: Collection[str],
     hog_function_ids: list[UUID],
-) -> None:
+) -> dict[UUID, str | None]:
+    """Soft-deletes the alert's destinations among `hog_function_ids`, and returns each one's
+    destination type, None for a template no destination type matches."""
     unique_ids = set(hog_function_ids)
     with transaction.atomic():
         owned_rows = [
-            AlertDestinationRow(*row)
-            for row in owned_alert_destinations_qs(
+            AlertDestinationRow(row_id, template_id, stored_inputs(inputs, encrypted_inputs))
+            for row_id, template_id, inputs, encrypted_inputs in owned_alert_destinations_qs(
                 team_id=team_id, alert_ids=[alert_id], allowed_event_ids=allowed_event_ids
             )
             .select_for_update()
-            .values_list("id", "template_id", "inputs")
+            .values_list("id", "template_id", "inputs", "encrypted_inputs")
         ]
         owned_ids = {row.hog_function_id for row in owned_rows}
         invalid_ids = unique_ids - owned_ids
@@ -306,6 +481,45 @@ def soft_delete_alert_destinations(
 
         HogFunction.objects.filter(team_id=team_id, id__in=unique_ids).update(deleted=True, enabled=False)
         _reload_hog_functions_after_commit(team_id=team_id, hog_function_ids=unique_ids)
+    return {
+        row.hog_function_id: spec.type.value
+        if row.template_id and (spec := SPEC_BY_TEMPLATE_ID.get(row.template_id))
+        else None
+        for row in owned_rows
+        if row.hog_function_id in unique_ids
+    }
+
+
+def retire_alert_hog_functions(*, team_id: int, alert_id: str) -> None:
+    """Switches off and soft-deletes every HogFunction destination of a deleted alert, whatever its events."""
+    for hog_function in HogFunction.objects.filter(
+        team_id=team_id,
+        type=HogFunctionType.INTERNAL_DESTINATION,
+        deleted=False,
+        filters__contains={"properties": [{"key": "alert_id", "value": alert_id}]},
+    ):
+        # nosemgrep: insight-alert-state-direct-mutation (writes HogFunction.enabled, not the alert's state)
+        hog_function.enabled = False
+        hog_function.deleted = True
+        hog_function.save()
+
+
+def retire_linked_hog_functions(*, team_id: int, alert_id: UUID, hog_function_ids: Collection[UUID]) -> None:
+    """Switches off and soft-deletes the named HogFunctions of one alert, whatever their events. One
+    that filters on another alert is left alone, so a row cannot retire a function it does not send for."""
+    retired = set(
+        HogFunction.objects.filter(
+            team_id=team_id,
+            id__in=list(hog_function_ids),
+            type=HogFunctionType.INTERNAL_DESTINATION,
+            deleted=False,
+            filters__properties__contains=[{"key": "alert_id", "value": str(alert_id)}],
+        )
+        .select_for_update()
+        .values_list("id", flat=True)
+    )
+    HogFunction.objects.filter(team_id=team_id, id__in=retired).update(deleted=True, enabled=False)
+    _reload_hog_functions_after_commit(team_id=team_id, hog_function_ids=retired)
 
 
 def soft_delete_all_alert_destinations(*, team_id: int, alert_id: str, allowed_event_ids: Collection[str]) -> int:
@@ -335,6 +549,55 @@ def count_active_alert_destinations(*, team_id: int, alert_id: str, allowed_even
     return _active_alert_destinations_qs(
         team_id=team_id, alert_id=alert_id, allowed_event_ids=allowed_event_ids
     ).count()
+
+
+def active_alert_destination_counts(
+    *, team_id: int, alert_ids: Collection[str], allowed_event_ids: Collection[str]
+) -> dict[str, int]:
+    """`count_active_alert_destinations` for a page of alerts, in one read of the functions' filters."""
+    counts: dict[str, int] = {}
+    functions = (
+        owned_alert_destinations_qs(
+            team_id=team_id, alert_ids=alert_ids, allowed_event_ids=allowed_event_ids, known_templates_only=False
+        )
+        .filter(type="internal_destination", filters__source="internal-events", enabled=True)
+        .values_list("filters", flat=True)
+    )
+    for filters in functions:
+        bound = _bound_alert_id(filters)
+        if bound is not None and bound in alert_ids:
+            counts[bound] = counts.get(bound, 0) + 1
+    return counts
+
+
+def _bound_alert_id(filters: Any) -> str | None:
+    """The one alert a function's event filters bind it to, read as `_BOUND_TO_THIS_ALERT_PATH` and
+    `_EXCLUDES_THIS_ALERT_PATH` do: one exact string id, which no other condition rules out."""
+    properties = filters.get("properties") if isinstance(filters, dict) else None
+    exact: set[str] = set()
+    within: list[set[str]] = []
+    excluded: set[str] = set()
+    for condition in properties if isinstance(properties, list) else ():
+        if not isinstance(condition, dict) or condition.get("key") != "alert_id":
+            continue
+        if condition.get("type") not in (None, "event"):
+            continue
+        value = condition.get("value")
+        values = {item for item in value if isinstance(item, str)} if isinstance(value, list) else set()
+        operator = condition.get("operator")
+        if operator in (None, "exact"):
+            if isinstance(value, str):
+                exact.add(value)
+            elif values:
+                within.append(values)
+        elif operator == "is_not":
+            excluded |= {value} if isinstance(value, str) else values
+    if len(exact) != 1:
+        return None
+    (bound,) = exact
+    if bound in excluded or any(bound not in allowed for allowed in within):
+        return None
+    return bound
 
 
 # Webhook-style destination names embed the full webhook URL, whose path is a channel
@@ -393,7 +656,8 @@ def _allowed_event_filter(allowed_event_ids: Collection[str]) -> Q:
 
     event_filter = Q()
     for event_id in allowed_event_ids:
-        event_filter |= Q(filters__events__contains=[{"id": event_id, "type": "events"}])
+        # `type` is optional in a stored filter, and the internal events consumer matches on the id alone.
+        event_filter |= Q(filters__events__contains=[{"id": event_id}])
     return event_filter
 
 
@@ -413,7 +677,9 @@ def produce_alert_internal_event(
     properties: dict[str, Any],
     timestamp: datetime | None = None,
     uuid: str | None = None,
+    alert_id: str | None = None,
 ) -> ProduceResult | None:
+    """`alert_id` names the alert in a failure report, for an event that carries it under another property."""
     try:
         return produce_internal_event(
             team_id=team_id,
@@ -427,7 +693,7 @@ def produce_alert_internal_event(
         )
     except Exception as error:
         context = {
-            "alert_id": properties.get("alert_id"),
+            "alert_id": alert_id or properties.get("alert_id"),
             "event_name": event_name,
             "feature": "alerts",
             "team_id": team_id,
@@ -468,3 +734,34 @@ def alert_internal_event_delivered(
         ALERT_INTERNAL_EVENT_DELIVERY_FAILURES.labels(event_name=event_name).inc()
         logger.warning("Alert internal event was not delivered", error=str(error), **context)
         return False
+
+
+def emit_alert_internal_events(
+    *, team_id: int, alert_id: str, events: Sequence[AlertInternalEvent], flush_timeout_seconds: float
+) -> None:
+    """Produce the events and return once the broker took all of them. Raise otherwise."""
+    pending = [
+        (
+            event.event_name,
+            produce_alert_internal_event(
+                team_id=team_id,
+                event_name=event.event_name,
+                properties=event.properties,
+                timestamp=event.timestamp,
+                uuid=event.uuid,
+                alert_id=alert_id,
+            ),
+        )
+        for event in events
+    ]
+    if not pending:
+        return
+    flush_alert_internal_events(flush_timeout_seconds)
+    undelivered = [
+        event_name
+        for event_name, result in pending
+        if result is None
+        or not alert_internal_event_delivered(result, team_id=team_id, alert_id=alert_id, event_name=event_name)
+    ]
+    if undelivered:
+        raise AlertInternalEventsNotDelivered(f"{len(undelivered)} of {len(pending)} alert events were not delivered")

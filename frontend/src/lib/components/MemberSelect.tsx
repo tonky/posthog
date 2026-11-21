@@ -1,14 +1,17 @@
 import { useActions, useValues } from 'kea'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
 import { LemonButton, LemonButtonProps, LemonDropdown, LemonDropdownProps, LemonInput } from '@posthog/lemon-ui'
 
+import { quillButtonVariant } from 'lib/lemon-ui/LemonButton/quillButtonVariant'
+import { useQuillSurface } from 'lib/ui/QuillSurface/quillSurfaceContext'
 import { fullName } from 'lib/utils/strings'
-import { membersLogic } from 'scenes/organization/membersLogic'
 
+import { membersLogic } from '~/models/membersLogic'
 import { UserBasicType } from '~/types'
 
 import { MemberSelectOptions } from './MemberSelectOptions'
+import { QuillMemberSelect } from './QuillMemberSelect'
 
 export type MemberSelectProps = {
     defaultLabel?: string
@@ -43,6 +46,7 @@ export function MemberSelect({
     const { ensureAllMembersLoaded, setSearch } = useActions(membersLogic)
     const [showPopover, setShowPopover] = useState(false)
     const [optionSearch, setOptionSearch] = useState('')
+    const quillSurface = useQuillSurface()
     const searchValue = options ? optionSearch : search
 
     const changeSearch = (query: string): void => {
@@ -62,6 +66,14 @@ export function MemberSelect({
         }
         return meFirstMembers.find((member) => member.user[propToCompare] === value)?.user ?? null
     }, [value, meFirstMembers, propToCompare])
+
+    // Load members when a value is set even before the popover opens, so a value pre-populated
+    // from the URL resolves to a name rather than falling back to the default label.
+    useEffect(() => {
+        if (value && !selectedMemberAsUser && !options) {
+            ensureAllMembersLoaded()
+        }
+    }, [value]) // oxlint-disable-line react-hooks/exhaustive-deps
 
     const handleVisibilityChange = (visible: boolean): void => {
         setShowPopover(visible)
@@ -86,6 +98,32 @@ export function MemberSelect({
     }
 
     const members = showPopover && !options ? selectableMembers(excludedMembers, propToCompare) : []
+
+    // A custom trigger is Lemon markup, so those callers keep the Lemon dropdown.
+    if (quillSurface && !children) {
+        return (
+            <QuillMemberSelect
+                open={showPopover}
+                onOpenChange={handleVisibilityChange}
+                searchValue={searchValue}
+                onSearchChange={changeSearch}
+                members={members}
+                options={options}
+                optionsLoading={optionsLoading}
+                membersLoading={membersLoading}
+                extraOptions={extraOptions}
+                allowNone={allowNone}
+                defaultLabel={defaultLabel}
+                currentUserUuid={me?.user.uuid}
+                selectedUser={selectedMemberAsUser}
+                onChange={_onChange}
+                onSelectOption={onSelectOption}
+                onClose={closeAfterSelection}
+                variant={quillButtonVariant(buttonProps.type ?? 'secondary')}
+            />
+        )
+    }
+
     return (
         <LemonDropdown
             closeOnClickInside={false}

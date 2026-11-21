@@ -1,7 +1,11 @@
+from typing import TYPE_CHECKING
+
 from .coordinator import (
     BusinessKnowledgeIngestSourceWorkflow,
     BusinessKnowledgeRefreshCoordinatorWorkflow,
+    BusinessKnowledgeRefreshCoordinatorWorkflowV2,
     BusinessKnowledgeRefreshSourceWorkflow,
+    claim_refresh_source_activity,
     classify_pending_documents_activity,
     emit_pending_embeddings_activity,
     execute_refresh_knowledge_source_activity,
@@ -10,6 +14,7 @@ from .coordinator import (
     reconcile_embeddings_activity,
     refresh_aging_embeddings_activity,
     refresh_knowledge_source_activity,
+    release_failed_source_activity,
     sweep_tombstoned_documents_activity,
 )
 from .learning.activities.analyze import analyze_learning_evidence_activity
@@ -17,15 +22,19 @@ from .learning.activities.collect import collect_learning_evidence_activity
 from .learning.coordinator import BusinessKnowledgeLearningCoordinatorWorkflow
 from .learning.workflow import BusinessKnowledgeLearningWorkflow
 
+if TYPE_CHECKING:
+    from posthog.temporal.common.registration import ActivityDefinition
+
 WORKFLOWS = [
     BusinessKnowledgeRefreshCoordinatorWorkflow,
+    BusinessKnowledgeRefreshCoordinatorWorkflowV2,
     BusinessKnowledgeIngestSourceWorkflow,
     BusinessKnowledgeRefreshSourceWorkflow,
     BusinessKnowledgeLearningCoordinatorWorkflow,
     BusinessKnowledgeLearningWorkflow,
 ]
 
-ACTIVITIES = [
+ACTIVITIES: list[ActivityDefinition] = [
     sweep_tombstoned_documents_activity,
     classify_pending_documents_activity,
     reconcile_embeddings_activity,
@@ -33,8 +42,10 @@ ACTIVITIES = [
     refresh_aging_embeddings_activity,
     list_due_refresh_sources_activity,
     refresh_knowledge_source_activity,
+    claim_refresh_source_activity,
     execute_refresh_knowledge_source_activity,
     ingest_knowledge_source_activity,
+    release_failed_source_activity,
     collect_learning_evidence_activity,
     analyze_learning_evidence_activity,
 ]
@@ -46,7 +57,9 @@ __all__ = [
     "BusinessKnowledgeLearningCoordinatorWorkflow",
     "BusinessKnowledgeLearningWorkflow",
     "BusinessKnowledgeRefreshCoordinatorWorkflow",
+    "BusinessKnowledgeRefreshCoordinatorWorkflowV2",
     "BusinessKnowledgeRefreshSourceWorkflow",
+    "claim_refresh_source_activity",
     "classify_pending_documents_activity",
     "collect_learning_evidence_activity",
     "analyze_learning_evidence_activity",
@@ -57,5 +70,6 @@ __all__ = [
     "reconcile_embeddings_activity",
     "refresh_aging_embeddings_activity",
     "refresh_knowledge_source_activity",
+    "release_failed_source_activity",
     "sweep_tombstoned_documents_activity",
 ]

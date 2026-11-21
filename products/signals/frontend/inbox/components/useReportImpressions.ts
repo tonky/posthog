@@ -14,12 +14,31 @@ interface SectionImpressionState {
     totalCount: number | null
     loadedQueryKey: string | null
     loadedContext: ReportListRequestContext | null
+    loadedRanker: string | null
+    loadedRankingPill: boolean
 }
 
 function useSectionImpressionState(sectionKey: InboxReportSectionKey): SectionImpressionState {
-    const { isLoaded, reportsLoadFailed, reportsResponseLoading, totalCount, loadedQueryKey, loadedContext } =
-        useValues(reportListLogic(sectionListLogicProps(sectionKey)))
-    return { isLoaded, reportsLoadFailed, reportsResponseLoading, totalCount, loadedQueryKey, loadedContext }
+    const {
+        isLoaded,
+        reportsLoadFailed,
+        reportsResponseLoading,
+        totalCount,
+        loadedQueryKey,
+        loadedContext,
+        loadedRanker,
+        loadedRankingPill,
+    } = useValues(reportListLogic(sectionListLogicProps(sectionKey)))
+    return {
+        isLoaded,
+        reportsLoadFailed,
+        reportsResponseLoading,
+        totalCount,
+        loadedQueryKey,
+        loadedContext,
+        loadedRanker,
+        loadedRankingPill,
+    }
 }
 
 /**
@@ -32,14 +51,21 @@ function useSectionImpressionState(sectionKey: InboxReportSectionKey): SectionIm
  * narrowing the state filter or changing any server filter re-impresses the rows at their new
  * ranks; loading a further page keeps the context and impresses only the new rows.
  */
-export function useReportImpressions(rows: MergedReportRow[], selectedSections: InboxReportSectionKey[]): void {
+export function useReportImpressions(
+    rows: MergedReportRow[],
+    selectedSections: InboxReportSectionKey[],
+    linkStrips: boolean = false
+): void {
     // Fixed-order reads over every state (not just the selected ones), so the hook order never
     // changes when the filter does; the effect below only consults the selected states.
     const sections: Record<InboxReportSectionKey, SectionImpressionState> = {
         monitoring: useSectionImpressionState('monitoring'),
         'needs-decision': useSectionImpressionState('needs-decision'),
+        'outcome-monitoring': useSectionImpressionState('outcome-monitoring'),
         resolved: useSectionImpressionState('resolved'),
+        closed: useSectionImpressionState('closed'),
         dismissed: useSectionImpressionState('dismissed'),
+        'held-back': useSectionImpressionState('held-back'),
         'not-actionable': useSectionImpressionState('not-actionable'),
     }
     // The list stays mounted (hidden) while a report/scout detail is open, so gate impressions on the
@@ -59,7 +85,15 @@ export function useReportImpressions(rows: MergedReportRow[], selectedSections: 
     const settled = selectedSections.every(
         (key) => (sections[key].isLoaded || sections[key].reportsLoadFailed) && !sections[key].reportsResponseLoading
     )
-    const contextKey = JSON.stringify(selectedSections.map((key) => [key, sections[key].loadedQueryKey]))
+    // The ranker and pill setting are in the key because `sort=recommended` keeps the same query when the server switches arms.
+    const contextKey = JSON.stringify(
+        selectedSections.map((key) => [
+            key,
+            sections[key].loadedQueryKey,
+            sections[key].loadedRanker,
+            sections[key].loadedRankingPill,
+        ])
+    )
 
     const impressedIdsRef = useRef(new Set<string>())
     const impressionContextKeyRef = useRef('')
@@ -103,6 +137,10 @@ export function useReportImpressions(rows: MergedReportRow[], selectedSections: 
                 sortField: context.sortField,
                 sortDirection: context.sortDirection,
                 createdWindow: context.createdWindow,
+                rankerId: sections[sectionKey].loadedRanker,
+                rankingPill: sections[sectionKey].loadedRankingPill,
+                linkStrips,
+                collapsedCounts: sectionRows.map(({ collapsedReportIds }) => collapsedReportIds?.length ?? 0),
             })
         }
         // `sections` is a fresh object each render; `contextKey` and `settled` already change with

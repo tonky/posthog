@@ -81,18 +81,23 @@ GROUP_FLAGS = {"core": RETRY_FLAGS, "temporal": RETRY_FLAGS, "dags": ["--reruns"
 
 # Full-catalog `warehouse_sources` tests call `SourceRegistry.get_all_sources()`,
 # `load_all_sources()`, `_load_all`, `SourceRegistry.is_registered()`, or trigger
-# `backend/conftest.py`'s `google_ads_sdk_leak_check` subprocess (`SourceRegistry._ensure_loaded()`).
-# Running any of them in the same pytest process as the ~1,620+ individual vendor tests
-# imports every vendor source module into the shared session footprint (~8.8x file bloat,
-# ~2.3x peak RAM). Isolating them into `warehouse_sources_catalog` keeps vendor footprints
-# scoped to their own provider while preserving full catalog footprints on the catalog
-# invariant, API, and workflow e2e tests.
+# `sources/google_ads/tests/conftest.py`'s `SourceRegistry._ensure_loaded()` /
+# `google_ads_sdk_leak_check`. Running any of them in the same pytest process as
+# the ~1,750+ individual vendor tests imports every vendor source module into the
+# shared session footprint (~8.8x file bloat, ~2.3x peak RAM). Isolating them into
+# `warehouse_sources_catalog` keeps vendor footprints scoped to their own provider
+# while preserving full catalog footprints on the catalog invariant, credential,
+# API, and workflow e2e tests.
 WAREHOUSE_SOURCES_CATALOG_PREFIXES = (
     "products/warehouse_sources/backend/temporal/data_imports/sources/tests/",
     "products/warehouse_sources/backend/temporal/data_imports/tests/e2e/",
+    "products/warehouse_sources/sources/google_ads/tests/",
 )
 WAREHOUSE_SOURCES_CATALOG_FILES = frozenset(
     {
+        "products/warehouse_sources/backend/migration/catalog/tests/test_catalog.py",
+        "products/warehouse_sources/backend/temporal/data_imports/sources/common/test/test_credential_auth_type.py",
+        "products/warehouse_sources/backend/temporal/data_imports/sources/common/test/test_credential_kind.py",
         "products/warehouse_sources/backend/temporal/data_imports/sources/common/test/test_resumable.py",
         "products/warehouse_sources/backend/temporal/data_imports/workflow_activities/tests/test_import_data_sync.py",
         "products/warehouse_sources/backend/tests/api/test_external_data_source.py",
@@ -100,6 +105,18 @@ WAREHOUSE_SOURCES_CATALOG_FILES = frozenset(
         "products/warehouse_sources/backend/tests/api/test_external_data_source_end_to_end.py",
     }
 )
+
+
+def missing_warehouse_sources_catalog_paths(repo_root: Path) -> list[str]:
+    """Return any catalog prefix (dir) or file entry that does not exist under `repo_root`."""
+    missing: list[str] = []
+    for prefix in WAREHOUSE_SOURCES_CATALOG_PREFIXES:
+        if not (repo_root / prefix.rstrip("/")).is_dir():
+            missing.append(prefix)
+    for rel_file in sorted(WAREHOUSE_SOURCES_CATALOG_FILES):
+        if not (repo_root / rel_file).is_file():
+            missing.append(rel_file)
+    return missing
 
 
 def _is_warehouse_sources_catalog(target: str) -> bool:

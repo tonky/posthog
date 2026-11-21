@@ -342,6 +342,7 @@ class ProductRunsTest(unittest.TestCase):
         )
         prefix = "products/warehouse_sources/backend"
         catalog_targets = [
+            f"{prefix}/migration/catalog/tests/test_catalog.py",
             f"{prefix}/temporal/data_imports/sources/tests/test_all_sources_import.py",
             f"{prefix}/temporal/data_imports/sources/tests/test_connection_string_fields.py",
             f"{prefix}/temporal/data_imports/sources/tests/test_generated_configs.py",
@@ -349,6 +350,8 @@ class ProductRunsTest(unittest.TestCase):
             f"{prefix}/temporal/data_imports/sources/tests/test_source_categories.py",
             f"{prefix}/temporal/data_imports/sources/tests/test_source_versions.py",
             f"{prefix}/temporal/data_imports/sources/tests/test_source_loading.py",
+            f"{prefix}/temporal/data_imports/sources/common/test/test_credential_auth_type.py",
+            f"{prefix}/temporal/data_imports/sources/common/test/test_credential_kind.py",
             f"{prefix}/temporal/data_imports/sources/common/test/test_resumable.py",
             f"{prefix}/temporal/data_imports/workflow_activities/tests/test_import_data_sync.py",
             f"{prefix}/tests/api/test_external_data_source.py::TestFieldClassification::test_all_registered_sources_have_valid_classification",
@@ -360,10 +363,11 @@ class ProductRunsTest(unittest.TestCase):
             f"{prefix}/temporal/data_imports/tests/e2e/test_external_data_job.py",
             f"{prefix}/temporal/data_imports/tests/e2e/test_bigquery_source.py",
             f"{prefix}/temporal/data_imports/tests/e2e/test_import_data.py",
+            "products/warehouse_sources/sources/google_ads/tests/test_google_ads_client_and_validation.py",
         ]
         vendor_targets = [
-            f"{prefix}/temporal/data_imports/sources/lodgify/tests/test_lodgify.py",
-            f"{prefix}/temporal/data_imports/sources/qonto/tests/test_qonto.py",
+            "products/warehouse_sources/sources/lodgify/tests/test_lodgify.py",
+            "products/warehouse_sources/sources/qonto/tests/test_qonto.py",
             f"{prefix}/temporal/data_imports/sources/stripe/tests/test_stripe_source.py",
             f"{prefix}/temporal/data_imports/sources/common/test/test_history_window.py",
         ]
@@ -390,6 +394,35 @@ class ProductRunsTest(unittest.TestCase):
         combined = by_group["warehouse_sources"] + by_group["warehouse_sources_catalog"]
         self.assertEqual(len(all_targets), len(combined))
         self.assertEqual(set(all_targets), set(combined))
+
+    def test_warehouse_sources_catalog_paths_exist_guard(self) -> None:
+        import importlib.util
+        import os
+
+        spec = importlib.util.spec_from_file_location("product_pytest", SCRIPTS / "product_pytest.py")
+        assert spec and spec.loader
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+
+        # Synthetic negative: empty repo reports every configured catalog prefix & file as missing.
+        expected_all = list(mod.WAREHOUSE_SOURCES_CATALOG_PREFIXES) + sorted(mod.WAREHOUSE_SOURCES_CATALOG_FILES)
+        self.assertEqual(expected_all, mod.missing_warehouse_sources_catalog_paths(self.repo))
+
+        # Synthetic positive: materializing every declared prefix/file clears the guard.
+        for prefix in mod.WAREHOUSE_SOURCES_CATALOG_PREFIXES:
+            (self.repo / prefix.rstrip("/")).mkdir(parents=True, exist_ok=True)
+        for rel_file in mod.WAREHOUSE_SOURCES_CATALOG_FILES:
+            self.write(rel_file, "# stub\n")
+        self.assertEqual([], mod.missing_warehouse_sources_catalog_paths(self.repo))
+
+        # Live upstream guard when POSTHOG_UPSTREAM_DIR is provided (e.g. during pin bumps).
+        upstream_dir = os.environ.get("POSTHOG_UPSTREAM_DIR")
+        if upstream_dir:
+            self.assertEqual(
+                [],
+                mod.missing_warehouse_sources_catalog_paths(Path(upstream_dir)),
+                f"stale WAREHOUSE_SOURCES_CATALOG_* entries in {upstream_dir}",
+            )
 
 
 if __name__ == "__main__":

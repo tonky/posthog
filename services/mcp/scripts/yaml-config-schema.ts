@@ -11,6 +11,11 @@ export const ToolConfigSchema = z
     .object({
         operation: z.string(),
         enabled: z.boolean(),
+        /**
+         * Why the tool stays off. Scaffold sync removes an `enabled: false` entry without one as a
+         * leftover stub, so every disabled entry records a decision. Rejected on an enabled tool.
+         */
+        disabled_reason: z.string().trim().min(1).optional(),
         scopes: z.array(z.string()).optional(),
         annotations: z
             .object({
@@ -41,6 +46,7 @@ export const ToolConfigSchema = z
          * Example: "Time series, aggregations, formulas, comparisons"
          */
         system_prompt_hint: z.string().optional(),
+        search_keywords: z.array(z.string().trim().min(1)).optional(),
         /**
          * Brief work-protocol guidance appended to the tool's *response* as `_agentNote`,
          * so the agent sees it at point of use instead of it growing the always-loaded tool
@@ -100,11 +106,15 @@ export const ToolConfigSchema = z
                          *   unchanged so zod still rejects with its honest error.
                          * - `'boolean-string'` — casts a boolean to `"true"` / `"false"` for a
                          *   string param that reads as a boolean to an agent (e.g. `enabled`).
+                         * - `'sync-frequency'` — maps common spellings of a warehouse sync frequency
+                         *   (`daily`, `60min`, `1h`) to the canonical enum value.
                          *
                          * Mutually exclusive with `input_schema` and `schema_ref` (those
                          * fully replace the schema; cast composes with the existing one).
                          */
-                        cast: z.enum(['string-int', 'boolean-string']).optional(),
+                        cast: z
+                            .enum(['string-int', 'boolean-string', 'object-json-string', 'sync-frequency'])
+                            .optional(),
                         /**
                          * Alternate key names accepted for this param and normalized to it
                          * before validation — for identifier params agents guess different
@@ -238,6 +248,13 @@ export const ToolConfigSchema = z
                  */
                 strip_nulls: z.boolean().optional(),
                 /**
+                 * Dot-path patterns of response fields to remove unless the caller asks for them. Codegen adds
+                 * an optional `expand` request param constrained to these paths. Use it on a detail tool where
+                 * a few fields dominate the payload but an agent needs them only for some tasks.
+                 * Incompatible with `include`, and with a path `exclude` also lists.
+                 */
+                expandable: z.array(z.string()).optional(),
+                /**
                  * Dot-path allowlist for the compact text projection the model reads, applied to each item in
                  * `results`. The structured payload stays whole, so a UI app still renders every field. Use it
                  * on a list tool whose rows are far larger than what a reader needs to choose between them —
@@ -258,6 +275,13 @@ export const ToolConfigSchema = z
             .strict()
             .refine((data) => !(data.include?.length && data.exclude?.length), {
                 message: 'response.include and response.exclude are mutually exclusive',
+            })
+            .refine((data) => !(data.expandable?.length && data.include?.length), {
+                message:
+                    'response.expandable removes fields by default, so it cannot be combined with response.include',
+            })
+            .refine((data) => !data.expandable?.some((path) => data.exclude?.includes(path)), {
+                message: 'response.exclude always removes its paths, so `expand` could never restore them',
             })
             .refine((data) => !(data.selectable && !data.include?.length), {
                 message: 'response.selectable requires response.include (the allowlist to select from)',
@@ -326,6 +350,10 @@ export const ToolConfigSchema = z
     .refine((data) => !(data.feature_flag_variant && !data.feature_flag), {
         message: '`feature_flag_variant` requires `feature_flag` to be set',
         path: ['feature_flag_variant'],
+    })
+    .refine((data) => !(data.enabled && data.disabled_reason !== undefined), {
+        message: '`disabled_reason` applies only to `enabled: false`. Remove it from the enabled tool.',
+        path: ['disabled_reason'],
     })
     // A list response encodes as a TOON table: one header of shared keys, then one row per
     // item. Dropping a `null` that only some rows carry breaks that uniformity and forces the
@@ -401,6 +429,7 @@ const DetailUiAppSchema = z
         view_component: z.string().optional(),
         /** Prop name to bind the host's `openLink(url)` callback to. Omit if the view has no inline external links. */
         link_prop: z.string().optional(),
+        resource_domains: z.array(z.string()).optional(),
     })
     .strict()
 
@@ -468,6 +497,10 @@ const CustomUiAppSchema = z
                 view_prop: z.string(),
                 /** TypeScript type for the tool result. Omit when the component accepts unknown. */
                 data_type: z.string().optional(),
+                /** Prop name that receives the host's link opener, for a view that opens links. */
+                link_prop: z.string().optional(),
+                /** Prop name that receives the host app, for a view that calls server tools. */
+                app_prop: z.string().optional(),
             })
             .strict()
             .optional(),
@@ -488,6 +521,7 @@ export interface ResolvedDetailUiApp {
     data_type: string
     view_component: string
     link_prop?: string
+    resource_domains?: string[]
 }
 
 /** List config with all fields resolved (after convention defaults are applied). */
@@ -517,6 +551,8 @@ export interface ResolvedCustomUiApp {
         view_component: string
         view_prop: string
         data_type?: string
+        link_prop?: string
+        app_prop?: string
     }
 }
 
@@ -565,6 +601,7 @@ export const QueryWrapperToolConfigSchema = z
          * Example: "Time series, aggregations, formulas, comparisons"
          */
         system_prompt_hint: z.string().optional(),
+        search_keywords: z.array(z.string().trim().min(1)).optional(),
         ui_resource_uri: z.string().optional(),
         /** Properties to exclude from the generated Zod schema */
         exclude_properties: z.array(z.string()).optional(),

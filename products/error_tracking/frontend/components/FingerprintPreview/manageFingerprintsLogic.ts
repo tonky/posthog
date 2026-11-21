@@ -93,9 +93,9 @@ export interface manageFingerprintsLogicActions {
         }[]
     ) => {
         fingerprints: {
-            description?: string | undefined
+            description?: string
             fingerprint: string
-            name?: string | undefined
+            name?: string
         }[]
         id: string
     } // issueActionsLogic
@@ -377,7 +377,7 @@ export const manageFingerprintsLogic = kea<manageFingerprintsLogicType>([
     }),
 
     urlToAction(({ actions, props }) => ({
-        '/error_tracking/:id': ({ id }, searchParams) => {
+        '/error-tracking/:id': ({ id }, searchParams) => {
             if (id === props.issueId && searchParams.manageFingerprints === 'true') {
                 actions.openManage()
             }

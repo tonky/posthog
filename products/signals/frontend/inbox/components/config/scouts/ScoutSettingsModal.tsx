@@ -49,6 +49,7 @@ export function ScoutSettingsModal({
                 deleting={deletingScoutIds.includes(config.id)}
                 updating={updatingScoutIds.includes(config.id)}
                 onUnsavedChange={setHasUnsavedInput}
+                surface={surface}
             />
         </LemonModal>
     )
@@ -83,7 +84,7 @@ export function ScoutSettingsButton({
                         })
                         setIsOpen(true)
                     }}
-                    aria-label={`${config.skill_name} settings`}
+                    aria-label={`${scoutDisplayName(config)} settings`}
                 >
                     {showLabel ? 'Settings' : null}
                 </LemonButton>

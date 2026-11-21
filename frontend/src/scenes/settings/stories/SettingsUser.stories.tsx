@@ -15,6 +15,7 @@ import preflightJson from '~/mocks/fixtures/_preflight.json'
 import { HedgehogConfig } from '~/types'
 
 import { SettingSectionId } from '../types'
+import { withTodayRailNav } from './withTodayRailNav'
 
 interface StoryProps {
     sectionId: SettingSectionId
@@ -85,6 +86,8 @@ export default meta
 export const SettingsUserProfile: Story = {
     args: { sectionId: 'user-profile' },
 }
+
+export const SettingsUserProfileQuill: Story = withTodayRailNav(SettingsUserProfile)
 
 const HEDGEHOG_AVATAR_CONFIG: HedgehogConfig = {
     version: 2,
@@ -199,21 +202,37 @@ export const SettingsUserApiKeys: Story = {
     args: { sectionId: 'user-api-keys' },
 }
 
+export const SettingsUserApiKeysQuill: Story = withTodayRailNav(SettingsUserApiKeys)
+
+export const SettingsUserApiKeysCreateModal: Story = {
+    args: { sectionId: 'user-api-keys' },
+    play: async ({ canvasElement }) => {
+        const canvas = within(canvasElement)
+        await userEvent.click(await canvas.findByText('Create personal API key'))
+        // Open one group, so the snapshot shows the rows under a header too. The settings
+        // navigation has a "Product analytics" entry as well, so the lookup stays inside the modal.
+        const dialog = within(await within(document.body).findByRole('dialog'))
+        await userEvent.click(await dialog.findByText('Product analytics'))
+    },
+}
+
 export const SettingsUserNotifications: Story = {
     args: { sectionId: 'user-notifications' },
 }
+
+export const SettingsUserNotificationsQuill: Story = withTodayRailNav(SettingsUserNotifications)
 
 export const SettingsUserCustomization: Story = {
     args: { sectionId: 'user-customization' },
 }
 
-export const SettingsUserNavigation: Story = {
-    args: { sectionId: 'user-navigation' },
-}
+export const SettingsUserCustomizationQuill: Story = withTodayRailNav(SettingsUserCustomization)
 
 export const SettingsUserDangerZone: Story = {
     args: { sectionId: 'user-danger-zone' },
 }
+
+export const SettingsUserDangerZoneQuill: Story = withTodayRailNav(SettingsUserDangerZone)
 
 export const SettingsUserRemindersModal: Story = {
     args: { sectionId: 'user-reminders' },

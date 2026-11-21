@@ -6,11 +6,10 @@ from unittest.mock import patch
 from parameterized import parameterized
 from rest_framework import status
 
-from posthog.api.team import TEAM_CONFIG_FIELDS
+from posthog.api.team.team_config import TEAM_CONFIG_FIELDS
 from posthog.models.organization import OrganizationMembership
 from posthog.models.project import Project
 from posthog.models.team.team import Team
-from posthog.models.utils import generate_random_token_secret
 
 from products.dashboards.backend.models.dashboard import Dashboard
 
@@ -158,7 +157,6 @@ FIELD_VALUES: dict[str, Any] = {
     "timezone": "America/New_York",
     "data_attributes": ["data-attr"],
     "person_display_name_properties": ["email"],
-    "correlation_config": {"excluded_person_property_names": ["foo"]},
     "autocapture_opt_out": True,
     "autocapture_exceptions_opt_in": True,
     "autocapture_web_vitals_opt_in": True,
@@ -183,6 +181,7 @@ FIELD_VALUES: dict[str, Any] = {
     "survey_config": {"appearance": {"backgroundColor": "#ffffff"}},
     "week_start_day": 1,
     "primary_dashboard": "__PER_TWIN_DASHBOARD__",  # special-cased: a dashboard belonging to each twin
+    "home_tab_dashboard": "__PER_TWIN_DASHBOARD__",
     "live_events_columns": ["event"],
     "recording_domains": ["https://example.com"],
     "cookieless_server_hash_mode": 2,
@@ -204,7 +203,11 @@ FIELD_VALUES: dict[str, Any] = {
     "marketing_analytics_config": {"attribution_window_days": 14},
     "customer_analytics_config": {"activity_event": "$pageview"},
     "workflows_config": {"capture_workflows_engagement_events": True},
-    "feature_flag_policy_config": {"require_tags": True},
+    "feature_flag_policy_config": {
+        "require_tags": True,
+        "blocked_hosts": ["https://Example.com/page"],
+        "blocked_ips": ["198.51.100.42/24"],
+    },
     "onboarding_tasks": {"task_x": "completed"},
     "base_currency": "EUR",
     "web_analytics_pre_aggregated_tables_enabled": True,
@@ -232,7 +235,7 @@ class TestWriteParity(DifferentialParityBase):
         project_b, team_b = self._make_twin()
 
         value = FIELD_VALUES[field]
-        if field == "primary_dashboard":
+        if field in {"primary_dashboard", "home_tab_dashboard"}:
             dash_a = Dashboard.objects.create(team=team_a, name="d")
             dash_b = Dashboard.objects.create(team=team_b, name="d")
             body_a: dict[str, Any] = {field: dash_a.id}
@@ -256,7 +259,7 @@ class TestWriteParity(DifferentialParityBase):
             # 2. Round-trip parity: reading the field back must yield the same result via both routes.
             get_a = self.client.get(f"/api/environments/{team_a.id}/").json()
             get_b = self.client.get(f"/api/projects/{project_b.id}/").json()
-            if field == "primary_dashboard":
+            if field in {"primary_dashboard", "home_tab_dashboard"}:
                 self.assertEqual(get_a[field], dash_a.id)
                 self.assertEqual(get_b[field], dash_b.id)
             else:
@@ -281,8 +284,6 @@ TEAM_SHAPED_VOLATILE_FIELDS = {
     "project_id",
     "uuid",
     "api_token",
-    "secret_api_token",
-    "secret_api_token_backup",
     "live_events_token",
     "created_at",
     "updated_at",
@@ -314,8 +315,6 @@ def _normalize_intents(intents: list[dict]) -> list[dict]:
 # table is default_evaluation_contexts, which is an irreducible POST-then-DELETE sequence (separate test below).
 WRITE_ACTION_CASES = [
     ("reset_token", "patch", "reset_token/", None, status.HTTP_200_OK, "team_shaped"),
-    ("rotate_secret_token", "patch", "rotate_secret_token/", None, status.HTTP_200_OK, "team_shaped"),
-    ("delete_secret_token_backup", "patch", "delete_secret_token_backup/", None, status.HTTP_200_OK, "team_shaped"),
     (
         "generate_conversations_public_token",
         "post",
@@ -374,9 +373,6 @@ class TestWriteActionParity(DifferentialParityBase):
         project, team = Project.objects.create_with_team(
             organization=self.organization, name="Twin project", initiating_user=self.user
         )
-        # Minting a first legacy secret token is refused, so seed one to keep rotate_secret_token on its 200 path.
-        team.secret_api_token = generate_random_token_secret()
-        team.save()
         return project, team
 
     def _assert_team_shaped_parity(self, body_a: dict, body_b: dict) -> None:

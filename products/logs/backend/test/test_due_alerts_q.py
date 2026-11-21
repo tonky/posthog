@@ -34,6 +34,7 @@ class TestDueAlertsQ(BaseTest):
                 {"state": State.FIRING, "snooze_until": FUTURE},
                 True,
             ),
+            ("platform_owned_cut_over_moments_ago", {"owner": "platform", "owner_changed_at": NOW}, False),
         ]
     )
     def test_due_alerts_q(self, _name: str, overrides: dict, expected_due: bool) -> None:
