@@ -20,3 +20,5 @@ test.describe('System Status', () => {
         await expect(page.locator('table')).toHaveText(/Events in ClickHouse/)
     })
 })
+
+// frozen O1 baseline E2E replay receipt
