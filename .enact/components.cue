@@ -480,7 +480,7 @@ pipeline: schema.#Pipeline & {
 						"posthog/clickhouse/test/test_cluster.py",
 						"posthog/hogql/test/test_property_skip_indexes.py",
 					]
-					reason: "O1 pin cb94c35517cf: 1/351 (test_exception_summary) and 1/110 (test_mat_col_non_nullable_bloom_filter_3_lt) fail deterministically under rootless ClickHouse 26.9.5.2; revisit on next pin bump (usecases/posthog/LEARNINGS.md)"
+					reason: "O1 pin: 1/351 (test_exception_summary) and 1/110 (test_mat_col_non_nullable_bloom_filter_3_lt) fail deterministically under rootless ClickHouse 26.9.5.2; revisit on next pin bump (usecases/posthog/LEARNINGS.md)"
 				}]
 				rules: [
 					{match: ["posthog/dags/**", "products/*/dags/**"], action: "ignore"},
@@ -576,7 +576,7 @@ pipeline: schema.#Pipeline & {
 							"products/warehouse_sources/backend/temporal/data_imports/tests/e2e/github/test_github_integration.py",
 							"products/warehouse_sources/backend/temporal/data_imports/tests/e2e/stripe/test_stripe_source.py",
 						]
-						reason: "O1 pin cb94c35517cf: upstream-failing assertions at pin; revisit on next pin bump (usecases/posthog/LEARNINGS.md)"
+						reason: "O1 pin: upstream-failing assertions at pin; revisit on next pin bump (usecases/posthog/LEARNINGS.md)"
 					},
 				]
 			}
@@ -897,7 +897,7 @@ pipeline: schema.#Pipeline & {
 					},
 					{
 						tests:  ["products/ai_observability/frontend/redesign/trace/components/ToolCallValue.test.tsx"]
-						reason: "O1 pin cb94c35517cf: missing themeLogic mount in Kea store under isolated Jest run; revisit on next pin bump (usecases/posthog/LEARNINGS.md)"
+						reason: "O1 pin: missing themeLogic mount in Kea store under isolated Jest run; revisit on next pin bump (usecases/posthog/LEARNINGS.md)"
 					},
 				]
 			}
@@ -1213,7 +1213,7 @@ pipeline: schema.#Pipeline & {
 					reason: "test:live checks the live context-mill manifest over the network (ci-mcp-live-canary.yml, scheduled)"
 				}, {
 					tests:  ["services/mcp/tests/tools/featureFlags.integration.test.ts"]
-					reason: "O1 pin cb94c35517cf: /test_evaluation/ returns 503 without live feature-flags Rust service in mcp_integration harness; revisit on next pin bump (usecases/posthog/LEARNINGS.md)"
+					reason: "O1 pin: /test_evaluation/ returns 503 without live feature-flags Rust service in mcp_integration harness; revisit on next pin bump (usecases/posthog/LEARNINGS.md)"
 				}]
 			}
 			jobs: {
@@ -1366,7 +1366,7 @@ pipeline: schema.#Pipeline & {
 								"products/ai_observability/frontend/e2e/multimodal-trace.spec.ts",
 								"products/messaging/frontend/e2e/message-preferences.spec.ts",
 							]
-							reason: "O1 pin cb94c35517cf: live-stack E2E assertion drift at pin; revisit on next pin bump (usecases/posthog/LEARNINGS.md)"
+							reason: "O1 pin: live-stack E2E assertion drift at pin; revisit on next pin bump (usecases/posthog/LEARNINGS.md)"
 						}]
 						rules: [
 							{match: ["posthog/dags/**", "products/*/dags/**", "frontend/snapshots.yml", "playwright/snapshots.yml"], action: "ignore"},

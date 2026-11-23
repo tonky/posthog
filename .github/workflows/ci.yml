@@ -192,7 +192,7 @@ jobs:
     - Linux
     - tonky-ci
     - tonky-ci-c2m6g
-    timeout-minutes: 5
+    timeout-minutes: 10
     outputs:
       builds_e2e__build: ${{ steps.diff.outputs.builds_e2e__build }}
       builds_frontend__build: ${{ steps.diff.outputs.builds_frontend__build }}
@@ -243,10 +243,19 @@ jobs:
         export GIT_CONFIG_KEY_1=safe.directory
         export GIT_CONFIG_VALUE_1="$mirror"
         header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$ENACT_GIT_TOKEN" | base64 | tr -d '\n')"
-        refs=("+refs/heads/*:refs/heads/*")
-        case "$GITHUB_REF" in
-            refs/pull/*) refs+=("+$GITHUB_REF:$GITHUB_REF") ;;
+        base_ref="${GITHUB_BASE_REF:-${ENACT_BASE_REF:-}}"
+        depth="${ENACT_HOST_FETCH_DEPTH:-50}"
+        fetch_args=(--no-tags)
+        if [ "$depth" != "0" ]; then
+            fetch_args+=("--depth=$depth")
+        fi
+        refs=()
+        case "${GITHUB_REF:-}" in
+            refs/heads/*|refs/pull/*|refs/tags/*) refs+=("+$GITHUB_REF:$GITHUB_REF") ;;
         esac
+        if [ -n "$base_ref" ] && [ "refs/heads/$base_ref" != "${GITHUB_REF:-}" ]; then
+            refs+=("+refs/heads/$base_ref:refs/heads/$base_ref")
+        fi
         (
             flock 9
             if [ ! -f "$mirror/HEAD" ]; then
@@ -255,14 +264,23 @@ jobs:
                 git -C "$mirror" config gc.auto 0
             fi
             ref_current=""
-            case "$GITHUB_REF" in
-                refs/heads/*|refs/pull/*) ref_current=$(git -C "$mirror" rev-parse --verify -q "$GITHUB_REF^{commit}" 2>/dev/null || true) ;;
+            case "${GITHUB_REF:-}" in
+                refs/heads/*|refs/pull/*|refs/tags/*) ref_current=$(git -C "$mirror" rev-parse --verify -q "$GITHUB_REF^{commit}" 2>/dev/null || true) ;;
                 *) ref_current="$GITHUB_SHA" ;;
             esac
-            if [ -z "$(find "$mirror/HEAD" -mmin -1 2>/dev/null || true)" ] || [ "$ref_current" != "$GITHUB_SHA" ] || ! git -C "$mirror" cat-file -e "$GITHUB_SHA^{commit}" 2>/dev/null; then
-                git -C "$mirror" -c "http.extraheader=$header" fetch -q --no-tags --prune "$url" "${refs[@]}"
+            base_missing=0
+            if [ -n "$base_ref" ] && ! git -C "$mirror" rev-parse --verify -q "refs/heads/$base_ref^{commit}" >/dev/null 2>&1; then
+                base_missing=1
+            fi
+            if [ -z "$(find "$mirror/HEAD" -mmin -1 2>/dev/null || true)" ] || [ "$ref_current" != "$GITHUB_SHA" ] || [ "$base_missing" = 1 ] || ! git -C "$mirror" cat-file -e "$GITHUB_SHA^{commit}" 2>/dev/null; then
+                if [ "${#refs[@]}" -gt 0 ]; then
+                    git -C "$mirror" -c "http.extraheader=$header" fetch -q "${fetch_args[@]}" "$url" "${refs[@]}" \
+                        || git -C "$mirror" -c "http.extraheader=$header" fetch -q "${fetch_args[@]}" "$url" "$GITHUB_SHA"
+                else
+                    git -C "$mirror" -c "http.extraheader=$header" fetch -q "${fetch_args[@]}" "$url" "$GITHUB_SHA"
+                fi
                 if ! git -C "$mirror" cat-file -e "$GITHUB_SHA^{commit}" 2>/dev/null; then
-                    git -C "$mirror" -c "http.extraheader=$header" fetch -q --no-tags "$url" "$GITHUB_SHA"
+                    git -C "$mirror" -c "http.extraheader=$header" fetch -q "${fetch_args[@]}" "$url" "$GITHUB_SHA"
                 fi
             fi
             touch "$mirror" "$mirror/HEAD" 2>/dev/null || true
@@ -276,32 +294,53 @@ jobs:
         git remote add origin "$url"
         git config --local "http.$GITHUB_SERVER_URL/.extraheader" "$header"
         git config --local gc.auto 0
-        git fetch -q --no-tags "$mirror" "+refs/heads/*:refs/remotes/origin/*"
-        if [ -n "${ENACT_SPARSE_CONE:-}" ]; then
-            mapfile -t raw_cone < <(printf '%s\n' "$ENACT_SPARSE_CONE" | sed '/^[[:space:]]*$/d')
-            cone=()
-            for entry in "${raw_cone[@]}"; do
-                case "$entry" in
-                    */.enact-direct-files)
-                        cone+=("$entry")
-                        ;;
-                    *)
-                        kind=$(git cat-file -t "$GITHUB_SHA:$entry" 2>/dev/null || true)
-                        if [ "$kind" = "blob" ]; then
-                            case "$entry" in
-                                */*) cone+=("${entry%/*}/.enact-direct-files") ;;
-                            esac
-                        else
-                            cone+=("$entry")
-                        fi
-                        ;;
-                esac
+        mirror_branches=()
+        case "${GITHUB_REF:-}" in
+            refs/heads/*) mirror_branches+=("${GITHUB_REF#refs/heads/}") ;;
+        esac
+        if [ -n "$base_ref" ] && [ "refs/heads/$base_ref" != "${GITHUB_REF:-}" ]; then
+            mirror_branches+=("$base_ref")
+        fi
+        if [ "${#mirror_branches[@]}" -gt 0 ]; then
+            for ref_branch in "${mirror_branches[@]}"; do
+                ref_sha=$(git -C "$mirror" rev-parse --verify -q "refs/heads/$ref_branch^{commit}" 2>/dev/null || true)
+                if [ -n "$ref_sha" ]; then
+                    git update-ref "refs/remotes/origin/$ref_branch" "$ref_sha"
+                fi
             done
+        fi
+        if [ -n "${ENACT_SPARSE_CONE:-}" ]; then
+            raw_cone=()
+            while IFS= read -r entry; do
+                entry="${entry#"${entry%%[![:space:]]*}"}"
+                entry="${entry%"${entry##*[![:space:]]}"}"
+                [ -n "$entry" ] && raw_cone+=("$entry")
+            done <<<"$ENACT_SPARSE_CONE"
+            cone=()
+            if [ "${#raw_cone[@]}" -gt 0 ]; then
+                for entry in "${raw_cone[@]}"; do
+                    case "$entry" in
+                        */.enact-direct-files)
+                            cone+=("$entry")
+                            ;;
+                        *)
+                            kind=$(git cat-file -t "$GITHUB_SHA:$entry" 2>/dev/null || true)
+                            if [ "$kind" = "blob" ]; then
+                                case "$entry" in
+                                    */*) cone+=("${entry%/*}/.enact-direct-files") ;;
+                                esac
+                            else
+                                cone+=("$entry")
+                            fi
+                            ;;
+                    esac
+                done
+            fi
             if [ "${#cone[@]}" -gt 0 ]; then
                 git sparse-checkout set --cone "${cone[@]}"
             fi
         fi
-        case "$GITHUB_REF" in
+        case "${GITHUB_REF:-}" in
             refs/heads/*) git checkout -q --force -B "${GITHUB_REF#refs/heads/}" "$GITHUB_SHA" ;;
             *) git checkout -q --force --detach "$GITHUB_SHA" ;;
         esac
@@ -860,10 +899,19 @@ jobs:
         export GIT_CONFIG_KEY_1=safe.directory
         export GIT_CONFIG_VALUE_1="$mirror"
         header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$ENACT_GIT_TOKEN" | base64 | tr -d '\n')"
-        refs=("+refs/heads/*:refs/heads/*")
-        case "$GITHUB_REF" in
-            refs/pull/*) refs+=("+$GITHUB_REF:$GITHUB_REF") ;;
+        base_ref="${GITHUB_BASE_REF:-${ENACT_BASE_REF:-}}"
+        depth="${ENACT_HOST_FETCH_DEPTH:-50}"
+        fetch_args=(--no-tags)
+        if [ "$depth" != "0" ]; then
+            fetch_args+=("--depth=$depth")
+        fi
+        refs=()
+        case "${GITHUB_REF:-}" in
+            refs/heads/*|refs/pull/*|refs/tags/*) refs+=("+$GITHUB_REF:$GITHUB_REF") ;;
         esac
+        if [ -n "$base_ref" ] && [ "refs/heads/$base_ref" != "${GITHUB_REF:-}" ]; then
+            refs+=("+refs/heads/$base_ref:refs/heads/$base_ref")
+        fi
         (
             flock 9
             if [ ! -f "$mirror/HEAD" ]; then
@@ -872,14 +920,23 @@ jobs:
                 git -C "$mirror" config gc.auto 0
             fi
             ref_current=""
-            case "$GITHUB_REF" in
-                refs/heads/*|refs/pull/*) ref_current=$(git -C "$mirror" rev-parse --verify -q "$GITHUB_REF^{commit}" 2>/dev/null || true) ;;
+            case "${GITHUB_REF:-}" in
+                refs/heads/*|refs/pull/*|refs/tags/*) ref_current=$(git -C "$mirror" rev-parse --verify -q "$GITHUB_REF^{commit}" 2>/dev/null || true) ;;
                 *) ref_current="$GITHUB_SHA" ;;
             esac
-            if [ -z "$(find "$mirror/HEAD" -mmin -1 2>/dev/null || true)" ] || [ "$ref_current" != "$GITHUB_SHA" ] || ! git -C "$mirror" cat-file -e "$GITHUB_SHA^{commit}" 2>/dev/null; then
-                git -C "$mirror" -c "http.extraheader=$header" fetch -q --no-tags --prune "$url" "${refs[@]}"
+            base_missing=0
+            if [ -n "$base_ref" ] && ! git -C "$mirror" rev-parse --verify -q "refs/heads/$base_ref^{commit}" >/dev/null 2>&1; then
+                base_missing=1
+            fi
+            if [ -z "$(find "$mirror/HEAD" -mmin -1 2>/dev/null || true)" ] || [ "$ref_current" != "$GITHUB_SHA" ] || [ "$base_missing" = 1 ] || ! git -C "$mirror" cat-file -e "$GITHUB_SHA^{commit}" 2>/dev/null; then
+                if [ "${#refs[@]}" -gt 0 ]; then
+                    git -C "$mirror" -c "http.extraheader=$header" fetch -q "${fetch_args[@]}" "$url" "${refs[@]}" \
+                        || git -C "$mirror" -c "http.extraheader=$header" fetch -q "${fetch_args[@]}" "$url" "$GITHUB_SHA"
+                else
+                    git -C "$mirror" -c "http.extraheader=$header" fetch -q "${fetch_args[@]}" "$url" "$GITHUB_SHA"
+                fi
                 if ! git -C "$mirror" cat-file -e "$GITHUB_SHA^{commit}" 2>/dev/null; then
-                    git -C "$mirror" -c "http.extraheader=$header" fetch -q --no-tags "$url" "$GITHUB_SHA"
+                    git -C "$mirror" -c "http.extraheader=$header" fetch -q "${fetch_args[@]}" "$url" "$GITHUB_SHA"
                 fi
             fi
             touch "$mirror" "$mirror/HEAD" 2>/dev/null || true
@@ -893,32 +950,53 @@ jobs:
         git remote add origin "$url"
         git config --local "http.$GITHUB_SERVER_URL/.extraheader" "$header"
         git config --local gc.auto 0
-        git fetch -q --no-tags "$mirror" "+refs/heads/*:refs/remotes/origin/*"
-        if [ -n "${ENACT_SPARSE_CONE:-}" ]; then
-            mapfile -t raw_cone < <(printf '%s\n' "$ENACT_SPARSE_CONE" | sed '/^[[:space:]]*$/d')
-            cone=()
-            for entry in "${raw_cone[@]}"; do
-                case "$entry" in
-                    */.enact-direct-files)
-                        cone+=("$entry")
-                        ;;
-                    *)
-                        kind=$(git cat-file -t "$GITHUB_SHA:$entry" 2>/dev/null || true)
-                        if [ "$kind" = "blob" ]; then
-                            case "$entry" in
-                                */*) cone+=("${entry%/*}/.enact-direct-files") ;;
-                            esac
-                        else
-                            cone+=("$entry")
-                        fi
-                        ;;
-                esac
+        mirror_branches=()
+        case "${GITHUB_REF:-}" in
+            refs/heads/*) mirror_branches+=("${GITHUB_REF#refs/heads/}") ;;
+        esac
+        if [ -n "$base_ref" ] && [ "refs/heads/$base_ref" != "${GITHUB_REF:-}" ]; then
+            mirror_branches+=("$base_ref")
+        fi
+        if [ "${#mirror_branches[@]}" -gt 0 ]; then
+            for ref_branch in "${mirror_branches[@]}"; do
+                ref_sha=$(git -C "$mirror" rev-parse --verify -q "refs/heads/$ref_branch^{commit}" 2>/dev/null || true)
+                if [ -n "$ref_sha" ]; then
+                    git update-ref "refs/remotes/origin/$ref_branch" "$ref_sha"
+                fi
             done
+        fi
+        if [ -n "${ENACT_SPARSE_CONE:-}" ]; then
+            raw_cone=()
+            while IFS= read -r entry; do
+                entry="${entry#"${entry%%[![:space:]]*}"}"
+                entry="${entry%"${entry##*[![:space:]]}"}"
+                [ -n "$entry" ] && raw_cone+=("$entry")
+            done <<<"$ENACT_SPARSE_CONE"
+            cone=()
+            if [ "${#raw_cone[@]}" -gt 0 ]; then
+                for entry in "${raw_cone[@]}"; do
+                    case "$entry" in
+                        */.enact-direct-files)
+                            cone+=("$entry")
+                            ;;
+                        *)
+                            kind=$(git cat-file -t "$GITHUB_SHA:$entry" 2>/dev/null || true)
+                            if [ "$kind" = "blob" ]; then
+                                case "$entry" in
+                                    */*) cone+=("${entry%/*}/.enact-direct-files") ;;
+                                esac
+                            else
+                                cone+=("$entry")
+                            fi
+                            ;;
+                    esac
+                done
+            fi
             if [ "${#cone[@]}" -gt 0 ]; then
                 git sparse-checkout set --cone "${cone[@]}"
             fi
         fi
-        case "$GITHUB_REF" in
+        case "${GITHUB_REF:-}" in
             refs/heads/*) git checkout -q --force -B "${GITHUB_REF#refs/heads/}" "$GITHUB_SHA" ;;
             *) git checkout -q --force --detach "$GITHUB_SHA" ;;
         esac
@@ -2430,10 +2508,19 @@ jobs:
         export GIT_CONFIG_KEY_1=safe.directory
         export GIT_CONFIG_VALUE_1="$mirror"
         header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$ENACT_GIT_TOKEN" | base64 | tr -d '\n')"
-        refs=("+refs/heads/*:refs/heads/*")
-        case "$GITHUB_REF" in
-            refs/pull/*) refs+=("+$GITHUB_REF:$GITHUB_REF") ;;
+        base_ref="${GITHUB_BASE_REF:-${ENACT_BASE_REF:-}}"
+        depth="${ENACT_HOST_FETCH_DEPTH:-50}"
+        fetch_args=(--no-tags)
+        if [ "$depth" != "0" ]; then
+            fetch_args+=("--depth=$depth")
+        fi
+        refs=()
+        case "${GITHUB_REF:-}" in
+            refs/heads/*|refs/pull/*|refs/tags/*) refs+=("+$GITHUB_REF:$GITHUB_REF") ;;
         esac
+        if [ -n "$base_ref" ] && [ "refs/heads/$base_ref" != "${GITHUB_REF:-}" ]; then
+            refs+=("+refs/heads/$base_ref:refs/heads/$base_ref")
+        fi
         (
             flock 9
             if [ ! -f "$mirror/HEAD" ]; then
@@ -2442,14 +2529,23 @@ jobs:
                 git -C "$mirror" config gc.auto 0
             fi
             ref_current=""
-            case "$GITHUB_REF" in
-                refs/heads/*|refs/pull/*) ref_current=$(git -C "$mirror" rev-parse --verify -q "$GITHUB_REF^{commit}" 2>/dev/null || true) ;;
+            case "${GITHUB_REF:-}" in
+                refs/heads/*|refs/pull/*|refs/tags/*) ref_current=$(git -C "$mirror" rev-parse --verify -q "$GITHUB_REF^{commit}" 2>/dev/null || true) ;;
                 *) ref_current="$GITHUB_SHA" ;;
             esac
-            if [ -z "$(find "$mirror/HEAD" -mmin -1 2>/dev/null || true)" ] || [ "$ref_current" != "$GITHUB_SHA" ] || ! git -C "$mirror" cat-file -e "$GITHUB_SHA^{commit}" 2>/dev/null; then
-                git -C "$mirror" -c "http.extraheader=$header" fetch -q --no-tags --prune "$url" "${refs[@]}"
+            base_missing=0
+            if [ -n "$base_ref" ] && ! git -C "$mirror" rev-parse --verify -q "refs/heads/$base_ref^{commit}" >/dev/null 2>&1; then
+                base_missing=1
+            fi
+            if [ -z "$(find "$mirror/HEAD" -mmin -1 2>/dev/null || true)" ] || [ "$ref_current" != "$GITHUB_SHA" ] || [ "$base_missing" = 1 ] || ! git -C "$mirror" cat-file -e "$GITHUB_SHA^{commit}" 2>/dev/null; then
+                if [ "${#refs[@]}" -gt 0 ]; then
+                    git -C "$mirror" -c "http.extraheader=$header" fetch -q "${fetch_args[@]}" "$url" "${refs[@]}" \
+                        || git -C "$mirror" -c "http.extraheader=$header" fetch -q "${fetch_args[@]}" "$url" "$GITHUB_SHA"
+                else
+                    git -C "$mirror" -c "http.extraheader=$header" fetch -q "${fetch_args[@]}" "$url" "$GITHUB_SHA"
+                fi
                 if ! git -C "$mirror" cat-file -e "$GITHUB_SHA^{commit}" 2>/dev/null; then
-                    git -C "$mirror" -c "http.extraheader=$header" fetch -q --no-tags "$url" "$GITHUB_SHA"
+                    git -C "$mirror" -c "http.extraheader=$header" fetch -q "${fetch_args[@]}" "$url" "$GITHUB_SHA"
                 fi
             fi
             touch "$mirror" "$mirror/HEAD" 2>/dev/null || true
@@ -2463,32 +2559,53 @@ jobs:
         git remote add origin "$url"
         git config --local "http.$GITHUB_SERVER_URL/.extraheader" "$header"
         git config --local gc.auto 0
-        git fetch -q --no-tags "$mirror" "+refs/heads/*:refs/remotes/origin/*"
-        if [ -n "${ENACT_SPARSE_CONE:-}" ]; then
-            mapfile -t raw_cone < <(printf '%s\n' "$ENACT_SPARSE_CONE" | sed '/^[[:space:]]*$/d')
-            cone=()
-            for entry in "${raw_cone[@]}"; do
-                case "$entry" in
-                    */.enact-direct-files)
-                        cone+=("$entry")
-                        ;;
-                    *)
-                        kind=$(git cat-file -t "$GITHUB_SHA:$entry" 2>/dev/null || true)
-                        if [ "$kind" = "blob" ]; then
-                            case "$entry" in
-                                */*) cone+=("${entry%/*}/.enact-direct-files") ;;
-                            esac
-                        else
-                            cone+=("$entry")
-                        fi
-                        ;;
-                esac
+        mirror_branches=()
+        case "${GITHUB_REF:-}" in
+            refs/heads/*) mirror_branches+=("${GITHUB_REF#refs/heads/}") ;;
+        esac
+        if [ -n "$base_ref" ] && [ "refs/heads/$base_ref" != "${GITHUB_REF:-}" ]; then
+            mirror_branches+=("$base_ref")
+        fi
+        if [ "${#mirror_branches[@]}" -gt 0 ]; then
+            for ref_branch in "${mirror_branches[@]}"; do
+                ref_sha=$(git -C "$mirror" rev-parse --verify -q "refs/heads/$ref_branch^{commit}" 2>/dev/null || true)
+                if [ -n "$ref_sha" ]; then
+                    git update-ref "refs/remotes/origin/$ref_branch" "$ref_sha"
+                fi
             done
+        fi
+        if [ -n "${ENACT_SPARSE_CONE:-}" ]; then
+            raw_cone=()
+            while IFS= read -r entry; do
+                entry="${entry#"${entry%%[![:space:]]*}"}"
+                entry="${entry%"${entry##*[![:space:]]}"}"
+                [ -n "$entry" ] && raw_cone+=("$entry")
+            done <<<"$ENACT_SPARSE_CONE"
+            cone=()
+            if [ "${#raw_cone[@]}" -gt 0 ]; then
+                for entry in "${raw_cone[@]}"; do
+                    case "$entry" in
+                        */.enact-direct-files)
+                            cone+=("$entry")
+                            ;;
+                        *)
+                            kind=$(git cat-file -t "$GITHUB_SHA:$entry" 2>/dev/null || true)
+                            if [ "$kind" = "blob" ]; then
+                                case "$entry" in
+                                    */*) cone+=("${entry%/*}/.enact-direct-files") ;;
+                                esac
+                            else
+                                cone+=("$entry")
+                            fi
+                            ;;
+                    esac
+                done
+            fi
             if [ "${#cone[@]}" -gt 0 ]; then
                 git sparse-checkout set --cone "${cone[@]}"
             fi
         fi
-        case "$GITHUB_REF" in
+        case "${GITHUB_REF:-}" in
             refs/heads/*) git checkout -q --force -B "${GITHUB_REF#refs/heads/}" "$GITHUB_SHA" ;;
             *) git checkout -q --force --detach "$GITHUB_SHA" ;;
         esac
@@ -2904,10 +3021,19 @@ jobs:
         export GIT_CONFIG_KEY_1=safe.directory
         export GIT_CONFIG_VALUE_1="$mirror"
         header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$ENACT_GIT_TOKEN" | base64 | tr -d '\n')"
-        refs=("+refs/heads/*:refs/heads/*")
-        case "$GITHUB_REF" in
-            refs/pull/*) refs+=("+$GITHUB_REF:$GITHUB_REF") ;;
+        base_ref="${GITHUB_BASE_REF:-${ENACT_BASE_REF:-}}"
+        depth="${ENACT_HOST_FETCH_DEPTH:-50}"
+        fetch_args=(--no-tags)
+        if [ "$depth" != "0" ]; then
+            fetch_args+=("--depth=$depth")
+        fi
+        refs=()
+        case "${GITHUB_REF:-}" in
+            refs/heads/*|refs/pull/*|refs/tags/*) refs+=("+$GITHUB_REF:$GITHUB_REF") ;;
         esac
+        if [ -n "$base_ref" ] && [ "refs/heads/$base_ref" != "${GITHUB_REF:-}" ]; then
+            refs+=("+refs/heads/$base_ref:refs/heads/$base_ref")
+        fi
         (
             flock 9
             if [ ! -f "$mirror/HEAD" ]; then
@@ -2916,14 +3042,23 @@ jobs:
                 git -C "$mirror" config gc.auto 0
             fi
             ref_current=""
-            case "$GITHUB_REF" in
-                refs/heads/*|refs/pull/*) ref_current=$(git -C "$mirror" rev-parse --verify -q "$GITHUB_REF^{commit}" 2>/dev/null || true) ;;
+            case "${GITHUB_REF:-}" in
+                refs/heads/*|refs/pull/*|refs/tags/*) ref_current=$(git -C "$mirror" rev-parse --verify -q "$GITHUB_REF^{commit}" 2>/dev/null || true) ;;
                 *) ref_current="$GITHUB_SHA" ;;
             esac
-            if [ -z "$(find "$mirror/HEAD" -mmin -1 2>/dev/null || true)" ] || [ "$ref_current" != "$GITHUB_SHA" ] || ! git -C "$mirror" cat-file -e "$GITHUB_SHA^{commit}" 2>/dev/null; then
-                git -C "$mirror" -c "http.extraheader=$header" fetch -q --no-tags --prune "$url" "${refs[@]}"
+            base_missing=0
+            if [ -n "$base_ref" ] && ! git -C "$mirror" rev-parse --verify -q "refs/heads/$base_ref^{commit}" >/dev/null 2>&1; then
+                base_missing=1
+            fi
+            if [ -z "$(find "$mirror/HEAD" -mmin -1 2>/dev/null || true)" ] || [ "$ref_current" != "$GITHUB_SHA" ] || [ "$base_missing" = 1 ] || ! git -C "$mirror" cat-file -e "$GITHUB_SHA^{commit}" 2>/dev/null; then
+                if [ "${#refs[@]}" -gt 0 ]; then
+                    git -C "$mirror" -c "http.extraheader=$header" fetch -q "${fetch_args[@]}" "$url" "${refs[@]}" \
+                        || git -C "$mirror" -c "http.extraheader=$header" fetch -q "${fetch_args[@]}" "$url" "$GITHUB_SHA"
+                else
+                    git -C "$mirror" -c "http.extraheader=$header" fetch -q "${fetch_args[@]}" "$url" "$GITHUB_SHA"
+                fi
                 if ! git -C "$mirror" cat-file -e "$GITHUB_SHA^{commit}" 2>/dev/null; then
-                    git -C "$mirror" -c "http.extraheader=$header" fetch -q --no-tags "$url" "$GITHUB_SHA"
+                    git -C "$mirror" -c "http.extraheader=$header" fetch -q "${fetch_args[@]}" "$url" "$GITHUB_SHA"
                 fi
             fi
             touch "$mirror" "$mirror/HEAD" 2>/dev/null || true
@@ -2937,32 +3072,53 @@ jobs:
         git remote add origin "$url"
         git config --local "http.$GITHUB_SERVER_URL/.extraheader" "$header"
         git config --local gc.auto 0
-        git fetch -q --no-tags "$mirror" "+refs/heads/*:refs/remotes/origin/*"
-        if [ -n "${ENACT_SPARSE_CONE:-}" ]; then
-            mapfile -t raw_cone < <(printf '%s\n' "$ENACT_SPARSE_CONE" | sed '/^[[:space:]]*$/d')
-            cone=()
-            for entry in "${raw_cone[@]}"; do
-                case "$entry" in
-                    */.enact-direct-files)
-                        cone+=("$entry")
-                        ;;
-                    *)
-                        kind=$(git cat-file -t "$GITHUB_SHA:$entry" 2>/dev/null || true)
-                        if [ "$kind" = "blob" ]; then
-                            case "$entry" in
-                                */*) cone+=("${entry%/*}/.enact-direct-files") ;;
-                            esac
-                        else
-                            cone+=("$entry")
-                        fi
-                        ;;
-                esac
+        mirror_branches=()
+        case "${GITHUB_REF:-}" in
+            refs/heads/*) mirror_branches+=("${GITHUB_REF#refs/heads/}") ;;
+        esac
+        if [ -n "$base_ref" ] && [ "refs/heads/$base_ref" != "${GITHUB_REF:-}" ]; then
+            mirror_branches+=("$base_ref")
+        fi
+        if [ "${#mirror_branches[@]}" -gt 0 ]; then
+            for ref_branch in "${mirror_branches[@]}"; do
+                ref_sha=$(git -C "$mirror" rev-parse --verify -q "refs/heads/$ref_branch^{commit}" 2>/dev/null || true)
+                if [ -n "$ref_sha" ]; then
+                    git update-ref "refs/remotes/origin/$ref_branch" "$ref_sha"
+                fi
             done
+        fi
+        if [ -n "${ENACT_SPARSE_CONE:-}" ]; then
+            raw_cone=()
+            while IFS= read -r entry; do
+                entry="${entry#"${entry%%[![:space:]]*}"}"
+                entry="${entry%"${entry##*[![:space:]]}"}"
+                [ -n "$entry" ] && raw_cone+=("$entry")
+            done <<<"$ENACT_SPARSE_CONE"
+            cone=()
+            if [ "${#raw_cone[@]}" -gt 0 ]; then
+                for entry in "${raw_cone[@]}"; do
+                    case "$entry" in
+                        */.enact-direct-files)
+                            cone+=("$entry")
+                            ;;
+                        *)
+                            kind=$(git cat-file -t "$GITHUB_SHA:$entry" 2>/dev/null || true)
+                            if [ "$kind" = "blob" ]; then
+                                case "$entry" in
+                                    */*) cone+=("${entry%/*}/.enact-direct-files") ;;
+                                esac
+                            else
+                                cone+=("$entry")
+                            fi
+                            ;;
+                    esac
+                done
+            fi
             if [ "${#cone[@]}" -gt 0 ]; then
                 git sparse-checkout set --cone "${cone[@]}"
             fi
         fi
-        case "$GITHUB_REF" in
+        case "${GITHUB_REF:-}" in
             refs/heads/*) git checkout -q --force -B "${GITHUB_REF#refs/heads/}" "$GITHUB_SHA" ;;
             *) git checkout -q --force --detach "$GITHUB_SHA" ;;
         esac
@@ -3460,10 +3616,19 @@ jobs:
         export GIT_CONFIG_KEY_1=safe.directory
         export GIT_CONFIG_VALUE_1="$mirror"
         header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$ENACT_GIT_TOKEN" | base64 | tr -d '\n')"
-        refs=("+refs/heads/*:refs/heads/*")
-        case "$GITHUB_REF" in
-            refs/pull/*) refs+=("+$GITHUB_REF:$GITHUB_REF") ;;
+        base_ref="${GITHUB_BASE_REF:-${ENACT_BASE_REF:-}}"
+        depth="${ENACT_HOST_FETCH_DEPTH:-50}"
+        fetch_args=(--no-tags)
+        if [ "$depth" != "0" ]; then
+            fetch_args+=("--depth=$depth")
+        fi
+        refs=()
+        case "${GITHUB_REF:-}" in
+            refs/heads/*|refs/pull/*|refs/tags/*) refs+=("+$GITHUB_REF:$GITHUB_REF") ;;
         esac
+        if [ -n "$base_ref" ] && [ "refs/heads/$base_ref" != "${GITHUB_REF:-}" ]; then
+            refs+=("+refs/heads/$base_ref:refs/heads/$base_ref")
+        fi
         (
             flock 9
             if [ ! -f "$mirror/HEAD" ]; then
@@ -3472,14 +3637,23 @@ jobs:
                 git -C "$mirror" config gc.auto 0
             fi
             ref_current=""
-            case "$GITHUB_REF" in
-                refs/heads/*|refs/pull/*) ref_current=$(git -C "$mirror" rev-parse --verify -q "$GITHUB_REF^{commit}" 2>/dev/null || true) ;;
+            case "${GITHUB_REF:-}" in
+                refs/heads/*|refs/pull/*|refs/tags/*) ref_current=$(git -C "$mirror" rev-parse --verify -q "$GITHUB_REF^{commit}" 2>/dev/null || true) ;;
                 *) ref_current="$GITHUB_SHA" ;;
             esac
-            if [ -z "$(find "$mirror/HEAD" -mmin -1 2>/dev/null || true)" ] || [ "$ref_current" != "$GITHUB_SHA" ] || ! git -C "$mirror" cat-file -e "$GITHUB_SHA^{commit}" 2>/dev/null; then
-                git -C "$mirror" -c "http.extraheader=$header" fetch -q --no-tags --prune "$url" "${refs[@]}"
+            base_missing=0
+            if [ -n "$base_ref" ] && ! git -C "$mirror" rev-parse --verify -q "refs/heads/$base_ref^{commit}" >/dev/null 2>&1; then
+                base_missing=1
+            fi
+            if [ -z "$(find "$mirror/HEAD" -mmin -1 2>/dev/null || true)" ] || [ "$ref_current" != "$GITHUB_SHA" ] || [ "$base_missing" = 1 ] || ! git -C "$mirror" cat-file -e "$GITHUB_SHA^{commit}" 2>/dev/null; then
+                if [ "${#refs[@]}" -gt 0 ]; then
+                    git -C "$mirror" -c "http.extraheader=$header" fetch -q "${fetch_args[@]}" "$url" "${refs[@]}" \
+                        || git -C "$mirror" -c "http.extraheader=$header" fetch -q "${fetch_args[@]}" "$url" "$GITHUB_SHA"
+                else
+                    git -C "$mirror" -c "http.extraheader=$header" fetch -q "${fetch_args[@]}" "$url" "$GITHUB_SHA"
+                fi
                 if ! git -C "$mirror" cat-file -e "$GITHUB_SHA^{commit}" 2>/dev/null; then
-                    git -C "$mirror" -c "http.extraheader=$header" fetch -q --no-tags "$url" "$GITHUB_SHA"
+                    git -C "$mirror" -c "http.extraheader=$header" fetch -q "${fetch_args[@]}" "$url" "$GITHUB_SHA"
                 fi
             fi
             touch "$mirror" "$mirror/HEAD" 2>/dev/null || true
@@ -3493,32 +3667,53 @@ jobs:
         git remote add origin "$url"
         git config --local "http.$GITHUB_SERVER_URL/.extraheader" "$header"
         git config --local gc.auto 0
-        git fetch -q --no-tags "$mirror" "+refs/heads/*:refs/remotes/origin/*"
-        if [ -n "${ENACT_SPARSE_CONE:-}" ]; then
-            mapfile -t raw_cone < <(printf '%s\n' "$ENACT_SPARSE_CONE" | sed '/^[[:space:]]*$/d')
-            cone=()
-            for entry in "${raw_cone[@]}"; do
-                case "$entry" in
-                    */.enact-direct-files)
-                        cone+=("$entry")
-                        ;;
-                    *)
-                        kind=$(git cat-file -t "$GITHUB_SHA:$entry" 2>/dev/null || true)
-                        if [ "$kind" = "blob" ]; then
-                            case "$entry" in
-                                */*) cone+=("${entry%/*}/.enact-direct-files") ;;
-                            esac
-                        else
-                            cone+=("$entry")
-                        fi
-                        ;;
-                esac
+        mirror_branches=()
+        case "${GITHUB_REF:-}" in
+            refs/heads/*) mirror_branches+=("${GITHUB_REF#refs/heads/}") ;;
+        esac
+        if [ -n "$base_ref" ] && [ "refs/heads/$base_ref" != "${GITHUB_REF:-}" ]; then
+            mirror_branches+=("$base_ref")
+        fi
+        if [ "${#mirror_branches[@]}" -gt 0 ]; then
+            for ref_branch in "${mirror_branches[@]}"; do
+                ref_sha=$(git -C "$mirror" rev-parse --verify -q "refs/heads/$ref_branch^{commit}" 2>/dev/null || true)
+                if [ -n "$ref_sha" ]; then
+                    git update-ref "refs/remotes/origin/$ref_branch" "$ref_sha"
+                fi
             done
+        fi
+        if [ -n "${ENACT_SPARSE_CONE:-}" ]; then
+            raw_cone=()
+            while IFS= read -r entry; do
+                entry="${entry#"${entry%%[![:space:]]*}"}"
+                entry="${entry%"${entry##*[![:space:]]}"}"
+                [ -n "$entry" ] && raw_cone+=("$entry")
+            done <<<"$ENACT_SPARSE_CONE"
+            cone=()
+            if [ "${#raw_cone[@]}" -gt 0 ]; then
+                for entry in "${raw_cone[@]}"; do
+                    case "$entry" in
+                        */.enact-direct-files)
+                            cone+=("$entry")
+                            ;;
+                        *)
+                            kind=$(git cat-file -t "$GITHUB_SHA:$entry" 2>/dev/null || true)
+                            if [ "$kind" = "blob" ]; then
+                                case "$entry" in
+                                    */*) cone+=("${entry%/*}/.enact-direct-files") ;;
+                                esac
+                            else
+                                cone+=("$entry")
+                            fi
+                            ;;
+                    esac
+                done
+            fi
             if [ "${#cone[@]}" -gt 0 ]; then
                 git sparse-checkout set --cone "${cone[@]}"
             fi
         fi
-        case "$GITHUB_REF" in
+        case "${GITHUB_REF:-}" in
             refs/heads/*) git checkout -q --force -B "${GITHUB_REF#refs/heads/}" "$GITHUB_SHA" ;;
             *) git checkout -q --force --detach "$GITHUB_SHA" ;;
         esac
@@ -3874,10 +4069,19 @@ jobs:
         export GIT_CONFIG_KEY_1=safe.directory
         export GIT_CONFIG_VALUE_1="$mirror"
         header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$ENACT_GIT_TOKEN" | base64 | tr -d '\n')"
-        refs=("+refs/heads/*:refs/heads/*")
-        case "$GITHUB_REF" in
-            refs/pull/*) refs+=("+$GITHUB_REF:$GITHUB_REF") ;;
+        base_ref="${GITHUB_BASE_REF:-${ENACT_BASE_REF:-}}"
+        depth="${ENACT_HOST_FETCH_DEPTH:-50}"
+        fetch_args=(--no-tags)
+        if [ "$depth" != "0" ]; then
+            fetch_args+=("--depth=$depth")
+        fi
+        refs=()
+        case "${GITHUB_REF:-}" in
+            refs/heads/*|refs/pull/*|refs/tags/*) refs+=("+$GITHUB_REF:$GITHUB_REF") ;;
         esac
+        if [ -n "$base_ref" ] && [ "refs/heads/$base_ref" != "${GITHUB_REF:-}" ]; then
+            refs+=("+refs/heads/$base_ref:refs/heads/$base_ref")
+        fi
         (
             flock 9
             if [ ! -f "$mirror/HEAD" ]; then
@@ -3886,14 +4090,23 @@ jobs:
                 git -C "$mirror" config gc.auto 0
             fi
             ref_current=""
-            case "$GITHUB_REF" in
-                refs/heads/*|refs/pull/*) ref_current=$(git -C "$mirror" rev-parse --verify -q "$GITHUB_REF^{commit}" 2>/dev/null || true) ;;
+            case "${GITHUB_REF:-}" in
+                refs/heads/*|refs/pull/*|refs/tags/*) ref_current=$(git -C "$mirror" rev-parse --verify -q "$GITHUB_REF^{commit}" 2>/dev/null || true) ;;
                 *) ref_current="$GITHUB_SHA" ;;
             esac
-            if [ -z "$(find "$mirror/HEAD" -mmin -1 2>/dev/null || true)" ] || [ "$ref_current" != "$GITHUB_SHA" ] || ! git -C "$mirror" cat-file -e "$GITHUB_SHA^{commit}" 2>/dev/null; then
-                git -C "$mirror" -c "http.extraheader=$header" fetch -q --no-tags --prune "$url" "${refs[@]}"
+            base_missing=0
+            if [ -n "$base_ref" ] && ! git -C "$mirror" rev-parse --verify -q "refs/heads/$base_ref^{commit}" >/dev/null 2>&1; then
+                base_missing=1
+            fi
+            if [ -z "$(find "$mirror/HEAD" -mmin -1 2>/dev/null || true)" ] || [ "$ref_current" != "$GITHUB_SHA" ] || [ "$base_missing" = 1 ] || ! git -C "$mirror" cat-file -e "$GITHUB_SHA^{commit}" 2>/dev/null; then
+                if [ "${#refs[@]}" -gt 0 ]; then
+                    git -C "$mirror" -c "http.extraheader=$header" fetch -q "${fetch_args[@]}" "$url" "${refs[@]}" \
+                        || git -C "$mirror" -c "http.extraheader=$header" fetch -q "${fetch_args[@]}" "$url" "$GITHUB_SHA"
+                else
+                    git -C "$mirror" -c "http.extraheader=$header" fetch -q "${fetch_args[@]}" "$url" "$GITHUB_SHA"
+                fi
                 if ! git -C "$mirror" cat-file -e "$GITHUB_SHA^{commit}" 2>/dev/null; then
-                    git -C "$mirror" -c "http.extraheader=$header" fetch -q --no-tags "$url" "$GITHUB_SHA"
+                    git -C "$mirror" -c "http.extraheader=$header" fetch -q "${fetch_args[@]}" "$url" "$GITHUB_SHA"
                 fi
             fi
             touch "$mirror" "$mirror/HEAD" 2>/dev/null || true
@@ -3907,32 +4120,53 @@ jobs:
         git remote add origin "$url"
         git config --local "http.$GITHUB_SERVER_URL/.extraheader" "$header"
         git config --local gc.auto 0
-        git fetch -q --no-tags "$mirror" "+refs/heads/*:refs/remotes/origin/*"
-        if [ -n "${ENACT_SPARSE_CONE:-}" ]; then
-            mapfile -t raw_cone < <(printf '%s\n' "$ENACT_SPARSE_CONE" | sed '/^[[:space:]]*$/d')
-            cone=()
-            for entry in "${raw_cone[@]}"; do
-                case "$entry" in
-                    */.enact-direct-files)
-                        cone+=("$entry")
-                        ;;
-                    *)
-                        kind=$(git cat-file -t "$GITHUB_SHA:$entry" 2>/dev/null || true)
-                        if [ "$kind" = "blob" ]; then
-                            case "$entry" in
-                                */*) cone+=("${entry%/*}/.enact-direct-files") ;;
-                            esac
-                        else
-                            cone+=("$entry")
-                        fi
-                        ;;
-                esac
+        mirror_branches=()
+        case "${GITHUB_REF:-}" in
+            refs/heads/*) mirror_branches+=("${GITHUB_REF#refs/heads/}") ;;
+        esac
+        if [ -n "$base_ref" ] && [ "refs/heads/$base_ref" != "${GITHUB_REF:-}" ]; then
+            mirror_branches+=("$base_ref")
+        fi
+        if [ "${#mirror_branches[@]}" -gt 0 ]; then
+            for ref_branch in "${mirror_branches[@]}"; do
+                ref_sha=$(git -C "$mirror" rev-parse --verify -q "refs/heads/$ref_branch^{commit}" 2>/dev/null || true)
+                if [ -n "$ref_sha" ]; then
+                    git update-ref "refs/remotes/origin/$ref_branch" "$ref_sha"
+                fi
             done
+        fi
+        if [ -n "${ENACT_SPARSE_CONE:-}" ]; then
+            raw_cone=()
+            while IFS= read -r entry; do
+                entry="${entry#"${entry%%[![:space:]]*}"}"
+                entry="${entry%"${entry##*[![:space:]]}"}"
+                [ -n "$entry" ] && raw_cone+=("$entry")
+            done <<<"$ENACT_SPARSE_CONE"
+            cone=()
+            if [ "${#raw_cone[@]}" -gt 0 ]; then
+                for entry in "${raw_cone[@]}"; do
+                    case "$entry" in
+                        */.enact-direct-files)
+                            cone+=("$entry")
+                            ;;
+                        *)
+                            kind=$(git cat-file -t "$GITHUB_SHA:$entry" 2>/dev/null || true)
+                            if [ "$kind" = "blob" ]; then
+                                case "$entry" in
+                                    */*) cone+=("${entry%/*}/.enact-direct-files") ;;
+                                esac
+                            else
+                                cone+=("$entry")
+                            fi
+                            ;;
+                    esac
+                done
+            fi
             if [ "${#cone[@]}" -gt 0 ]; then
                 git sparse-checkout set --cone "${cone[@]}"
             fi
         fi
-        case "$GITHUB_REF" in
+        case "${GITHUB_REF:-}" in
             refs/heads/*) git checkout -q --force -B "${GITHUB_REF#refs/heads/}" "$GITHUB_SHA" ;;
             *) git checkout -q --force --detach "$GITHUB_SHA" ;;
         esac
@@ -5269,10 +5503,19 @@ jobs:
         export GIT_CONFIG_KEY_1=safe.directory
         export GIT_CONFIG_VALUE_1="$mirror"
         header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$ENACT_GIT_TOKEN" | base64 | tr -d '\n')"
-        refs=("+refs/heads/*:refs/heads/*")
-        case "$GITHUB_REF" in
-            refs/pull/*) refs+=("+$GITHUB_REF:$GITHUB_REF") ;;
+        base_ref="${GITHUB_BASE_REF:-${ENACT_BASE_REF:-}}"
+        depth="${ENACT_HOST_FETCH_DEPTH:-50}"
+        fetch_args=(--no-tags)
+        if [ "$depth" != "0" ]; then
+            fetch_args+=("--depth=$depth")
+        fi
+        refs=()
+        case "${GITHUB_REF:-}" in
+            refs/heads/*|refs/pull/*|refs/tags/*) refs+=("+$GITHUB_REF:$GITHUB_REF") ;;
         esac
+        if [ -n "$base_ref" ] && [ "refs/heads/$base_ref" != "${GITHUB_REF:-}" ]; then
+            refs+=("+refs/heads/$base_ref:refs/heads/$base_ref")
+        fi
         (
             flock 9
             if [ ! -f "$mirror/HEAD" ]; then
@@ -5281,14 +5524,23 @@ jobs:
                 git -C "$mirror" config gc.auto 0
             fi
             ref_current=""
-            case "$GITHUB_REF" in
-                refs/heads/*|refs/pull/*) ref_current=$(git -C "$mirror" rev-parse --verify -q "$GITHUB_REF^{commit}" 2>/dev/null || true) ;;
+            case "${GITHUB_REF:-}" in
+                refs/heads/*|refs/pull/*|refs/tags/*) ref_current=$(git -C "$mirror" rev-parse --verify -q "$GITHUB_REF^{commit}" 2>/dev/null || true) ;;
                 *) ref_current="$GITHUB_SHA" ;;
             esac
-            if [ -z "$(find "$mirror/HEAD" -mmin -1 2>/dev/null || true)" ] || [ "$ref_current" != "$GITHUB_SHA" ] || ! git -C "$mirror" cat-file -e "$GITHUB_SHA^{commit}" 2>/dev/null; then
-                git -C "$mirror" -c "http.extraheader=$header" fetch -q --no-tags --prune "$url" "${refs[@]}"
+            base_missing=0
+            if [ -n "$base_ref" ] && ! git -C "$mirror" rev-parse --verify -q "refs/heads/$base_ref^{commit}" >/dev/null 2>&1; then
+                base_missing=1
+            fi
+            if [ -z "$(find "$mirror/HEAD" -mmin -1 2>/dev/null || true)" ] || [ "$ref_current" != "$GITHUB_SHA" ] || [ "$base_missing" = 1 ] || ! git -C "$mirror" cat-file -e "$GITHUB_SHA^{commit}" 2>/dev/null; then
+                if [ "${#refs[@]}" -gt 0 ]; then
+                    git -C "$mirror" -c "http.extraheader=$header" fetch -q "${fetch_args[@]}" "$url" "${refs[@]}" \
+                        || git -C "$mirror" -c "http.extraheader=$header" fetch -q "${fetch_args[@]}" "$url" "$GITHUB_SHA"
+                else
+                    git -C "$mirror" -c "http.extraheader=$header" fetch -q "${fetch_args[@]}" "$url" "$GITHUB_SHA"
+                fi
                 if ! git -C "$mirror" cat-file -e "$GITHUB_SHA^{commit}" 2>/dev/null; then
-                    git -C "$mirror" -c "http.extraheader=$header" fetch -q --no-tags "$url" "$GITHUB_SHA"
+                    git -C "$mirror" -c "http.extraheader=$header" fetch -q "${fetch_args[@]}" "$url" "$GITHUB_SHA"
                 fi
             fi
             touch "$mirror" "$mirror/HEAD" 2>/dev/null || true
@@ -5302,32 +5554,53 @@ jobs:
         git remote add origin "$url"
         git config --local "http.$GITHUB_SERVER_URL/.extraheader" "$header"
         git config --local gc.auto 0
-        git fetch -q --no-tags "$mirror" "+refs/heads/*:refs/remotes/origin/*"
-        if [ -n "${ENACT_SPARSE_CONE:-}" ]; then
-            mapfile -t raw_cone < <(printf '%s\n' "$ENACT_SPARSE_CONE" | sed '/^[[:space:]]*$/d')
-            cone=()
-            for entry in "${raw_cone[@]}"; do
-                case "$entry" in
-                    */.enact-direct-files)
-                        cone+=("$entry")
-                        ;;
-                    *)
-                        kind=$(git cat-file -t "$GITHUB_SHA:$entry" 2>/dev/null || true)
-                        if [ "$kind" = "blob" ]; then
-                            case "$entry" in
-                                */*) cone+=("${entry%/*}/.enact-direct-files") ;;
-                            esac
-                        else
-                            cone+=("$entry")
-                        fi
-                        ;;
-                esac
+        mirror_branches=()
+        case "${GITHUB_REF:-}" in
+            refs/heads/*) mirror_branches+=("${GITHUB_REF#refs/heads/}") ;;
+        esac
+        if [ -n "$base_ref" ] && [ "refs/heads/$base_ref" != "${GITHUB_REF:-}" ]; then
+            mirror_branches+=("$base_ref")
+        fi
+        if [ "${#mirror_branches[@]}" -gt 0 ]; then
+            for ref_branch in "${mirror_branches[@]}"; do
+                ref_sha=$(git -C "$mirror" rev-parse --verify -q "refs/heads/$ref_branch^{commit}" 2>/dev/null || true)
+                if [ -n "$ref_sha" ]; then
+                    git update-ref "refs/remotes/origin/$ref_branch" "$ref_sha"
+                fi
             done
+        fi
+        if [ -n "${ENACT_SPARSE_CONE:-}" ]; then
+            raw_cone=()
+            while IFS= read -r entry; do
+                entry="${entry#"${entry%%[![:space:]]*}"}"
+                entry="${entry%"${entry##*[![:space:]]}"}"
+                [ -n "$entry" ] && raw_cone+=("$entry")
+            done <<<"$ENACT_SPARSE_CONE"
+            cone=()
+            if [ "${#raw_cone[@]}" -gt 0 ]; then
+                for entry in "${raw_cone[@]}"; do
+                    case "$entry" in
+                        */.enact-direct-files)
+                            cone+=("$entry")
+                            ;;
+                        *)
+                            kind=$(git cat-file -t "$GITHUB_SHA:$entry" 2>/dev/null || true)
+                            if [ "$kind" = "blob" ]; then
+                                case "$entry" in
+                                    */*) cone+=("${entry%/*}/.enact-direct-files") ;;
+                                esac
+                            else
+                                cone+=("$entry")
+                            fi
+                            ;;
+                    esac
+                done
+            fi
             if [ "${#cone[@]}" -gt 0 ]; then
                 git sparse-checkout set --cone "${cone[@]}"
             fi
         fi
-        case "$GITHUB_REF" in
+        case "${GITHUB_REF:-}" in
             refs/heads/*) git checkout -q --force -B "${GITHUB_REF#refs/heads/}" "$GITHUB_SHA" ;;
             *) git checkout -q --force --detach "$GITHUB_SHA" ;;
         esac

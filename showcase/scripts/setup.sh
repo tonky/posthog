@@ -76,17 +76,13 @@ tmp.replace(cfg)
         run_under_venv_lock() {
             mkdir -p "$UV_CACHE_DIR/locks" 2>/dev/null || true
             local lock_file="$UV_CACHE_DIR/locks/${VENV_CACHE##*/}.lock"
-            if command -v flock >/dev/null 2>&1; then
-                ( flock 9 && "$@" ) 9>"$lock_file"
-            else
-                "$PY_BIN" -c '
-import fcntl, os, subprocess, sys
+            "$PY_BIN" -c '
+import fcntl, subprocess, sys
 with open(sys.argv[1], "a+") as f:
     fcntl.flock(f.fileno(), fcntl.LOCK_EX)
-    rc = subprocess.call(sys.argv[2:])
+    rc = subprocess.call(sys.argv[2:], close_fds=True)
 sys.exit(rc)
 ' "$lock_file" "$@"
-            fi
         }
         RESTORED=0
         CLONED_CACHE_INO=""

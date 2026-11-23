@@ -221,7 +221,7 @@ pipeline: components: {
 						"nodejs/src/cdp/services/invocation-results.service.test.ts",
 						"nodejs/src/cdp/services/job-queue/job-queue-postgres-v2.serial.test.ts",
 					]
-					reason: "O1 pin cb94c35517cf: Cyclotron Postgres v2 / invocation-results failure at pin; revisit on next pin bump (usecases/posthog/LEARNINGS.md)"
+					reason: "O1 pin: Cyclotron Postgres v2 / invocation-results failure at pin; revisit on next pin bump (usecases/posthog/LEARNINGS.md)"
 				},
 			]
 		}
@@ -263,7 +263,7 @@ pipeline: components: {
 					"nodejs/tests/scenarios/cloud/host-prepare.test.ts",
 					"nodejs/tests/scenarios/environment/environment.test.ts",
 				]
-				reason: "O1 pin cb94c35517cf: cloud/environment scenario harness assumes fixed Postgres/Docker setup; revisit on next pin bump (usecases/posthog/LEARNINGS.md)"
+				reason: "O1 pin: cloud/environment scenario harness assumes fixed Postgres/Docker setup; revisit on next pin bump (usecases/posthog/LEARNINGS.md)"
 			}]
 		}
 	}

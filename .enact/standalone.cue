@@ -431,7 +431,7 @@ pipeline: components: {
 					tests:    ["services/mcp/tests/**/*.integration.test.ts"]
 					not_run: [{
 						tests:  ["services/mcp/tests/tools/featureFlags.integration.test.ts"]
-						reason: "O1 pin cb94c35517cf: /test_evaluation/ returns 503 without live feature-flags Rust service in mcp_integration harness; revisit on next pin bump (usecases/posthog/LEARNINGS.md)"
+						reason: "O1 pin: /test_evaluation/ returns 503 without live feature-flags Rust service in mcp_integration harness; revisit on next pin bump (usecases/posthog/LEARNINGS.md)"
 					}]
 					rules: [
 						{match: ["posthog/dags/**", "products/*/dags/**", "frontend/snapshots.yml", "playwright/snapshots.yml"], action: "ignore"},
