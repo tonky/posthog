@@ -37,7 +37,7 @@ const RESULT: RunResult = {
     profileHash: SMOKE.profileHash,
     origin: 'local-agent',
     target: 'local',
-    units: { targetUnits: 60, offeredUnits: 58, sendRetries: 3, steps: [] },
+    units: { targetUnits: 60, offeredUnits: 58, steps: [] },
     convergence: { converged: true, unfinishedJobs: 0, unrecorded: [], tookMs: 4000 },
     janitorResets: 2,
     invariants: [
@@ -155,7 +155,6 @@ describe('scorecard', () => {
                     duration_s: 150.5,
                     units_target: 60,
                     units_offered: 58,
-                    send_retries: 3,
                     converged: true,
                     unfinished_jobs: 0,
                     janitor_resets: 2,
@@ -203,7 +202,6 @@ describe('scorecard', () => {
         expect(scorecardOf(stopped, SMOKE, PROVENANCE)).toMatchObject({
             units_target: null,
             units_offered: null,
-            send_retries: null,
             converged: null,
             unfinished_jobs: null,
             invariants_failed: [],
@@ -299,7 +297,6 @@ describe('scorecard', () => {
         const units = {
             targetUnits: 60,
             offeredUnits: 58,
-            sendRetries: 0,
             steps: [
                 { index: 0, scale: 5, startedAt: at, endedAt: at + 60_000, dueUnits: 30, offeredUnits: 29 },
                 {

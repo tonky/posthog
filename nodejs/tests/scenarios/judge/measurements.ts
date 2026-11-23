@@ -163,13 +163,12 @@ export type Phase = { from: number; to: number }
 
 export type Phases = { baseline: Phase; valve?: Phase; failback?: Phase }
 
-const appliedDuring = (drive: DriveWindow, timeline: readonly ValveTimelineEntry[]): ValveTimelineEntry[] =>
-    timeline.filter(({ intentAt }) => intentAt !== undefined && Date.parse(intentAt) < drive.endedAt)
-
 export function phasesOf(drive: DriveWindow, timeline: readonly ValveTimelineEntry[]): Phases {
-    const applied = appliedDuring(drive, timeline).map(({ intentAt, releaseIntentAt, releasedAt }) => {
+    const applied = timeline.flatMap(({ intentAt, releaseIntentAt, releasedAt }) => {
         const released = releaseIntentAt ?? releasedAt
-        return { intent: Date.parse(intentAt!), released: released === undefined ? Infinity : Date.parse(released) }
+        return intentAt === undefined
+            ? []
+            : [{ intent: Date.parse(intentAt), released: released === undefined ? Infinity : Date.parse(released) }]
     })
     if (applied.length === 0) {
         return { baseline: { from: drive.startedAt, to: drive.endedAt } }
@@ -454,12 +453,8 @@ const inPhase = (
     },
 })
 
-function sinceIntent(
-    drive: DriveWindow,
-    timeline: readonly ValveTimelineEntry[],
-    name: ObservationName
-): Measured[] | undefined {
-    const journalled = appliedDuring(drive, timeline).find(({ observations }) => observations)
+function sinceIntent(timeline: readonly ValveTimelineEntry[], name: ObservationName): Measured[] | undefined {
+    const journalled = timeline.find(({ intentAt, observations }) => intentAt !== undefined && observations)
     if (journalled === undefined) {
         return undefined
     }
@@ -473,7 +468,7 @@ const observed = (name: string, observation: ObservationName): MeasurementDefini
     name,
     params: z.object({}).strict(),
     unit: 's',
-    measure: ({ drive, timeline }) => sinceIntent(drive, timeline, observation) ?? [],
+    measure: ({ timeline }) => sinceIntent(timeline, observation) ?? [],
 })
 
 export const RECOVERY_MEASUREMENTS: MeasurementDefinition[] = [
@@ -487,8 +482,8 @@ export const RECOVERY_MEASUREMENTS: MeasurementDefinition[] = [
         'seconds_to_first_probe_commit',
         's',
         'valve',
-        ({ writer, drive, timeline }, phase) =>
-            sinceIntent(drive, timeline, 'first_probe_commit') ?? firstCommitAfterFailure(writer, phase)
+        ({ writer, timeline }, phase) =>
+            sinceIntent(timeline, 'first_probe_commit') ?? firstCommitAfterFailure(writer, phase)
     ),
     inPhase('queue_lag_peak_seconds', 's', 'valve', ({ queue }, phase) => {
         const ages = counted(queue)

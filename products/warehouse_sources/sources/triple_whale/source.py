@@ -87,10 +87,7 @@ class TripleWhaleSource(ResumableSource[TripleWhaleSourceConfig, TripleWhaleResu
         if response.status_code == 403:
             if schema_name is None:
                 return True, None
-            scope = ENDPOINTS[schema_name].scope
-            if scope is None:
-                return False, "Give the API key owner access to this shop."
-            return False, f"Grant the API key {scope} read access and access to this shop."
+            return False, f"Grant the API key {ENDPOINTS[schema_name].scope} read access and access to this shop."
         response.raise_for_status()
         return True, None
 
@@ -102,7 +99,7 @@ class TripleWhaleSource(ResumableSource[TripleWhaleSourceConfig, TripleWhaleResu
     def get_non_retryable_errors(self) -> dict[str, str | None]:
         return {
             "401 Client Error": "Triple Whale rejected the API key. Replace revoked or expired keys. Keys also stop working when their owner leaves.",
-            "403 Client Error": "Grant the API key access to this shop. Orders with journeys needs Pixel Attribution read access, and summary page needs Summary Page read access.",
+            "403 Client Error": "Grant the API key access to this shop and the selected table's read scope: Pixel Attribution or Summary Page.",
         }
 
     def get_canonical_descriptions(self) -> CanonicalDescriptions:
@@ -129,7 +126,7 @@ class TripleWhaleSource(ResumableSource[TripleWhaleSourceConfig, TripleWhaleResu
             name=ExternalDataSourceType.TRIPLEWHALE,
             category=DataWarehouseSourceCategory.E_COMMERCE,
             label="Triple Whale",
-            caption="Import orders, ads, customers, products, order journeys, and daily metrics. Full refresh captures changes to historical data.",
+            caption="Import order journeys and daily metrics. Full refresh captures changes to historical data.",
             docsUrl="https://posthog.com/docs/cdp/sources/triple-whale",
             iconPath="/static/services/triple_whale.png",
             releaseStatus=ReleaseStatus.BETA,
@@ -143,7 +140,7 @@ class TripleWhaleSource(ResumableSource[TripleWhaleSourceConfig, TripleWhaleResu
                         required=True,
                         placeholder="",
                         secret=True,
-                        caption="Create a key in Data > APIs. Grant Pixel Attribution and Summary Page read access for those tables. Without Customer PII read access, customer names, emails, and addresses are `blocked`.",
+                        caption="Create a key in Data > APIs. Grant Pixel Attribution and Summary Page read access for both tables.",
                     ),
                     SourceFieldInputConfig(
                         name="shop",

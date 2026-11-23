@@ -1,4 +1,3 @@
-import { setTimeout as sleep } from 'timers/promises'
 import { z } from 'zod'
 
 import { FixtureHogFlowBuilder } from '~/cdp/_tests/builders/hogflow.builder'
@@ -22,11 +21,9 @@ export type Unit = { unitId: string; teamId: number; flowId: string }
 
 export type Emit = (unit: Unit, event: string, properties: object) => Promise<IntakeAnswer>
 
-export type SendClock = { now(): number; wait(ms: number, signal: AbortSignal): Promise<void> }
-
 export type OfferContext = {
     emit: Emit
-    cdpApi?: { url: string; jwt: Pick<ScopedServiceJwt, 'mint'>; clock?: SendClock }
+    cdpApi?: { url: string; jwt: Pick<ScopedServiceJwt, 'mint'> }
     sesFeedback?: SesFeedback
 }
 
@@ -36,7 +33,7 @@ export type TrafficKind = Omit<TrafficDefinition, 'profile'> & {
     deliveries: string[]
     needsLocal?: true
     flow(teamId: number, emailIntegrationId: number, parks: number): Promise<HogFlow>
-    offer(unit: Unit, context: OfferContext, signal: AbortSignal): Promise<JournalEntry['answer']>
+    offer(unit: Unit, context: OfferContext): Promise<JournalEntry['answer']>
     followUp?: {
         flow(teamId: number, emailIntegrationId: number, parks: number): Promise<HogFlow>
         offer(unit: Unit, context: OfferContext, signal: AbortSignal): Promise<FollowUpAnswer>
@@ -218,7 +215,7 @@ export const transactionalEmail: TrafficKind = {
             step: await emailStep(emailIntegrationId, 'event.properties.to'),
             parks,
         }),
-    offer: (unit, { cdpApi }, signal) => sendTransactional(unit, localOnly(cdpApi, 'CDP API'), signal),
+    offer: (unit, { cdpApi }) => sendTransactional(unit, localOnly(cdpApi, 'CDP API')),
 }
 
 const BOUNCE_EVENT = 'scenario_bounce'
@@ -244,51 +241,15 @@ export const bounceFollowup: TrafficKind = {
         offer: async (unit, { sesFeedback, cdpApi }, signal) => {
             const notSent = await localOnly(sesFeedback, 'SES feedback').settled(unit.unitId, signal)
             signal.throwIfAborted()
-            return notSent === undefined ? sendTransactional(unit, localOnly(cdpApi, 'CDP API'), signal) : { notSent }
+            return notSent === undefined ? sendTransactional(unit, localOnly(cdpApi, 'CDP API')) : { notSent }
         },
     },
 }
 
-const SEND_RETRY = { backoffMs: 500, maxWaitMs: 5_000, deadlineMs: 60_000 }
-
-export const REAL_CLOCK: SendClock = {
-    now: () => performance.now(),
-    wait: async (ms, signal) => {
-        await sleep(ms, undefined, { signal })
-    },
-}
-
-const withRetries = (answer: IntakeAnswer, retries: number): JournalEntry['answer'] =>
-    retries === 0 ? answer : { ...answer, retries }
-
 async function sendTransactional(
     unit: Unit,
-    cdpApi: NonNullable<OfferContext['cdpApi']>,
-    signal: AbortSignal
+    cdpApi: NonNullable<OfferContext['cdpApi']>
 ): Promise<JournalEntry['answer']> {
-    const { backoffMs, maxWaitMs, deadlineMs } = SEND_RETRY
-    const clock = cdpApi.clock ?? REAL_CLOCK
-    const request = { to: unitAddress(unit), distinct_id: unit.unitId, variables: {}, idempotency_key: unit.unitId }
-    const deadline = clock.now() + deadlineMs
-    for (let retry = 0; ; retry += 1) {
-        const answer = await postTransactional(unit, cdpApi, request)
-        const waitMs = Math.min(backoffMs * 2 ** retry, maxWaitMs)
-        if (!('status' in answer) || answer.status < 500 || clock.now() + waitMs > deadline) {
-            return withRetries(answer, retry)
-        }
-        await clock.wait(waitMs, signal)
-        signal.throwIfAborted()
-        if (clock.now() > deadline) {
-            return withRetries(answer, retry)
-        }
-    }
-}
-
-async function postTransactional(
-    unit: Unit,
-    cdpApi: NonNullable<OfferContext['cdpApi']>,
-    request: object
-): Promise<IntakeAnswer> {
     try {
         const response = await internalFetch(
             `${cdpApi.url}/api/projects/${unit.teamId}/hog_flows/${unit.flowId}/transactional_email`,
@@ -298,7 +259,7 @@ async function postTransactional(
                     'content-type': 'application/json',
                     authorization: `Bearer ${cdpApi.jwt.mint({ team_id: unit.teamId, hog_flow_id: unit.flowId })}`,
                 },
-                body: JSON.stringify(request),
+                body: JSON.stringify({ to: unitAddress(unit), distinct_id: unit.unitId, variables: {} }),
             }
         )
         const body = await response.text()

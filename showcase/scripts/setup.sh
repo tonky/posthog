@@ -49,10 +49,70 @@ case "${1:-frontend}" in
                 [ -n "$lease_id" ] && printf 'container=%s\n' "$lease_id" > "$1/.gha-job-lease" 2>/dev/null || true
             fi
         }
+        relink_venv_python() {
+            local venv_dir="$1"
+            if [ -d "$venv_dir/bin" ]; then
+                ln -sfn "$PY_BIN" "$venv_dir/bin/python" 2>/dev/null || true
+                ln -sfn "$PY_BIN" "$venv_dir/bin/python3" 2>/dev/null || true
+            fi
+            if [ -f "$venv_dir/pyvenv.cfg" ]; then
+                local py_home
+                py_home="$(dirname "$PY_BIN")"
+                "$PY_BIN" -c '
+import sys
+from pathlib import Path
+cfg, py_home = Path(sys.argv[1]), sys.argv[2]
+lines = cfg.read_text().splitlines()
+out = [f"home = {py_home}" if l.startswith("home = ") else l for l in lines]
+tmp = cfg.with_suffix(".cfg.tmp")
+tmp.write_text("\n".join(out) + "\n")
+tmp.replace(cfg)
+' "$venv_dir/pyvenv.cfg" "$py_home" 2>/dev/null || true
+            fi
+        }
+        venv_cache_inode() {
+            stat -c '%d:%i' "$1" 2>/dev/null || stat -f '%d:%i' "$1" 2>/dev/null || true
+        }
+        run_under_venv_lock() {
+            mkdir -p "$UV_CACHE_DIR/locks" 2>/dev/null || true
+            local lock_file="$UV_CACHE_DIR/locks/${VENV_CACHE##*/}.lock"
+            if command -v flock >/dev/null 2>&1; then
+                ( flock 9 && "$@" ) 9>"$lock_file"
+            else
+                "$PY_BIN" -c '
+import fcntl, os, subprocess, sys
+with open(sys.argv[1], "a+") as f:
+    fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+    rc = subprocess.call(sys.argv[2:])
+sys.exit(rc)
+' "$lock_file" "$@"
+            fi
+        }
         RESTORED=0
-        if [ -n "$VENV_CACHE" ] && [ -d "$VENV_CACHE" ] && [ ! -e .venv ]; then
+        CLONED_CACHE_INO=""
+        if [ -n "$VENV_CACHE" ] && [ ! -e .venv ]; then
             WORK_VENV="$(mktemp -d "$UV_CACHE_DIR/work/venv.XXXXXX")"
-            if clone_tree "$VENV_CACHE" "$WORK_VENV"; then
+            CLONE_OK=0
+            if run_under_venv_lock bash -c '
+                set -euo pipefail
+                cache="$1"; dest="$2"; ino_file="$3"
+                if [ -d "$cache" ] && [ ! -f "$cache/pyvenv.cfg" ]; then
+                    rm -rf "$cache" 2>/dev/null || true
+                fi
+                [ -f "$cache/pyvenv.cfg" ] || exit 1
+                (stat -c "%d:%i" "$cache" 2>/dev/null || stat -f "%d:%i" "$cache" 2>/dev/null || true) > "$ino_file"
+                rm -rf "$dest"
+                cp -a --reflink=auto "$cache" "$dest" 2>/dev/null \
+                    || { rm -rf "$dest"; cp -al "$cache" "$dest" 2>/dev/null; } \
+                    || { rm -rf "$dest"; cp -a "$cache" "$dest"; }
+                touch "$cache" "$dest" 2>/dev/null || true
+            ' _ "$VENV_CACHE" "$WORK_VENV" "$WORK_VENV.ino"; then
+                CLONE_OK=1
+                CLONED_CACHE_INO="$(cat "$WORK_VENV.ino" 2>/dev/null || true)"
+            fi
+            rm -f "$WORK_VENV.ino"
+            if [ "$CLONE_OK" -eq 1 ]; then
+                relink_venv_python "$WORK_VENV"
                 write_venv_lease "$WORK_VENV"
                 find "$WORK_VENV" -name '*.pth' -type f -delete 2>/dev/null || true
                 # Rewrite cloned entrypoint shebangs on fresh inodes (`uv sync` skips rebuilding
@@ -74,12 +134,20 @@ if bin_dir.is_dir():
             os.chmod(tmp, p.stat().st_mode & 0o7777)
             tmp.replace(p)
 ' "$WORK_VENV" "$PWD/.venv/bin/python3"
-                touch "$VENV_CACHE" "$WORK_VENV" 2>/dev/null || true
                 ln -sfn "$WORK_VENV" .venv
                 if uv sync --frozen --dev --no-install-package pytest-split --python "$PY_BIN" && uv run --no-sync python -c 'import grpc; from grpc._cython import cygrpc'; then
                     RESTORED=1
                 else
-                    rm -rf "$VENV_CACHE" "$WORK_VENV" .venv
+                    # Recheck cache identity under the per-key lock before evicting so a fresh
+                    # replacement published by another worker is never deleted.
+                    run_under_venv_lock bash -c '
+                        cache="$1"; expected_ino="$2"
+                        cur_ino="$(stat -c "%d:%i" "$cache" 2>/dev/null || stat -f "%d:%i" "$cache" 2>/dev/null || true)"
+                        if [ -n "$expected_ino" ] && [ "$cur_ino" = "$expected_ino" ]; then
+                            rm -rf "$cache" 2>/dev/null || true
+                        fi
+                    ' _ "$VENV_CACHE" "$CLONED_CACHE_INO"
+                    rm -rf "$WORK_VENV" .venv
                 fi
             else
                 rm -rf "$WORK_VENV"
@@ -88,17 +156,30 @@ if bin_dir.is_dir():
         if [ "$RESTORED" -eq 0 ]; then
             if [ -n "$VENV_CACHE" ] && [ ! -e .venv ]; then
                 WORK_VENV="$(mktemp -d "$UV_CACHE_DIR/work/venv.XXXXXX")"
+                # Create the venv BEFORE writing `.gha-job-lease`: uv refuses to initialize
+                # `.venv` over a non-empty directory that lacks a Python executable (exit 2).
+                uv venv --python "$PY_BIN" "$WORK_VENV"
                 write_venv_lease "$WORK_VENV"
                 ln -sfn "$WORK_VENV" .venv
             fi
             uv sync --frozen --dev --no-install-package pytest-split --compile-bytecode --python "$PY_BIN"
             uv run --no-sync python -c 'import grpc; from grpc._cython import cygrpc'
-            if [ "$CACHE_VENV_WRITE" -eq 1 ] && [ -n "$VENV_CACHE" ] && [ ! -d "$VENV_CACHE" ]; then
+            if [ "$CACHE_VENV_WRITE" -eq 1 ] && [ -n "$VENV_CACHE" ]; then
                 TMP_CACHE="$(mktemp -d "$UV_CACHE_DIR/venv-tmp.XXXXXX")"
                 SRC_VENV="$(realpath .venv)"
                 if clone_tree "$SRC_VENV" "$TMP_CACHE"; then
                     rm -f "$TMP_CACHE/.gha-job-lease"
-                    mv -T "$TMP_CACHE" "$VENV_CACHE" 2>/dev/null || { [ ! -d "$VENV_CACHE" ] && mv "$TMP_CACHE" "$VENV_CACHE" 2>/dev/null; } || rm -rf "$TMP_CACHE"
+                    run_under_venv_lock bash -c '
+                        cache="$1"; staged="$2"
+                        if [ -d "$cache" ] && [ ! -f "$cache/pyvenv.cfg" ]; then
+                            rm -rf "$cache" 2>/dev/null || true
+                        fi
+                        if [ ! -f "$cache/pyvenv.cfg" ]; then
+                            mv -T "$staged" "$cache" 2>/dev/null || { [ ! -d "$cache" ] && mv "$staged" "$cache" 2>/dev/null; } || rm -rf "$staged"
+                        else
+                            rm -rf "$staged"
+                        fi
+                    ' _ "$VENV_CACHE" "$TMP_CACHE"
                 else
                     rm -rf "$TMP_CACHE"
                 fi
