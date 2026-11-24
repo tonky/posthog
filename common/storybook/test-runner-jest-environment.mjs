@@ -64,32 +64,21 @@ class CustomEnvironment extends BaseEnvironment {
 
     async handleTestEvent(event) {
         if (event.name === 'test_done' && event.test.errors.length > 0) {
-            if (!(await this.pageResponds())) {
-                await this.replaceUnresponsivePage(event.test)
-            } else if (!(await this.pagePaints())) {
-                await this.replacePageThatStoppedPainting(event.test)
-            } else {
+            if (await this.pageResponds()) {
                 await this.takeFailureScreenshot(event.test)
+            } else {
+                await this.replaceUnresponsivePage(event.test)
             }
         }
         await super.handleTestEvent(event)
     }
 
     async pageResponds() {
-        return this.pageAnswers(() => true, 'page did not respond')
-    }
-
-    // Playwright's element screenshot and the runner's resize both wait for animation frames, so every retry
-    // fails on a page that answers script but paints no frame, and `pageResponds` alone would keep that page.
-    async pagePaints() {
-        return this.pageAnswers(
-            () => new Promise((resolve) => requestAnimationFrame(() => resolve(true))),
-            'page painted no frame'
+        return withTimeout(
+            this.global.page.evaluate(() => true),
+            PAGE_LIVENESS_TIMEOUT_MS,
+            'page did not respond'
         )
-    }
-
-    async pageAnswers(pageFunction, message) {
-        return withTimeout(this.global.page.evaluate(pageFunction), PAGE_LIVENESS_TIMEOUT_MS, message)
             .then(() => true)
             .catch(() => false)
     }
@@ -115,7 +104,9 @@ class CustomEnvironment extends BaseEnvironment {
         if (!this.pageSession) {
             return 'No diagnosis in this browser.'
         }
-        const cpu = await this.describeProcessCpu()
+        const cpu = await withTimeout(this.sampleProcessCpu(), PAGE_LIVENESS_TIMEOUT_MS, 'CPU sample timed out').catch(
+            (error) => error.message
+        )
         const stack = await this.captureStack()
         // Chromium serves these commands from the page's main thread or through a V8 interrupt, so a page
         // blocked outside script never answers them.
@@ -156,12 +147,6 @@ class CustomEnvironment extends BaseEnvironment {
         }
     }
 
-    async describeProcessCpu() {
-        return withTimeout(this.sampleProcessCpu(), PAGE_LIVENESS_TIMEOUT_MS, 'CPU sample timed out').catch(
-            (error) => error.message
-        )
-    }
-
     async sampleProcessCpu() {
         const browserSession = await this.global.browser.newBrowserCDPSession()
         const read = async () => (await browserSession.send('SystemInfo.getProcessInfo')).processInfo
@@ -180,26 +165,15 @@ class CustomEnvironment extends BaseEnvironment {
         }
     }
 
+    // One page serves every story in a file. When its main thread stops answering, every later
+    // page.evaluate waits forever, so each remaining story and retry in the file runs into the jest
+    // timeout. A new browser context gets a new renderer process, which lets the retry and the
+    // remaining stories run.
     async replaceUnresponsivePage(test) {
         const message = `Page stopped responding during "${storyName(test)}". ${await this.diagnoseFreeze()} Replacing it.`
-        await this.replacePage('Storybook page froze', message)
-    }
-
-    async replacePageThatStoppedPainting(test) {
-        const message =
-            `Page stopped painting frames during "${storyName(test)}" but still answers script. ` +
-            `CPU: ${await this.describeProcessCpu()}. Replacing it.`
-        await this.replacePage('Storybook page stopped painting', message)
-    }
-
-    // One page serves every story in a file. When its main thread stops answering, every later
-    // page.evaluate waits forever, and when it stops painting, every later screenshot and frame wait
-    // times out, so each remaining story and retry in the file fails. A new browser context gets a new
-    // renderer process, which lets the retry and the remaining stories run.
-    async replacePage(title, message) {
         // eslint-disable-next-line no-console
         console.warn(`[test-runner] ${message}`)
-        writeWarningAnnotation(title, message)
+        writeWarningAnnotation('Storybook page froze', message)
         const replacement = (async () => {
             await this.global.jestPlaywright.resetContext()
             await setupPage(this.global.page, this.global.context)

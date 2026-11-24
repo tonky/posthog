@@ -47,6 +47,7 @@ class TestMembershipSchema(QueryMatchingTest, SimpleTestCase):
             database=Database(),
             enable_select_queries=True,
             restricted_properties=set(),
+            use_new_events_schema=False,
         )
         with self.assertRaises(QueryError):
             prepare_and_print_ast(parse_select(f"SELECT distinct_id FROM {table}"), context, "clickhouse")

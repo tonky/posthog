@@ -18,9 +18,7 @@ import { copyToClipboard } from 'lib/utils/copyToClipboard'
 
 import type { ImportProviderOptionApi } from 'products/messaging/frontend/generated/api.schemas'
 
-import { CustomerIOAutomationsImportItem } from './CustomerIOAutomationsImportItem'
 import { CSVImportProgress, customerIOImportLogic } from './customerIOImportLogic'
-import { providerImportLogic } from './providerImportLogic'
 import { ProviderImportPanel } from './ProviderImportPanel'
 
 function StepBadge({ status }: { status: 'completed' | 'failed' | false }): JSX.Element | null {
@@ -477,7 +475,6 @@ function Step4Content(): JSX.Element {
 
 export function CustomerIOImportSteps({ provider }: { provider: ImportProviderOptionApi }): JSX.Element {
     const { stepCompletion, syncConfigLoading, syncConfig, latestImportRun } = useValues(customerIOImportLogic)
-    const { showsAutomationImport } = useValues(providerImportLogic)
 
     if (syncConfigLoading) {
         return (
@@ -498,8 +495,6 @@ export function CustomerIOImportSteps({ provider }: { provider: ImportProviderOp
                     for detailed instructions.
                 </span>
             </LemonBanner>
-            {/* Above the steps, so it stays in view whichever step is open. */}
-            {showsAutomationImport && <CustomerIOAutomationsImportItem />}
             <LemonCollapse
                 defaultActiveKey={
                     // A failed run has to stay in view, because its error says which steps to retry.

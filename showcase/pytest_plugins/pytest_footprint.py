@@ -72,20 +72,81 @@ root = (
 )
 
 
-def wanted_files() -> set[str] | None:
-    """The test files to record ($ENACT_FOOTPRINT_TARGETS, targets or test ids); None: all."""
+def _resolve_operand_rel(path_part: str, base_dir: str | None) -> str | None:
+    """Repo-relative path for a pytest operand ("" for repo root), or None outside repo."""
+    if base_dir is None:
+        cleaned = path_part.strip().removeprefix("./").rstrip("/")
+        return "" if cleaned in ("", ".") else cleaned
+    candidates = (
+        [path_part]
+        if os.path.isabs(path_part)
+        else [os.path.join(base_dir, path_part), os.path.join(root, path_part), path_part]
+    )
+    for cand in candidates:
+        rel = core.relative(cand)
+        if rel is not None:
+            return rel
+    return None
+
+
+def _node_only_files(operands, base_dir: str | None = None) -> set[str]:
+    """Files requested only via `::` node-ID operands (not whole-file or enclosing-dir operands)."""
+    node_files: set[str] = set()
+    whole_files: set[str] = set()
+    whole_dirs: set[str] = set()
+    covers_all = False
+    for raw in operands:
+        op = raw.strip()
+        if not op:
+            continue
+        if "::" in op:
+            rel = _resolve_operand_rel(op.split("::", 1)[0], base_dir)
+            if rel and rel.endswith(".py"):
+                node_files.add(rel)
+        else:
+            rel = _resolve_operand_rel(op, base_dir)
+            if rel is None:
+                continue
+            if rel == "":
+                covers_all = True
+            elif rel.endswith(".py"):
+                whole_files.add(rel)
+            else:
+                whole_dirs.add(rel.rstrip("/"))
+    if covers_all:
+        return set()
+    return {
+        f
+        for f in node_files
+        if f not in whole_files and not any(f.startswith(d + "/") for d in whole_dirs)
+    }
+
+
+def wanted_files() -> tuple[set[str] | None, set[str]]:
+    """The test files to record ($ENACT_FOOTPRINT_TARGETS, targets or test ids); None: all.
+    Also returns files requested exclusively via `::` node-ID operands."""
     listed = os.environ.get("ENACT_FOOTPRINT_TARGETS")
     if not listed:
-        return None
+        return None, set()
     with open(listed) as f:
-        return {line.strip().split("::", 1)[0] for line in f if line.strip()}
+        lines = [line.strip() for line in f if line.strip()]
+    wanted = {line.split("::", 1)[0] for line in lines}
+    return wanted, _node_only_files(lines)
 
 
-WANTED = wanted_files() if RECORDING else None
+WANTED, _WANTED_NODE_ONLY = wanted_files() if RECORDING else (None, set())
 # Per recorded test file: its tests collected, those that ran, and whether one failed.
 collected: dict[str, int] = {}
 finished: dict[str, int] = {}
 failed: set[str] = set()
+# Recorded test files whose collection failed, succeeded as a module, had items deselected,
+# or were requested only via `::` node-ID operands (partial file selection).
+collection_failed: set[str] = set()
+collected_modules: set[str] = set()
+deselected: set[str] = set()
+node_filtered: set[str] = set(_WANTED_NODE_ONLY)
+session_collection_failed: bool = False
+session_exitstatus: int | None = None
 # Recorded test files with a test skipped (xfail aside: its test ran), or skipped whole.
 skipped: set[str] = set()
 # The platform as enact names it (`linux`, `darwin`).
@@ -114,11 +175,42 @@ def recorded_file(item) -> str | None:
     return None if key in (None, core.SHARED) else key
 
 
+def pytest_configure(config):
+    if not RECORDING:
+        return
+    inv_dir = getattr(getattr(config, "invocation_params", None), "dir", None)
+    base_dir = str(inv_dir) if inv_dir is not None else os.getcwd()
+    args = getattr(config, "args", None) or ()
+    node_filtered.update(_node_only_files(args, base_dir=base_dir))
+
+
+def pytest_deselected(items):
+    for item in items:
+        rel = recorded_file(item)
+        if rel:
+            deselected.add(rel)
+
+
 def pytest_collection_finish(session):
     for item in session.items:
         rel = recorded_file(item)
         if rel:
             collected[rel] = collected.get(rel, 0) + 1
+
+
+def pytest_collectreport(report):
+    global session_collection_failed
+    if not report.failed:
+        return
+    session_collection_failed = True
+    fspath = getattr(report, "fspath", None)
+    rel = relative(fspath) if fspath else None
+    if not rel:
+        nodeid_file = report.nodeid.split("::", 1)[0]
+        if nodeid_file:
+            rel = relative(os.path.join(root, nodeid_file)) or relative(nodeid_file)
+    if rel and rel.endswith(".py") and (WANTED is None or rel in WANTED):
+        collection_failed.add(rel)
 
 
 @pytest.hookimpl(wrapper=True)
@@ -133,8 +225,15 @@ def pytest_make_collect_report(collector):
         rel = recorded_file(collector)
         if rel and isinstance(collector, pytest.Module):
             core.own_modules.add(rel)
+            if not report.failed:
+                collected_modules.add(rel)
         if rel and report.skipped:
             skipped.add(rel)
+        if report.failed:
+            global session_collection_failed
+            session_collection_failed = True
+            if rel:
+                collection_failed.add(rel)
         return report
     finally:
         core.switch(previous)
@@ -150,7 +249,7 @@ def pytest_runtest_protocol(item, nextitem):
         rel = recorded_file(item)
         if rel:
             finished[rel] = finished.get(rel, 0) + 1
-            if RECORDING and finished[rel] >= collected.get(rel, 0):
+            if RECORDING and collected.get(rel, 0) > 0 and finished[rel] >= collected[rel]:
                 checkpoint()
 
 
@@ -178,7 +277,9 @@ def pytest_fixture_setup(fixturedef, request):
 
 
 @pytest.hookimpl(tryfirst=True)
-def pytest_sessionfinish(session):
+def pytest_sessionfinish(session, exitstatus):
+    global session_exitstatus
+    session_exitstatus = int(exitstatus)
     if RECORDING:
         core.switch(None)  # reporting: no test's
 
@@ -204,11 +305,39 @@ def patch_pytest() -> None:
     fixtures.FixtureDef.finish = finish_fixture
 
 
+def _has_completion_witness(target: str) -> bool:
+    if target in failed or target in collection_failed:
+        return False
+    if target in deselected or target in node_filtered:
+        return False
+    count = collected.get(target, 0)
+    if count > 0:
+        return finished.get(target, 0) >= count
+    # Zero collected items: only a clean (non-collection-failed, finished, non-interrupted)
+    # session where the file was not deselected or node-filtered and either skipped at module
+    # level or cleanly collected as an empty test module witnesses completion.
+    if session_collection_failed or session_exitstatus is None or session_exitstatus in (2, 3, 4):
+        return False
+    return target in skipped or target in collected_modules
+
+
+def _incomplete_exit(target: str) -> int:
+    if target in collection_failed:
+        return session_exitstatus if session_exitstatus in (2, 3, 4) else 2
+    if session_exitstatus in (2, 3, 4):
+        return session_exitstatus
+    if session_collection_failed:
+        return 2
+    if session_exitstatus and session_exitstatus > 0:
+        return session_exitstatus
+    return 1
+
+
 def _outcomes_and_skipped(targets) -> tuple[dict, dict[str, list[str]]]:
     outcomes = {
-        target: {"incomplete": {"exit": 1}}
+        target: {"incomplete": {"exit": _incomplete_exit(target)}}
         for target in targets
-        if target in failed or finished.get(target, 0) < collected.get(target, 0)
+        if not _has_completion_witness(target)
     }
     skipped_dict = {target: [PLATFORM] for target in targets if target in skipped}
     return outcomes, skipped_dict
@@ -224,8 +353,14 @@ def checkpoint() -> None:
     """Publish finished targets not already durable; unresolved children are retried later.
     A failed write leaves the earlier checkpoints intact."""
     began = time.monotonic()
-    done = [key for key in core.footprints if key != core.SHARED and key not in checkpointed
-            and finished.get(key, 0) >= collected.get(key, 0)]
+    done = [
+        key
+        for key in core.footprints
+        if key != core.SHARED
+        and key not in checkpointed
+        and collected.get(key, 0) > 0
+        and finished.get(key, 0) >= collected[key]
+    ]
     try:
         outcomes, skipped_dict = _outcomes_and_skipped(done)
         res = core.write_checkpoint_v2(

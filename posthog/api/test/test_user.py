@@ -1297,6 +1297,7 @@ class TestUserAPI(APIBaseTest):
     ):
         self.user.email = "alpha@example.com"
         self.user.save()
+        self.client.force_login(self.user)
 
         with patch("posthog.api.user.is_email_available", return_value=email_available):
             response = self.client.patch("/api/users/@me/", {"email": "beta@example.com"})
@@ -1495,6 +1496,7 @@ class TestUserAPI(APIBaseTest):
         self.user.email = "alpha@example.com"
         self.user.is_email_verified = True
         self.user.save()
+        self.client.force_login(self.user)
 
         social_auth_ids = [
             UserSocialAuth.objects.create(user=self.user, provider=provider, uid=uid).id

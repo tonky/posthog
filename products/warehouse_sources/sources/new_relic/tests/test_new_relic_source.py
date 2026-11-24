@@ -40,13 +40,6 @@ class TestNewRelicSource:
             ("javascript_errors", True),
             ("alert_incidents", True),
             ("alert_issues", True),
-            ("deployments", True),
-            ("change_tracking_events", True),
-            ("mobile_sessions", True),
-            ("mobile_crashes", True),
-            ("mobile_requests", True),
-            ("synthetic_checks", True),
-            ("synthetic_requests", True),
             ("logs", True),
             ("spans", True),
             ("entities", False),
@@ -60,7 +53,7 @@ class TestNewRelicSource:
         assert schema.supports_incremental is False
         assert bool(schema.incremental_fields) is supports_append
 
-    @parameterized.expand([("logs",), ("spans",), ("mobile_requests",), ("synthetic_requests",)])
+    @parameterized.expand([("logs",), ("spans",)])
     def test_high_volume_tables_are_off_by_default(self, endpoint):
         schema = next(s for s in self.source.get_schemas(self.config, self.team_id) if s.name == endpoint)
         assert schema.should_sync_default is False

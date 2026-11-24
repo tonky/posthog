@@ -64,7 +64,6 @@ import {
     VisibleGraph,
 } from './tileCanvasModel'
 import { withLeavingStacks } from './tileCanvasNodes'
-import { timeFromTrigger, TimesFromTrigger } from './timeFromTrigger'
 
 export type TileCanvasPanelMode = HogFlowEditorMode | 'history'
 
@@ -239,7 +238,6 @@ export interface tileCanvasLogicValues {
     stepMenuFromKeyboard: boolean
     stepMetrics: Record<string, HogFlowEditorActionMetrics> | null
     templateNameOf: TemplateNameOf
-    timesFromTrigger: TimesFromTrigger
     viewportFocus: ViewportFocus | null
     visibleGraph: VisibleGraph
 }
@@ -454,7 +452,6 @@ export interface tileCanvasLogicMeta {
     key: string
     __keaTypeGenInternalSelectorTypes: {
         pathGroups: (workflow: HogFlow) => PathGroup[]
-        timesFromTrigger: (workflow: HogFlow) => TimesFromTrigger
         stepMetrics: (
             workflow: HogFlow,
             stepCounts: Record<string, HogFlowEditorActionMetrics> | null
@@ -723,7 +720,6 @@ export const tileCanvasLogic = kea<tileCanvasLogicType>([
     })),
     selectors({
         pathGroups: [(s) => [s.workflow], (workflow: HogFlow): PathGroup[] => computePathGroups(workflow)],
-        timesFromTrigger: [(s) => [s.workflow], (workflow: HogFlow): TimesFromTrigger => timeFromTrigger(workflow)],
         stepMetrics: [
             (s) => [s.workflow, s.stepCounts],
             (

@@ -74,8 +74,8 @@ class OneSignalSource(ResumableSource[OneSignalSourceConfig, OneSignalResumeConf
             label="OneSignal",
             caption=(
                 "Enter your App ID and App API key from OneSignal Settings > Keys & IDs. "
-                "Import message delivery totals, segments, templates, and journeys with their stats. "
-                "OneSignal retains API messages for 30 days. The notifications table excludes journey messages."
+                "Import message delivery totals and segment metadata. "
+                "OneSignal retains API messages for 30 days. Journey messages are excluded."
             ),
             iconPath="/static/services/onesignal.png",
             docsUrl="https://posthog.com/docs/cdp/sources/onesignal",

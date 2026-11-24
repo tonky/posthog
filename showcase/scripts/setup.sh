@@ -17,13 +17,13 @@ case "${1:-frontend}" in
         VENV_CACHE=""
         CACHE_VENV_WRITE=0
         prune_venv_cache() {
-            { ls -1dt "$UV_CACHE_DIR"/venv-v2-* 2>/dev/null || true; } | tail -n +3 | while IFS= read -r stale_venv; do
+            { ls -1dt "$UV_CACHE_DIR"/venv-v3-* 2>/dev/null || true; } | tail -n +3 | while IFS= read -r stale_venv; do
                 rm -rf -- "$stale_venv" 2>/dev/null || true
             done
         }
         if [ -n "${UV_CACHE_DIR:-}" ] && { [ "${GITHUB_ACTIONS:-}" != "true" ] || [ -n "${ENACT_HOST_CACHE:-}" ]; }; then
             VENV_KEY="$({ printf '%s\n' "$PY_BIN"; sha256sum uv.lock pyproject.toml 2>/dev/null || shasum -a 256 uv.lock pyproject.toml; } | { sha256sum 2>/dev/null || shasum -a 256; } | cut -c1-16)"
-            VENV_CACHE="${UV_CACHE_DIR}/venv-v2-${VENV_KEY}"
+            VENV_CACHE="${UV_CACHE_DIR}/venv-v3-${VENV_KEY}"
             CACHE_VENV_WRITE=1
             UV_WORK_BASE="${ENACT_UV_WORK_DIR:-$UV_CACHE_DIR/work}"
             mkdir -p "$UV_WORK_BASE"
@@ -56,6 +56,32 @@ case "${1:-frontend}" in
             if [ -d "$venv_dir/bin" ]; then
                 ln -sfn "$PY_BIN" "$venv_dir/bin/python" 2>/dev/null || true
                 ln -sfn "$PY_BIN" "$venv_dir/bin/python3" 2>/dev/null || true
+                # Rewrite hardcoded producer paths in cloned activate scripts on fresh inodes
+                # so callers sourcing bin/activate (e.g. bin/hogli) resolve this consumer venv.
+                "$PY_BIN" -c '
+import os, re, sys
+from pathlib import Path
+venv_dir = sys.argv[1]
+bin_dir = Path(venv_dir) / "bin"
+patterns = {
+    "activate": re.compile(r"^(VIRTUAL_ENV=)([\x27\"])/[^\x27\"]*\2", re.M),
+    "activate.csh": re.compile(r"^(setenv VIRTUAL_ENV )([\x27\"])/[^\x27\"]*\2", re.M),
+    "activate.fish": re.compile(r"^(set -gx VIRTUAL_ENV )([\x27\"])/[^\x27\"]*\2", re.M),
+    "activate.nu": re.compile(r"^(\s*let virtual_env = )([\x27\"])/[^\x27\"]*\2", re.M),
+    "activate_this.py": re.compile(r"^(base = )([\x27\"])/[^\x27\"]*\2", re.M),
+}
+for name, pat in patterns.items():
+    p = bin_dir / name
+    if not p.is_file() or p.is_symlink():
+        continue
+    text = p.read_text(encoding="utf-8", errors="surrogateescape")
+    updated, count = pat.subn(lambda m: f"{m.group(1)}{m.group(2)}{venv_dir}{m.group(2)}", text)
+    if count:
+        tmp = p.with_name(f".{p.name}.tmp.{os.getpid()}")
+        tmp.write_text(updated, encoding="utf-8", errors="surrogateescape")
+        os.chmod(tmp, p.stat().st_mode & 0o7777)
+        tmp.replace(p)
+' "$venv_dir" 2>/dev/null || true
             fi
             if [ -f "$venv_dir/pyvenv.cfg" ]; then
                 local py_home
@@ -156,7 +182,7 @@ if bin_dir.is_dir():
                 WORK_VENV="$(mktemp -d "$UV_WORK_BASE/venv.XXXXXX")"
                 # Create the venv BEFORE writing `.gha-job-lease`: uv refuses to initialize
                 # `.venv` over a non-empty directory that lacks a Python executable (exit 2).
-                uv venv --python "$PY_BIN" "$WORK_VENV"
+                uv venv --relocatable --python "$PY_BIN" "$WORK_VENV"
                 write_venv_lease "$WORK_VENV"
                 ln -sfn "$WORK_VENV" .venv
             fi

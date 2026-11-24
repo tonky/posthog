@@ -9,7 +9,6 @@ import type { ProviderImportRunApi } from 'products/messaging/frontend/generated
 import type { OptOutSyncConfigResponse } from './customerIOImportLogic'
 import { providerImportLogic } from './providerImportLogic'
 import { ProviderImportModal } from './ProviderImportModal'
-import type { ImportEntryPoint } from './providerImportOrder'
 
 const syncConfigEndpoint = '/api/environments/:team_id/messaging_categories/optout_sync_config/'
 const importRunsEndpoint = '/api/projects/:team_id/messaging_provider_imports/'
@@ -51,14 +50,13 @@ const importProviders = [
 
 function mockSyncConfig(
     config: OptOutSyncConfigResponse,
-    importRuns: ProviderImportRunApi[] = [],
-    providers: typeof importProviders = importProviders
+    importRuns: ProviderImportRunApi[] = []
 ): Record<string, any> {
     return {
         get: {
             [syncConfigEndpoint]: config,
             [importRunsEndpoint]: importRuns,
-            [importProvidersEndpoint]: providers,
+            [importProvidersEndpoint]: importProviders,
         },
     }
 }
@@ -128,54 +126,17 @@ export default meta
 type StoryProps = {
     syncConfig: OptOutSyncConfigResponse
     importRuns?: ProviderImportRunApi[]
-    providers?: typeof importProviders
-    entryPoint?: ImportEntryPoint
 }
 
-const Template: StoryFn<StoryProps> = ({ syncConfig, importRuns, providers, entryPoint }) => {
-    useStorybookMocks(mockSyncConfig(syncConfig, importRuns, providers))
+const Template: StoryFn<StoryProps> = ({ syncConfig, importRuns }) => {
+    useStorybookMocks(mockSyncConfig(syncConfig, importRuns))
     const { openImportModal } = useActions(providerImportLogic)
 
     useEffect(() => {
-        openImportModal(null, entryPoint)
-    }, [openImportModal, entryPoint])
+        openImportModal()
+    }, [openImportModal])
 
     return <ProviderImportModal />
-}
-
-const otherTool = (key: string, label: string, stepLabels: string[]): (typeof importProviders)[number] => ({
-    ...importProviders[0],
-    key,
-    label,
-    retains_credentials: false,
-    steps: stepLabels.map((stepLabel, index) => ({ key: `step_${index}`, label: stepLabel, description: '' })),
-})
-
-export const ProviderPicker: StoryFn<StoryProps> = Template.bind({})
-ProviderPicker.args = {
-    syncConfig: emptySyncConfig,
-    providers: [
-        otherTool('sendgrid', 'SendGrid', [
-            'Unsubscribe groups',
-            'Bounces',
-            'Global unsubscribes',
-            'Templates',
-            'Lists',
-        ]),
-        ...importProviders,
-        otherTool('resend', 'Resend', ['Topics', 'Suppression list', 'Contacts', 'Templates', 'Automations']),
-        otherTool('mailgun', 'Mailgun', ['Bounces', 'Unsubscribes']),
-        otherTool('postmark', 'Postmark', ['Suppressions', 'Templates', 'Webhooks']),
-    ],
-}
-ProviderPicker.parameters = {
-    testOptions: { waitForSelector: '[data-attr="import-provider-resend"]', snapshotBrowsers: [] },
-}
-
-export const CustomerIOWithAutomations: StoryFn<StoryProps> = Template.bind({})
-CustomerIOWithAutomations.args = { syncConfig: emptySyncConfig, entryPoint: 'workflows' }
-CustomerIOWithAutomations.parameters = {
-    testOptions: { waitForSelector: '[data-attr="import-provider-customerio-automations"]', snapshotBrowsers: [] },
 }
 
 export const BothStepsNotCompleted: StoryFn<StoryProps> = Template.bind({})

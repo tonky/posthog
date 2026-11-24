@@ -1050,7 +1050,7 @@ jobs:
           playwright/test-results/**
         retention-days: "1"
     - name: Upload Recorded Footprints
-      if: ${{ (always() && (github.event_name == 'push' && github.ref_name == github.event.repository.default_branch || github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref != github.event.repository.default_branch || github.event_name == 'workflow_dispatch' && inputs.warm_reach == 'true' && github.ref_name == github.event.repository.default_branch)) && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
+      if: ${{ (success() && (github.event_name == 'push' && github.ref_name == github.event.repository.default_branch || github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref != github.event.repository.default_branch || github.event_name == 'workflow_dispatch' && inputs.warm_reach == 'true' && github.ref_name == github.event.repository.default_branch)) && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
       continue-on-error: true
       uses: actions/upload-artifact@v7
       with:
@@ -1111,7 +1111,20 @@ jobs:
       run: |-
         RUN_PREFIX=""
         ENACT_ENV_FILE=${ENACT_ENVIRONMENT_FILE:-enve.cue}
-        if command -v enve >/dev/null 2>&1 && [ -f "${ENACT_ENV_FILE%enve.cue}enve.lock" ]; then
+        ENACT_LOCK_FILE="${ENACT_ENV_FILE%enve.cue}enve.lock"
+        if [ -n "${ENACT_ENVIRONMENT_FILE:-}" ] && [ ! -f "$ENACT_ENV_FILE" ]; then
+          echo "::error::Declared ENACT_ENVIRONMENT_FILE '$ENACT_ENV_FILE' not found" >&2
+          exit 1
+        fi
+        if [ -f "$ENACT_ENV_FILE" ]; then
+          if ! command -v enve >/dev/null 2>&1; then
+            echo "::error::enve binary not found on PATH for $ENACT_ENV_FILE" >&2
+            exit 1
+          fi
+          if [ ! -f "$ENACT_LOCK_FILE" ]; then
+            echo "::error::Missing $ENACT_LOCK_FILE for $ENACT_ENV_FILE; run 'enve lock' before CI" >&2
+            exit 1
+          fi
           RUN_PREFIX="enve run --locked -f $ENACT_ENV_FILE -- "
         fi
         $RUN_PREFIX python3 showcase/scripts/template_publications.py "$HOME/.cache/enact/snapshots/v3"
@@ -1122,7 +1135,20 @@ jobs:
       run: |-
         RUN_PREFIX=""
         ENACT_ENV_FILE=${ENACT_ENVIRONMENT_FILE:-enve.cue}
-        if command -v enve >/dev/null 2>&1 && [ -f "${ENACT_ENV_FILE%enve.cue}enve.lock" ]; then
+        ENACT_LOCK_FILE="${ENACT_ENV_FILE%enve.cue}enve.lock"
+        if [ -n "${ENACT_ENVIRONMENT_FILE:-}" ] && [ ! -f "$ENACT_ENV_FILE" ]; then
+          echo "::error::Declared ENACT_ENVIRONMENT_FILE '$ENACT_ENV_FILE' not found" >&2
+          exit 1
+        fi
+        if [ -f "$ENACT_ENV_FILE" ]; then
+          if ! command -v enve >/dev/null 2>&1; then
+            echo "::error::enve binary not found on PATH for $ENACT_ENV_FILE" >&2
+            exit 1
+          fi
+          if [ ! -f "$ENACT_LOCK_FILE" ]; then
+            echo "::error::Missing $ENACT_LOCK_FILE for $ENACT_ENV_FILE; run 'enve lock' before CI" >&2
+            exit 1
+          fi
           RUN_PREFIX="enve run --locked -f $ENACT_ENV_FILE -- "
         fi
         $RUN_PREFIX python3 showcase/scripts/live_migrate_cache.py verify "$HOME/.cache/enact/snapshots"

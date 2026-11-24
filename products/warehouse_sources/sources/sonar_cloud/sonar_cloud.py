@@ -110,13 +110,11 @@ class SonarCloudPaginator(PageNumberPaginator):
 
 
 class SonarCloudEnvelopePaginator(PageNumberPaginator):
-    """v1 pagination driven by the response's paging fields instead of the row count.
+    """v1 pagination driven by the response's `paging` object instead of the row count.
 
     The measures endpoints need it: component_tree returns the project next to each page of its
     components, and search_history pages the history points of each metric, so the number of selected
-    rows says nothing about whether a page follows. Fan-out children use it too, because it reads the
-    page size the server applied rather than the one we asked for. user_groups/users reports p/ps/total
-    at the top level instead of in a `paging` object.
+    rows says nothing about whether a page follows.
     """
 
     def __init__(self, page: int = 1) -> None:
@@ -124,12 +122,7 @@ class SonarCloudEnvelopePaginator(PageNumberPaginator):
 
     def update_state(self, response: Response, data: Optional[list[Any]] = None) -> None:
         try:
-            body = response.json()
-            paging = body.get("paging") or {
-                "pageIndex": body.get("p"),
-                "pageSize": body.get("ps"),
-                "total": body.get("total"),
-            }
+            paging = response.json().get("paging") or {}
         except Exception:
             paging = {}
 

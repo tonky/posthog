@@ -42,7 +42,6 @@ class ContactChunkInputs:
     chunk: int
     send_events: bool
     created_by_id: int | None = None
-    wait_for_people: bool = True
 
 
 @frozen
@@ -51,7 +50,6 @@ class ContactChunkResult:
     found: int
     # The activity attempt that finished the part, so the run can count retried parts.
     attempt: int
-    new_people: int = 0
 
 
 @frozen
@@ -70,9 +68,6 @@ class ContactsImportOutcome:
     removed: int = 0
     failed_lists: int = 0
     retried_chunks: int = 0
-    # None from a workflow that didn't count what capture took.
-    sent: int | None = None
-    new_people: int | None = None
 
 
 @frozen

@@ -20,8 +20,6 @@ export interface LemonButtonPropsBase
         React.ButtonHTMLAttributes<HTMLElement>,
         | 'title'
         | 'onClick'
-        | 'onClickCapture'
-        | 'onAuxClick'
         | 'id'
         | 'tabIndex'
         | 'form'
@@ -143,12 +141,6 @@ export interface LemonButtonWithSideActionProps extends LemonButtonPropsBase {
 
 export type LemonButtonProps = LemonButtonWithoutSideActionProps | LemonButtonWithSideActionProps
 
-type ExtraClickHandlers = Pick<LemonButtonPropsBase, 'onClickCapture' | 'onAuxClick'>
-
-function clickHandlersUnlessDisabled(disabled: boolean | undefined, handlers: ExtraClickHandlers): ExtraClickHandlers {
-    return disabled ? {} : handlers
-}
-
 /** Styled button. */
 export const LemonButton: React.FunctionComponent<LemonButtonProps & React.RefAttributes<HTMLButtonElement>> =
     React.forwardRef(
@@ -179,8 +171,6 @@ export const LemonButton: React.FunctionComponent<LemonButtonProps & React.RefAt
                 hideExternalLinkIcon,
                 disableClientSideRouting,
                 onClick,
-                onClickCapture,
-                onAuxClick,
                 truncate = false,
                 buttonWrapper,
                 tooltipDocLink,
@@ -283,7 +273,6 @@ export const LemonButton: React.FunctionComponent<LemonButtonProps & React.RefAt
                         }
                         onClick?.(event)
                     }}
-                    {...clickHandlersUnlessDisabled(disabled, { onClickCapture, onAuxClick })}
                     // We are using the ARIA disabled instead of native HTML because of this:
                     // https://css-tricks.com/making-disabled-buttons-more-inclusive/
                     aria-disabled={!!disabled}

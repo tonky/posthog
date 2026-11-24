@@ -1,4 +1,3 @@
-import { useValues } from 'kea'
 import { useRef } from 'react'
 
 import { StepImportNotesList } from '../../../import/StepImportNotesList'
@@ -8,11 +7,9 @@ import { StepCountLine } from './StepCountLine'
 import { StepFieldList } from './StepFieldList'
 import type { StepPresentationKind } from './stepPresentation'
 import { TILE_SIZE } from './tileCanvasLayout'
-import { tileCanvasLogic } from './tileCanvasLogic'
 import { FIT_MARGIN } from './tileCanvasModel'
 import { CAPTION_WIDTH, TileCaption } from './TileCaption'
 import { TileFace } from './TileFace'
-import { reachedAfterTriggerText } from './timeFromTrigger'
 import { useKeepInView } from './useKeepInView'
 import type { TileStep } from './useTileStep'
 
@@ -51,8 +48,6 @@ export function TileHoverCard({
     count: number | undefined
     workflowId: string
 }): JSX.Element {
-    const { timesFromTrigger } = useValues(tileCanvasLogic)
-    const reachedAfter = reachedAfterTriggerText(timesFromTrigger.steps.get(action.id))
     const face = { width: TILE_SIZE, height: TILE_SIZE }
     const width = Math.max(MIN_WIDTH, face.width + 12 + CAPTION_WIDTH + PADDING * 2 + KIND_LABEL_ROOM)
     const nameRow = tile.customName ? NAME_ROW_HEIGHT : 0
@@ -105,7 +100,6 @@ export function TileHoverCard({
                     {showPreview && <StepPreview action={action} tile={tile} />}
                     {(!showPreview || !PREVIEWS_THAT_SHOW_SETTINGS.has(kind)) && <StepFieldList facts={tile.facts} />}
                     <StepCountLine count={count} />
-                    {reachedAfter && <div className="text-xs text-secondary">{reachedAfter}</div>}
                 </div>
                 {workflowId && (
                     <div className="border-t py-3 empty:hidden">

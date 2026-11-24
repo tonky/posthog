@@ -150,7 +150,7 @@ class ShardProvisioningTest(unittest.TestCase):
     def test_uv_venv_cache_is_bounded_and_shared_across_ephemeral_proof_dirs(self) -> None:
         uv_cache = self.repo / "uv-cache"
         for idx, age in enumerate((300, 200, 100)):
-            d = uv_cache / f"venv-v2-old{idx}"
+            d = uv_cache / f"venv-v3-old{idx}"
             d.mkdir(parents=True)
             ts = 1_700_000_000 - age
             os.utime(d, (ts, ts))
@@ -166,26 +166,26 @@ class ShardProvisioningTest(unittest.TestCase):
             ["bash", "showcase/scripts/setup.sh", "backend"], cwd=self.repo, env=env, capture_output=True, text=True
         )
         self.assertEqual(0, done.returncode, done.stdout + done.stderr)
-        remaining = sorted(p.name for p in uv_cache.glob("venv-v2-*"))
+        remaining = sorted(p.name for p in uv_cache.glob("venv-v3-*"))
         self.assertEqual(2, len(remaining), remaining)
-        self.assertFalse((uv_cache / "venv-v2-old0").exists())
-        self.assertFalse((uv_cache / "venv-v2-old1").exists())
+        self.assertFalse((uv_cache / "venv-v3-old0").exists())
+        self.assertFalse((uv_cache / "venv-v3-old1").exists())
         self.assertEqual(1, self.entries("cold-sync"))
         self.assertEqual(0, self.entries("warm-sync"))
-        cached_dirs = [p for p in uv_cache.glob("venv-v2-*") if p.name != "venv-v2-old2"]
+        cached_dirs = [p for p in uv_cache.glob("venv-v3-*") if p.name != "venv-v3-old2"]
         self.assertEqual(1, len(cached_dirs), cached_dirs)
         cached_venv = cached_dirs[0]
 
-        # (b) Running inside readiness-outputs/proof-abc123/runtime hits the cached venv-v2-<key>
+        # (b) Running inside readiness-outputs/proof-abc123/runtime hits the cached venv-v3-<key>
         #     without creating a 3rd directory or mutating hardlinked files inside VENV_CACHE.
         ephemeral_a = self.repo / "readiness-outputs/proof-abc123/runtime"
         self.stage_checkout(ephemeral_a)
-        before = set(uv_cache.glob("venv-v2-*"))
+        before = set(uv_cache.glob("venv-v3-*"))
         done = subprocess.run(
             ["bash", "showcase/scripts/setup.sh", "backend"], cwd=ephemeral_a, env=env, capture_output=True, text=True
         )
         self.assertEqual(0, done.returncode, done.stdout + done.stderr)
-        self.assertEqual(before, set(uv_cache.glob("venv-v2-*")))
+        self.assertEqual(before, set(uv_cache.glob("venv-v3-*")))
         self.assertEqual(1, self.entries("cold-sync"))
         self.assertEqual(1, self.entries("warm-sync"))
         self.assertEqual(f"{ephemeral_a}\n", (ephemeral_a / ".venv/lib/site-packages/_editable.pth").read_text())
@@ -200,7 +200,7 @@ class ShardProvisioningTest(unittest.TestCase):
             (cached_venv / "bin/pytest").stat().st_ino,
         )
 
-        # (c) Starting from an empty uv_cache, proof-abc123 populates venv-v2-<key> and
+        # (c) Starting from an empty uv_cache, proof-abc123 populates venv-v3-<key> and
         #     proof-def456 reuses it cleanly on warm restore.
         empty_cache = self.repo / "uv-cache-empty"
         self.log.unlink()
@@ -213,7 +213,7 @@ class ShardProvisioningTest(unittest.TestCase):
             ["bash", "showcase/scripts/setup.sh", "backend"], cwd=proof_1, env=env_empty, capture_output=True, text=True
         )
         self.assertEqual(0, done1.returncode, done1.stdout + done1.stderr)
-        populated = list(empty_cache.glob("venv-v2-*"))
+        populated = list(empty_cache.glob("venv-v3-*"))
         self.assertEqual(1, len(populated), populated)
         self.assertEqual(1, self.entries("cold-sync"))
         self.assertEqual(0, self.entries("warm-sync"))
@@ -222,13 +222,13 @@ class ShardProvisioningTest(unittest.TestCase):
             ["bash", "showcase/scripts/setup.sh", "backend"], cwd=proof_2, env=env_empty, capture_output=True, text=True
         )
         self.assertEqual(0, done2.returncode, done2.stdout + done2.stderr)
-        self.assertEqual(populated, list(empty_cache.glob("venv-v2-*")))
+        self.assertEqual(populated, list(empty_cache.glob("venv-v3-*")))
         self.assertEqual(1, self.entries("cold-sync"))
         self.assertEqual(1, self.entries("warm-sync"))
         self.assertEqual(f"{proof_2}\n", (proof_2 / ".venv/lib/site-packages/_editable.pth").read_text())
         self.assertEqual(f"{proof_1}\n", (populated[0] / "lib/site-packages/_editable.pth").read_text())
 
-        # (d) Hosted GitHub Actions without ENACT_HOST_CACHE must not populate venv-v2-* inside
+        # (d) Hosted GitHub Actions without ENACT_HOST_CACHE must not populate venv-v3-* inside
         #     UV_CACHE_DIR (which gets archived into GitHub's 10 GiB L1 cache).
         hosted_cache = self.repo / "uv-cache-hosted"
         hosted_checkout = self.repo / "hosted-checkout"
@@ -243,7 +243,7 @@ class ShardProvisioningTest(unittest.TestCase):
             text=True,
         )
         self.assertEqual(0, done_hosted.returncode, done_hosted.stdout + done_hosted.stderr)
-        self.assertEqual([], list(hosted_cache.glob("venv-v2-*")))
+        self.assertEqual([], list(hosted_cache.glob("venv-v3-*")))
         self.assertFalse((hosted_cache / "work").exists())
 
 

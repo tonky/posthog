@@ -59,7 +59,7 @@ export function endpointSyncFrequencyBounds(planRefreshFloorSeconds: number | nu
             }
         }),
         floor: null,
-        plan_floor: planFloorLabel ? { label: planFloorLabel, blocker: null, pinned: false } : null,
+        plan_floor: planFloorLabel ? { label: planFloorLabel, blocker: null } : null,
         ceiling: null,
         best_effort_sources: [],
         best_effort_sources_withheld: false,

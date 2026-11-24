@@ -680,6 +680,7 @@ def _act_on_box_in_background(worktree_root: Path, box: WorktreeBox, box_action:
     # from the main checkout and logs next to the box records.
     main_checkout = _main_checkout(worktree_root)
     log_path = get_worktree_boxes_path().with_name(_TEARDOWN_LOG_NAME)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
     main_env = {key: value for key, value in os.environ.items() if key not in ("VIRTUAL_ENV", "PYTHONPATH")}
     with log_path.open("ab") as log:
         subprocess.Popen(
@@ -808,6 +809,7 @@ def _prune_in_background() -> None:
     if saved_worktree_box_cleanup() is None or not load_worktree_boxes():
         return
     log_path = get_worktree_boxes_path().with_name(_TEARDOWN_LOG_NAME)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
     with log_path.open("ab") as log:
         subprocess.Popen(
             [sys.executable, "-P", "-m", "hogli", "devbox:worktree:prune"],

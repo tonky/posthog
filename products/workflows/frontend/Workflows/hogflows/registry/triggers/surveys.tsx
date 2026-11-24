@@ -11,7 +11,6 @@ import { truncate } from 'lib/utils/strings'
 import { TestAccountFilter } from 'scenes/insights/filters/TestAccountFilter/TestAccountFilter'
 import { urls } from 'scenes/urls'
 
-import { ProductIntentContext, ProductKey } from '~/queries/schema/schema-general'
 import { Survey, SurveyEventName, SurveyQuestionType } from '~/types'
 
 import { HogFlowPropertyFilters } from 'products/workflows/frontend/Workflows/hogflows/filters/HogFlowFilters'
@@ -20,7 +19,6 @@ import {
     registerTriggerType,
 } from 'products/workflows/frontend/Workflows/hogflows/registry/triggers/triggerTypeRegistry'
 import { workflowLogic } from 'products/workflows/frontend/Workflows/workflowLogic'
-import { crossSellLinkProps } from 'products/workflows/frontend/workflowsCrossSell'
 
 import { HogFlowAction } from '../../types'
 import { surveyTriggerLogic } from './surveyTriggerLogic'
@@ -283,15 +281,7 @@ function StepTriggerConfigurationSurvey({ node }: { node: any }): JSX.Element {
                             <p>
                                 You don't have any surveys yet. This workflow won't be triggered until you create your
                                 first survey.{' '}
-                                <Link
-                                    to={urls.survey('new')}
-                                    target="_blank"
-                                    className="font-semibold"
-                                    {...crossSellLinkProps(
-                                        ProductKey.SURVEYS,
-                                        ProductIntentContext.WORKFLOW_SURVEY_TRIGGER_CREATE_SURVEY
-                                    )}
-                                >
+                                <Link to={urls.survey('new')} target="_blank" className="font-semibold">
                                     Create a survey <IconOpenInNew className="inline text-sm" />
                                 </Link>
                             </p>

@@ -1422,14 +1422,15 @@ pipeline: schema.#Pipeline & {
 			// API ratchet, triggers and workspace lockfiles; test_runner's detection of each
 			// ecosystem's tests (a directory it walks whole is listed whole).
 			workspace_scope: include: [
-				"devenv", ".github/actions", ".github/scripts/migration-deletion-allowlist.txt", "frontend/package.json", "services/mcp/tsconfig.json",
+				"devenv", ".github/actions", ".github/scripts/migration-deletion-allowlist.txt", "frontend/package.json", "frontend/bin", "services/mcp/tsconfig.json",
 				"frontend/src/generated/core/api.ts", "frontend/src/lib/api.ts", "frontend/src/lib/api-ratchet-baseline.txt", "frontend/src/lib/constants.tsx",
-				"frontend/src/lib/components/AgentObjectTags/objectKinds.generated.ts", "frontend/src/scenes/sceneTypes.ts",
+				"frontend/src/lib/components/AgentObjectTags/objectKinds.generated.ts", "frontend/src/queries/schema/latest-versions.json", "frontend/src/scenes/sceneTypes.ts",
 				"frontend/src/scenes/dashboard/DashboardHeader.test.tsx",
 				"packages/agent/package.json", "packages/agent/biome.jsonc", "packages/agent/pnpm-workspace.yaml", "packages/agent/pnpm-lock.yaml",
 				"packages/agent/packages/agent/package.json", "packages/agent/packages/agent/src/utils/gateway.test.ts",
 				"packages/agent/packages/agent-contracts/src/model-catalog.generated.ts", "packages/agent/packages/agent-contracts/src/objectTagKinds.generated.ts",
-				"services/mcp/src/lib/oauth-scopes.generated.ts", "services/mcp/src/lib/trace-property-allowlist.generated.ts",
+				"services/credentials-service/src/catalogue.ts", "services/llm-gateway", "services/stripe-mock",
+				"services/mcp/src/lib/oauth-scopes.generated.ts", "services/mcp/src/lib/trace-property-allowlist.generated.ts", "services/mcp/tests/hono",
 				"tools/hedgebox-dummy/package.json", "tools/hedgebox-dummy/pnpm-workspace.yaml",
 				"cli/Cargo.toml", "cli/src/main.rs", "cli/src/utils/throttler.rs", "funnel-udf/Cargo.toml", "funnel-udf/src/lib.rs",
 				"rust/capture/Cargo.toml", "rust/capture/src", "rust/capture/tests/events.rs",

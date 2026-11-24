@@ -10,12 +10,9 @@ import { Link } from 'lib/lemon-ui/Link'
 import { databaseTableListLogic } from 'scenes/data-management/database/databaseTableListLogic'
 import { urls } from 'scenes/urls'
 
-import { ProductIntentContext, ProductKey } from '~/queries/schema/schema-general'
-
 import { HogFlowPropertyFilters } from 'products/workflows/frontend/Workflows/hogflows/filters/HogFlowFilters'
 import { registerTriggerType } from 'products/workflows/frontend/Workflows/hogflows/registry/triggers/triggerTypeRegistry'
 import { workflowLogic } from 'products/workflows/frontend/Workflows/workflowLogic'
-import { crossSellLinkProps } from 'products/workflows/frontend/workflowsCrossSell'
 
 import { HogFlowAction } from '../../types'
 
@@ -99,15 +96,7 @@ function StepTriggerConfigurationDataWarehouseTable({ node }: { node: any }): JS
                         <p className="mb-0">
                             You don't have any data warehouse tables yet, so this trigger has nothing to listen to. Sync
                             a source first, then come back and pick the table this workflow should run on.{' '}
-                            <Link
-                                to={urls.dataPipelinesNew('source')}
-                                target="_blank"
-                                className="font-semibold"
-                                {...crossSellLinkProps(
-                                    ProductKey.DATA_WAREHOUSE,
-                                    ProductIntentContext.WORKFLOW_WAREHOUSE_TABLE_TRIGGER_SET_UP_SOURCE
-                                )}
-                            >
+                            <Link to={urls.dataPipelinesNew('source')} target="_blank" className="font-semibold">
                                 Set up a source
                             </Link>
                         </p>

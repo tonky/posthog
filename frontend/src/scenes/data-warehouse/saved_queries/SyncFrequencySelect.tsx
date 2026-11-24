@@ -2,7 +2,6 @@ import { IconInfo, IconPinFilled, IconRabbit, IconTortoise, IconX } from '@posth
 import { LemonLabel, LemonSegmentedButton, LemonSegmentedButtonOption, Spinner } from '@posthog/lemon-ui'
 
 import { Tooltip } from 'lib/lemon-ui/Tooltip'
-import { capitalizeFirstLetter } from 'lib/utils/strings'
 
 import { DataModelingSyncInterval } from '~/types'
 
@@ -221,10 +220,7 @@ export function syncFrequencyState({
               }),
         // The inherited note already names the downstream view, so the ceiling sentence would repeat it.
         // With a pin on offer, a downstream view no longer caps how slow this view can go.
-        explanation: buildExplanation(bounds, {
-            omitCeiling: inherited?.blockedBy === 'consumer' || !!pin,
-            omitFloor: inherited?.blockedBy === 'source',
-        }),
+        explanation: buildExplanation(bounds, { omitCeiling: !!inherited || !!pin }),
     }
 }
 
@@ -287,7 +283,7 @@ function cadenceNotes({
     pin?: CadencePin | null
     selected?: DataModelingSyncInterval
     unpinning: { note: string } | null
-    inherited: InheritedCadence | null
+    inherited: { note: string } | null
     speedUp: string | null
 }): CadenceNote[] {
     const notes: (CadenceNote | null)[] = [
@@ -295,7 +291,7 @@ function cadenceNotes({
             ? { key: 'pin', text: pinNote(selected, pin.delayed, { pending: pin.pending }), upstreamRule: false }
             : null,
         unpinning ? { key: 'unpinning', text: unpinning.note, upstreamRule: true } : null,
-        inherited ? { key: 'inherited', text: inherited.note, upstreamRule: inherited.blockedBy === 'consumer' } : null,
+        inherited ? { key: 'inherited', text: inherited.note, upstreamRule: true } : null,
         speedUp ? { key: 'speed-up', text: speedUp, upstreamRule: true } : null,
     ]
     return notes.filter((note): note is CadenceNote => !!note)
@@ -414,50 +410,27 @@ function WithUpstreamRule({ text }: { text: string }): JSX.Element {
  * setting is a lower bound on freshness, not the schedule. Options arrive coarsest-last, so the last
  * allowed one is the consumer ceiling.
  */
-export interface InheritedCadence {
-    cadence: DataModelingSyncInterval
-    note: string
-    blockedBy: 'consumer' | 'source'
-}
-
 export function inheritedCadence(
     bounds: SyncFrequencyBoundsApi | null | undefined,
     value: SyncFrequencyValue | null
-): InheritedCadence | null {
+): { cadence: DataModelingSyncInterval; note: string } | null {
     if (!bounds || !value || value === 'never') {
         return null
     }
     const saved = bounds.options.find((option) => option.cadence === value)
     const allowed = bounds.options.filter((option) => option.allowed)
-    if (!saved || saved.allowed || !allowed.length) {
+    if (!saved || saved.allowed || saved.blocked_by !== 'consumer' || !allowed.length) {
         return null
     }
 
-    if (saved.blocked_by === 'consumer') {
-        const cadence = allowed[allowed.length - 1].cadence as DataModelingSyncInterval
-        const consumer = bounds.ceiling?.blocker?.name
-        return {
-            cadence,
-            blockedBy: 'consumer',
-            note:
-                `Refreshes every ${CADENCE_LABELS[cadence]} to keep up with ${consumer ? `downstream view ${consumer}` : 'a downstream view'}. ` +
-                `Your ${CADENCE_LABELS[value]} setting applies again if downstream views refresh less often.`,
-        }
+    const cadence = allowed[allowed.length - 1].cadence as DataModelingSyncInterval
+    const consumer = bounds.ceiling?.blocker?.name
+    return {
+        cadence,
+        note:
+            `Refreshes every ${CADENCE_LABELS[cadence]} to keep up with ${consumer ? `downstream view ${consumer}` : 'a downstream view'}. ` +
+            `Your ${CADENCE_LABELS[value]} setting applies again if downstream views refresh less often.`,
     }
-    if (saved.blocked_by === 'source') {
-        const cadence = allowed[0].cadence as DataModelingSyncInterval
-        const floor = bounds.floor
-        return {
-            cadence,
-            blockedBy: 'source',
-            note: floor?.pinned
-                ? `Refreshes every ${CADENCE_LABELS[cadence]} because ${floorCause(floor)}. ` +
-                  `Your ${CADENCE_LABELS[value]} setting applies again if ${pinnedViewName(floor)} refreshes more often.`
-                : `Refreshes every ${CADENCE_LABELS[cadence]} because no upstream source syncs more often. ` +
-                  `Your ${CADENCE_LABELS[value]} setting applies again if an upstream source syncs more often.`,
-        }
-    }
-    return null
 }
 
 export function buildOptions(
@@ -590,13 +563,8 @@ function segment(cadence: DataModelingSyncInterval): LemonSegmentedButtonOption<
  */
 function blockedReason(option: SyncFrequencyBoundsApi['options'][number], bounds: SyncFrequencyBoundsApi): string {
     const name = option.blocker?.name
-    if (option.blocked_by === 'source' && bounds.floor?.pinned) {
-        return name
-            ? `More often than pinned upstream view ${name} refreshes`
-            : 'More often than a pinned upstream view refreshes'
-    }
     if (option.blocked_by === 'source' && bounds.floor) {
-        return 'More often than any upstream source syncs'
+        return name ? `More often than upstream source ${name} syncs` : 'More often than the upstream sources sync'
     }
     if (option.blocked_by === 'plan') {
         return 'More often than your plan allows'
@@ -619,19 +587,21 @@ export function unsatisfiableReason(bounds?: SyncFrequencyBoundsApi | null): str
         return null
     }
 
+    const sourceName = bounds.floor?.blocker?.name
     const consumerName = bounds.ceiling?.blocker?.name
+    const source = sourceName ? `upstream source ${sourceName}` : 'an upstream source'
     const consumer = consumerName ? `downstream view ${consumerName}` : 'a downstream view or endpoint'
     if (bounds.floor && bounds.ceiling) {
         return (
-            `No cadence works here: ${floorCause(bounds.floor)}, ` +
+            `No cadence works here: ${source} only syncs every ${bounds.floor.label}, ` +
             `but ${consumer} refreshes every ${bounds.ceiling.label}. ` +
-            `Slow down ${consumer} or ${floorFix(bounds.floor)}.`
+            `Slow down ${consumer} or speed up ${source}.`
         )
     }
     if (bounds.floor) {
         return (
-            `No cadence works here: ${floorCause(bounds.floor)}, ` +
-            `less often than anything this can refresh at. ${capitalizeFirstLetter(floorFix(bounds.floor))} first.`
+            `No cadence works here: ${source} only syncs every ${bounds.floor.label}, ` +
+            `less often than anything this can refresh at. Speed up ${source} first.`
         )
     }
     if (bounds.ceiling) {
@@ -685,35 +655,16 @@ function fastestAllowedSlowerThan(
 
 export function buildExplanation(
     bounds?: SyncFrequencyBoundsApi | null,
-    { omitCeiling = false, omitFloor = false }: { omitCeiling?: boolean; omitFloor?: boolean } = {}
+    { omitCeiling = false }: { omitCeiling?: boolean } = {}
 ): string | null {
     if (!bounds || bounds.frequency_mode !== 'tiered') {
         return null
     }
     const parts = [
-        boundsSentence(bounds, omitFloor ? null : bounds.floor, omitCeiling ? null : bounds.ceiling),
+        boundsSentence(bounds, bounds.floor, omitCeiling ? null : bounds.ceiling),
         bestEffortSentence(bounds),
     ].filter((part): part is string => !!part)
     return parts.length ? parts.join(' ') : null
-}
-
-type FloorBound = NonNullable<SyncFrequencyBoundsApi['floor']>
-
-function pinnedViewName(floor: FloorBound): string {
-    return floor.blocker?.name ? `upstream view ${floor.blocker.name}` : 'an upstream view'
-}
-
-function floorCause(floor: FloorBound): string {
-    return floor.pinned
-        ? `${pinnedViewName(floor)} is pinned to refresh every ${floor.label}`
-        : `no upstream source syncs more often than every ${floor.label}`
-}
-
-function floorFix(floor: FloorBound): string {
-    if (!floor.pinned) {
-        return 'speed up an upstream source'
-    }
-    return floor.blocker?.name ? `unpin upstream view ${floor.blocker.name}` : 'unpin the upstream view'
 }
 
 function boundsSentence(
@@ -723,13 +674,14 @@ function boundsSentence(
 ): string | null {
     // A withheld blocker still has to hold its slot in the sentence, and the two slots read
     // differently: one opens a sentence, one sits mid-clause.
+    const floorName = floor?.blocker?.name ? `Upstream source ${floor.blocker.name}` : 'An upstream source'
     const ceilingLead = ceiling?.blocker?.name ? `Downstream view ${ceiling.blocker.name}` : 'A downstream view'
     const ceilingMid = ceiling?.blocker?.name ? `downstream view ${ceiling.blocker.name}` : 'a downstream view'
 
     const fastestReachable = floor && ceiling ? fastestAllowedSlowerThan(bounds, ceiling.label) : null
     if (floor && ceiling && fastestReachable) {
         return (
-            `${capitalizeFirstLetter(floorCause(floor))}, so this can't refresh more often. ` +
+            `${floorName} syncs every ${floor.label}, so this can't refresh more often. ` +
             `${ceilingLead} refreshes every ${ceiling.label}, ` +
             `but gets new data from this view only every ${CADENCE_LABELS[fastestReachable]}.`
         )
@@ -737,12 +689,12 @@ function boundsSentence(
     if (floor && ceiling) {
         return (
             `Pick between ${floor.label} and ${ceiling.label}. ` +
-            `${capitalizeFirstLetter(floorCause(floor))}, ` +
+            `${floorName} syncs every ${floor.label}, ` +
             `and ${ceilingMid} refreshes every ${ceiling.label}.`
         )
     }
     if (floor) {
-        return `${capitalizeFirstLetter(floorCause(floor))}, so this can't refresh more often.`
+        return `${floorName} syncs every ${floor.label}, so this can't refresh more often.`
     }
     if (ceiling) {
         return `${ceilingLead} refreshes every ${ceiling.label}, so this can't refresh less often.`

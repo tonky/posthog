@@ -175,11 +175,10 @@ class BaseSiteDestinationFunctionTest(APIBaseTest):
 
         # Mock the plugin server status endpoint to avoid connection errors
         # Patch where it's used (in hog_function.py) not where it's defined
-        self.mock_get_status = patch(
-            "products.cdp.backend.models.hog_functions.hog_function.get_hog_function_status"
-        ).start()
+        patcher = patch("products.cdp.backend.models.hog_functions.hog_function.get_hog_function_status")
+        self.mock_get_status = patcher.start()
         self.mock_get_status.return_value = MagicMock(status_code=200, json=lambda: {"state": "idle", "tokens": 0})
-        self.addCleanup(self.mock_get_status.stop)
+        self.addCleanup(patcher.stop)
 
     @functools.lru_cache  # noqa: B019 - TODO: refactor to avoid method cache
     def _get_transpiled(self, edit_payload: Optional[Callable[[dict], dict]] = None):

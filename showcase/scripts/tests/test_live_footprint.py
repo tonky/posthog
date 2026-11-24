@@ -381,5 +381,174 @@ class NodeReadsTest(unittest.TestCase):
         self.assertTrue(os.listdir(self.recording / "node/1"))
 
 
+class PytestFootprintOutcomesTest(unittest.TestCase):
+    """Contract matrix for pytest_footprint._outcomes_and_skipped (Astra 201)."""
+
+    def _load_plugin(self):
+        import importlib.util
+        import types
+
+        repo_root = Path(__file__).resolve().parents[5]
+        plugin_path = Path(__file__).resolve().parents[2] / "pytest_plugins" / "pytest_footprint.py"
+        core_path = repo_root / "crates" / "enact-runner" / "recorders" / "python" / "enact_footprint.py"
+        old_dir = os.environ.pop("ENACT_FOOTPRINT_DIR", None)
+        old_core = os.environ.get("ENACT_FOOTPRINT_CORE")
+        stubbed_pytest = False
+        if "pytest" not in sys.modules:
+            try:
+                __import__("pytest")
+            except ModuleNotFoundError:
+                stub = types.ModuleType("pytest")
+                stub.hookimpl = lambda *a, **kw: (lambda fn: fn)
+                stub.Module = type("Module", (), {})
+                sys.modules["pytest"] = stub
+                stubbed_pytest = True
+        if core_path.is_file():
+            os.environ["ENACT_FOOTPRINT_CORE"] = str(core_path)
+        try:
+            spec = importlib.util.spec_from_file_location("pytest_footprint_unit", plugin_path)
+            assert spec and spec.loader
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            return mod
+        finally:
+            if stubbed_pytest:
+                sys.modules.pop("pytest", None)
+            if old_dir is not None:
+                os.environ["ENACT_FOOTPRINT_DIR"] = old_dir
+            if old_core is not None:
+                os.environ["ENACT_FOOTPRINT_CORE"] = old_core
+            elif core_path.is_file():
+                os.environ.pop("ENACT_FOOTPRINT_CORE", None)
+
+    def test_completion_witness_contract_matrix(self):
+        mod = self._load_plugin()
+        # Clean session: passing, failed, deselected, module-skipped
+        mod.collected.clear()
+        mod.finished.clear()
+        mod.failed.clear()
+        mod.collection_failed.clear()
+        mod.collected_modules.clear()
+        mod.deselected.clear()
+        mod.skipped.clear()
+        mod.session_collection_failed = False
+        mod.session_exitstatus = 0
+
+        mod.collected.update({"t_pass.py": 2, "t_fail.py": 1, "t_partial.py": 2})
+        mod.finished.update({"t_pass.py": 2, "t_fail.py": 1, "t_partial.py": 1})
+        mod.failed.add("t_fail.py")
+        mod.deselected.add("t_deselected.py")
+        mod.skipped.add("t_mod_skip.py")
+        mod.collected_modules.update({"t_empty_clean.py", "t_deselected.py"})
+
+        targets = [
+            "t_pass.py",
+            "t_fail.py",
+            "t_partial.py",
+            "t_deselected.py",
+            "t_mod_skip.py",
+            "t_empty_clean.py",
+            "t_unwitnessed.py",
+        ]
+        outcomes, skipped_dict = mod._outcomes_and_skipped(targets)
+        self.assertNotIn("t_pass.py", outcomes)
+        self.assertNotIn("t_mod_skip.py", outcomes)
+        self.assertNotIn("t_empty_clean.py", outcomes)
+        self.assertEqual([mod.PLATFORM], skipped_dict["t_mod_skip.py"])
+        for bad in ("t_fail.py", "t_partial.py", "t_deselected.py", "t_unwitnessed.py"):
+            self.assertIn(bad, outcomes, f"{bad} must be incomplete")
+            self.assertIn("incomplete", outcomes[bad])
+
+        # Unfinished session (exitstatus is None, e.g. crash before sessionfinish):
+        # cleanly collected empty module cannot claim completion.
+        mod.session_exitstatus = None
+        outcomes_crash, _ = mod._outcomes_and_skipped(["t_empty_clean.py", "t_mod_skip.py"])
+        self.assertIn("t_empty_clean.py", outcomes_crash)
+        self.assertIn("t_mod_skip.py", outcomes_crash)
+
+        # Collection-failed session (exit 2): collection error + unrun sibling + module-skip + empty all incomplete
+        mod.collected.clear()
+        mod.finished.clear()
+        mod.failed.clear()
+        mod.collection_failed.clear()
+        mod.collected_modules.clear()
+        mod.deselected.clear()
+        mod.skipped.clear()
+        mod.session_collection_failed = True
+        mod.session_exitstatus = 2
+        mod.collection_failed.add("t_err.py")
+        mod.collected["t_sibling.py"] = 3
+        mod.skipped.add("t_mod_skip.py")
+        mod.collected_modules.add("t_empty_clean.py")
+
+        outcomes2, _ = mod._outcomes_and_skipped(
+            ["t_err.py", "t_sibling.py", "t_mod_skip.py", "t_empty_clean.py"]
+        )
+        self.assertEqual(
+            outcomes2,
+            {
+                "t_err.py": {"incomplete": {"exit": 2}},
+                "t_sibling.py": {"incomplete": {"exit": 2}},
+                "t_mod_skip.py": {"incomplete": {"exit": 2}},
+                "t_empty_clean.py": {"incomplete": {"exit": 2}},
+            },
+        )
+
+    def test_partial_file_selection_three_row_table(self):
+        """Astra 225 3-row regression table: whole file -> complete, -k first -> incomplete,
+        explicit file.py::test_first -> incomplete; whole-file or enclosing-dir operands override ::."""
+        mod = self._load_plugin()
+
+        def reset():
+            mod.collected.clear()
+            mod.finished.clear()
+            mod.failed.clear()
+            mod.collection_failed.clear()
+            mod.collected_modules.clear()
+            mod.deselected.clear()
+            mod.node_filtered.clear()
+            mod.skipped.clear()
+            mod.session_collection_failed = False
+            mod.session_exitstatus = 0
+
+        # Row 1: Whole file (2 passed) -> complete
+        reset()
+        mod.collected["tests/test_pair.py"] = 2
+        mod.finished["tests/test_pair.py"] = 2
+        outcomes, _ = mod._outcomes_and_skipped(["tests/test_pair.py"])
+        self.assertNotIn("tests/test_pair.py", outcomes)
+
+        # Row 2: Same file with `-k first` (1 passed, 1 deselected) -> incomplete
+        reset()
+        mod.collected["tests/test_pair.py"] = 1
+        mod.finished["tests/test_pair.py"] = 1
+        mod.deselected.add("tests/test_pair.py")
+        outcomes, _ = mod._outcomes_and_skipped(["tests/test_pair.py"])
+        self.assertEqual(outcomes, {"tests/test_pair.py": {"incomplete": {"exit": 1}}})
+
+        # Row 3: Explicit `tests/test_pair.py::test_first` (1 passed, no deselection hook) -> incomplete
+        reset()
+        mod.collected["tests/test_pair.py"] = 1
+        mod.finished["tests/test_pair.py"] = 1
+        mod.node_filtered.update(mod._node_only_files(["tests/test_pair.py::test_first"]))
+        self.assertIn("tests/test_pair.py", mod.node_filtered)
+        outcomes, _ = mod._outcomes_and_skipped(["tests/test_pair.py"])
+        self.assertEqual(outcomes, {"tests/test_pair.py": {"incomplete": {"exit": 1}}})
+
+        # Whole-file or enclosing-directory operands alongside :: restore whole-file completeness.
+        self.assertEqual(
+            mod._node_only_files(["tests/test_pair.py", "tests/test_pair.py::test_first"]),
+            set(),
+        )
+        self.assertEqual(
+            mod._node_only_files(["tests", "tests/test_pair.py::test_first"]),
+            set(),
+        )
+        self.assertEqual(
+            mod._node_only_files(["tests/test_pair.py::TestCls::test_first"]),
+            {"tests/test_pair.py"},
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

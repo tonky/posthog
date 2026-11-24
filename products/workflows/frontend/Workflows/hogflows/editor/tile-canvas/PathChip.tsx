@@ -1,23 +1,18 @@
 import { NodeProps } from '@xyflow/react'
-import { useActions, useValues } from 'kea'
+import { useActions } from 'kea'
 
 import { IconCollapse } from '@posthog/icons'
 
 import { cn } from 'lib/utils/css-classes'
 
-import { getEdgeId } from '../../edgeId'
 import { motionProps } from './motionProps'
 import { shortLabel } from './tileCanvasLayout'
 import { tileCanvasLogic } from './tileCanvasLogic'
 import { pathColor } from './tileCanvasModel'
 import type { PathChipNodeType } from './tileCanvasNodes'
-import { labelTooltip, reachedAfterTriggerText } from './timeFromTrigger'
 
 export function PathChip({ data }: NodeProps<PathChipNodeType>): JSX.Element {
     const { collapsePath } = useActions(tileCanvasLogic)
-    const { timesFromTrigger } = useValues(tileCanvasLogic)
-    const { label, entryEdge } = data.group
-    const reachedAfter = reachedAfterTriggerText(timesFromTrigger.edges.get(getEdgeId(entryEdge)))
     const color = pathColor(data.group.entryEdge)
     const motionStyle = motionProps(data.motion)
     return (
@@ -26,7 +21,7 @@ export function PathChip({ data }: NodeProps<PathChipNodeType>): JSX.Element {
                 type="button"
                 className="nodrag group flex w-max cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-full border bg-surface-primary py-1 pl-2.5 pr-1 shadow-sm"
                 style={{ borderColor: color }}
-                title={labelTooltip(label, reachedAfter)}
+                title={data.group.label === shortLabel(data.group.label) ? undefined : data.group.label}
                 data-attr="workflow-tile-collapse-path"
                 onClick={(event) => {
                     event.stopPropagation()

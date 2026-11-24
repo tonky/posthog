@@ -14,8 +14,13 @@ from posthog.settings import temporal
     ],
 )
 def test_task_queue_collapse(
-    debug: bool, single_task_queue: bool, expected_shared: str, expected_isolated: str
+    debug: bool,
+    single_task_queue: bool,
+    expected_shared: str,
+    expected_isolated: str,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.delenv("PYTEST_XDIST_WORKER", raising=False)
     with (
         mock.patch.object(temporal, "DEBUG", debug),
         mock.patch.object(temporal, "TEMPORAL_USE_SINGLE_TASK_QUEUE", single_task_queue),

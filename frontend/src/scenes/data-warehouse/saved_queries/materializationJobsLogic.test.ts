@@ -731,7 +731,7 @@ describe('materializationJobsLogic', () => {
                 { cadence: '24hour', allowed: false, blocked_by: 'consumer', blocker: dailyRevenue, speeds_up: [] },
             ],
             floor: null,
-            ceiling: { label: '6 hours', blocker: dailyRevenue, pinned: false },
+            ceiling: { label: '6 hours', blocker: dailyRevenue },
             best_effort_sources: [],
             best_effort_sources_withheld: false,
         }

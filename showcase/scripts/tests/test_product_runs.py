@@ -173,7 +173,7 @@ class ProductRunsTest(unittest.TestCase):
         code, runs = self.run_shard("posthog/api/test/test_x.py", "products/alpha/backend/tests/test_a.py", "ee/test_y.py")
         self.assertEqual(0, code)
         self.assertEqual([str(self.repo), str(self.repo / "products/alpha")], [cwd for cwd, _, _ in runs])
-        self.assertTrue(runs[0][2].endswith("-v --force-reruns 1 --reruns-delay 1 posthog/api/test/test_x.py ee/test_y.py"), runs[0][2])
+        self.assertTrue(runs[0][2].endswith("-v --force-reruns 1 --reruns-delay 1 ee/test_y.py posthog/api/test/test_x.py"), runs[0][2])
         self.assertIn("-m pytest", runs[0][2])
 
     def test_core_segments_upstream_runs_apart_are_runs_of_their_own(self) -> None:
@@ -191,7 +191,7 @@ class ProductRunsTest(unittest.TestCase):
         self.assertEqual(["core", "temporal", "dags"], [group for _, group, _ in runs])
         self.assertEqual({str(self.repo)}, {cwd for cwd, _, _ in runs})
         core, temporal, dags = (args for _, _, args in runs)
-        self.assertTrue(core.endswith("-v --force-reruns 1 --reruns-delay 1 posthog/api/test/test_x.py ee/test_y.py"), core)
+        self.assertTrue(core.endswith("-v --force-reruns 1 --reruns-delay 1 ee/test_y.py posthog/api/test/test_x.py"), core)
         self.assertTrue(
             temporal.endswith(
                 "-v --force-reruns 1 --reruns-delay 1 posthog/temporal/tests/test_t.py posthog/temporal/tests/test_u.py"
@@ -389,11 +389,45 @@ class ProductRunsTest(unittest.TestCase):
             rel_targets = args.split(marker, 1)[1].split()
             by_group[group] = [f"products/warehouse_sources/{t}" for t in rel_targets]
 
-        self.assertEqual(vendor_targets, by_group["warehouse_sources"])
-        self.assertEqual(catalog_targets, by_group["warehouse_sources_catalog"])
+        self.assertEqual(set(vendor_targets), set(by_group["warehouse_sources"]))
+        self.assertEqual(set(catalog_targets), set(by_group["warehouse_sources_catalog"]))
         combined = by_group["warehouse_sources"] + by_group["warehouse_sources_catalog"]
         self.assertEqual(len(all_targets), len(combined))
         self.assertEqual(set(all_targets), set(combined))
+
+    def test_operands_order_groups_descendant_dirs_contiguously_and_keeps_selectors(self) -> None:
+        # pytest 9.1.1 creates a second Dir collector node if a descendant directory is
+        # revisited after an explicit file in an ancestor directory (`a/test_first.py`,
+        # `test_top.py`, `a/test_export.py`), breaking FixtureManager.getfixturedefs.
+        self.write(
+            "products/batch_exports/package.json",
+            json.dumps({"scripts": {"backend:test": "pytest -c ../../pytest.ini --rootdir ../.. backend/tests -v"}}),
+        )
+        base = "products/batch_exports/backend/tests/temporal/destinations"
+        interleaved = [
+            f"{base}/azure_blob/test_first.py",
+            f"{base}/test_top.py",
+            f"{base}/azure_blob/test_export.py",
+            f"{base}/workflows/test_activity.py::TestA::test_2",
+            f"{base}/workflows/test_activity.py::TestA::test_1",
+        ]
+        code, runs = self.run_shard(*interleaved)
+        self.assertEqual(0, code)
+        self.assertEqual(1, len(runs))
+        marker = "--force-reruns 1 --reruns-delay 1 "
+        args = runs[0][2]
+        self.assertIn(marker, args)
+        emitted = args.split(marker, 1)[1].split()
+        self.assertEqual(
+            [
+                "backend/tests/temporal/destinations/test_top.py",
+                "backend/tests/temporal/destinations/azure_blob/test_export.py",
+                "backend/tests/temporal/destinations/azure_blob/test_first.py",
+                "backend/tests/temporal/destinations/workflows/test_activity.py::TestA::test_1",
+                "backend/tests/temporal/destinations/workflows/test_activity.py::TestA::test_2",
+            ],
+            emitted,
+        )
 
     def test_warehouse_sources_catalog_paths_exist_guard(self) -> None:
         import importlib.util

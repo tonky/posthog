@@ -145,16 +145,27 @@ def group_of(target: str) -> tuple[str, str]:
     return "core", "."
 
 
+def _operand_sort_key(target: str) -> tuple[tuple[str, ...], str, str]:
+    """Order targets in pre-order directory-tree order so pytest 9.1.1 never revisits
+    a descendant directory collector after an explicit file in an ancestor directory
+    (which creates a second Dir node and breaks FixtureManager.getfixturedefs)."""
+    file_path, _, selector = target.partition("::")
+    parent, _, name = file_path.rpartition("/")
+    dir_parts = tuple(parent.split("/")) if parent else ()
+    return (dir_parts, name, selector)
+
+
 def runs(targets: list[str]) -> list[tuple[str, str, list[str]]]:
     groups: dict[tuple[str, str], list[str]] = {}
     for target in targets:
         groups.setdefault(group_of(target), []).append(target)
     out = []
     for (group, directory), members in groups.items():
+        ordered = sorted(members, key=_operand_sort_key)
         if directory == ".":
-            out.append((group, directory, ["-v", *GROUP_FLAGS.get(group, []), *members]))
+            out.append((group, directory, ["-v", *GROUP_FLAGS.get(group, []), *ordered]))
         else:
-            relative = [t[len(directory) + 1 :] for t in members]
+            relative = [t[len(directory) + 1 :] for t in ordered]
             flags = [*script_flags(Path(directory)), *OVERLAY_FLAGS.get(group, []), *RETRY_FLAGS]
             out.append((group, directory, [*flags, *relative]))
     return out

@@ -293,7 +293,6 @@ describe('pg.failover', () => {
         const controller = {
             aws: cloud,
             now: () => new Date(),
-            env: {},
             print: () => undefined,
             warn: () => undefined,
         } as unknown as Controller

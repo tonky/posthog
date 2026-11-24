@@ -6029,6 +6029,9 @@ jobs:
           packages/agent/pnpm-lock.yaml
           packages/agent/packages/agent/package.json
           packages/agent/packages/agent/src/utils/gateway.test.ts
+          services/credentials-service/src/catalogue.ts
+          services/stripe-mock
+          services/mcp/tests/hono
           tools/hedgebox-dummy/package.json
           tools/hedgebox-dummy/pnpm-workspace.yaml
           cli/Cargo.toml
@@ -6675,6 +6678,9 @@ jobs:
           packages/agent/pnpm-lock.yaml
           packages/agent/packages/agent/package.json
           packages/agent/packages/agent/src/utils/gateway.test.ts
+          services/credentials-service/src/catalogue.ts
+          services/stripe-mock
+          services/mcp/tests/hono
           tools/hedgebox-dummy/package.json
           tools/hedgebox-dummy/pnpm-workspace.yaml
           cli/Cargo.toml
@@ -7541,6 +7547,9 @@ jobs:
           packages/agent/pnpm-lock.yaml
           packages/agent/packages/agent/package.json
           packages/agent/packages/agent/src/utils/gateway.test.ts
+          services/credentials-service/src/catalogue.ts
+          services/stripe-mock
+          services/mcp/tests/hono
           tools/hedgebox-dummy/package.json
           tools/hedgebox-dummy/pnpm-workspace.yaml
           cli/Cargo.toml
@@ -8187,6 +8196,9 @@ jobs:
           packages/agent/pnpm-lock.yaml
           packages/agent/packages/agent/package.json
           packages/agent/packages/agent/src/utils/gateway.test.ts
+          services/credentials-service/src/catalogue.ts
+          services/stripe-mock
+          services/mcp/tests/hono
           tools/hedgebox-dummy/package.json
           tools/hedgebox-dummy/pnpm-workspace.yaml
           cli/Cargo.toml

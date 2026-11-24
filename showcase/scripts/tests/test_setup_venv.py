@@ -250,9 +250,9 @@ sys.exit(0)
             bin_dir.mkdir()
             self._make_fake_uv(bin_dir)
 
-            # Seed extra older venv-v2-* directories so prune_venv_cache exercises retention.
+            # Seed extra older venv-v3-* directories so prune_venv_cache exercises retention.
             for idx in range(4):
-                old = uv_cache / f"venv-v2-old-{idx}"
+                old = uv_cache / f"venv-v3-old-{idx}"
                 old.mkdir(parents=True, exist_ok=True)
                 (old / "pyvenv.cfg").write_text("home = /tmp\n")
                 os.utime(old, (1000 + idx, 1000 + idx))
@@ -262,12 +262,12 @@ sys.exit(0)
             lock_files = list((uv_cache / "locks").glob("*.lock"))
             self.assertEqual(len(lock_files), 1, "lock file must live under uv-cache/locks/")
             ino_before = lock_files[0].stat().st_ino
-            # Ensure no lock files were placed directly under uv_cache matching venv-v2-*.
+            # Ensure no lock files were placed directly under uv_cache matching venv-v3-*.
             self.assertEqual(list(uv_cache.glob("venv-*.lock")), [])
 
-            # Run a second time with additional stale venv-v2-* entries to trigger pruning again.
+            # Run a second time with additional stale venv-v3-* entries to trigger pruning again.
             for idx in range(4, 7):
-                old = uv_cache / f"venv-v2-old-{idx}"
+                old = uv_cache / f"venv-v3-old-{idx}"
                 old.mkdir(parents=True, exist_ok=True)
                 os.utime(old, (1000 + idx, 1000 + idx))
             (repo / ".venv").unlink()
@@ -287,7 +287,7 @@ sys.exit(0)
             self._make_fake_uv(bin_dir)
 
             # Cold run with ENACT_UV_WORK_DIR allocates work venv inside private_work
-            # while publishing venv-v2-* into shared uv_cache.
+            # while publishing venv-v3-* into shared uv_cache.
             res = self._run_setup_backend(
                 repo,
                 uv_cache,
@@ -304,10 +304,10 @@ sys.exit(0)
                 (uv_cache / "work").exists(),
                 "shared uv_cache/work must not be used when ENACT_UV_WORK_DIR is set",
             )
-            published = list(uv_cache.glob("venv-v2-*"))
-            self.assertEqual(len(published), 1, "venv-v2-* must still be published to shared UV_CACHE_DIR")
+            published = list(uv_cache.glob("venv-v3-*"))
+            self.assertEqual(len(published), 1, "venv-v3-* must still be published to shared UV_CACHE_DIR")
 
-            # Warm run clones from shared venv-v2-* into a fresh dir under private_work.
+            # Warm run clones from shared venv-v3-* into a fresh dir under private_work.
             (repo / ".venv").unlink()
             res2 = self._run_setup_backend(
                 repo,
@@ -319,6 +319,53 @@ sys.exit(0)
             venv_target2 = (repo / ".venv").resolve()
             self.assertTrue(venv_target2.is_relative_to(private_work.resolve()))
             self.assertNotEqual(venv_target2, venv_target)
+
+    def test_warm_clone_rewrites_stale_activate_paths_and_cold_uses_relocatable(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            repo = self._init_repo(root)
+            uv_cache = root / "uv-cache"
+            bin_dir = root / "bin"
+            bin_dir.mkdir()
+            marker = self._make_fake_uv(bin_dir)
+
+            first = self._run_setup_backend(repo, uv_cache, bin_dir)
+            self.assertEqual(first.returncode, 0, first.stderr + first.stdout)
+            venv_calls = [c for c in marker.read_text().splitlines() if c.startswith("venv ")]
+            self.assertEqual(len(venv_calls), 1)
+            self.assertIn("--relocatable", venv_calls[0].split())
+
+            # Simulate a cached venv carrying a dead producer path in bin/activate* and entrypoints.
+            cached_dirs = list(uv_cache.glob("venv-v3-*"))
+            self.assertEqual(len(cached_dirs), 1)
+            cached = cached_dirs[0]
+            stale = "/tmp/old-producer/venv.1NmiJt"
+            (cached / "bin/activate").write_text(f"VIRTUAL_ENV='{stale}'\nexport VIRTUAL_ENV\n")
+            (cached / "bin/activate.csh").write_text(f"setenv VIRTUAL_ENV '{stale}'\n")
+            (cached / "bin/activate.fish").write_text(f"set -gx VIRTUAL_ENV '{stale}'\n")
+            (cached / "bin/activate.nu").write_text(f"    let virtual_env = '{stale}'\n")
+            (cached / "bin/activate_this.py").write_text(f"base = '{stale}'\n")
+            (cached / "bin/pytest").write_text(f"#!{stale}/bin/python3\nprint('ok')\n")
+
+            (repo / ".venv").unlink()
+            second = self._run_setup_backend(repo, uv_cache, bin_dir)
+            self.assertEqual(second.returncode, 0, second.stderr + second.stdout)
+
+            consumer_venv = os.readlink(repo / ".venv")
+            self.assertIn(f"VIRTUAL_ENV='{consumer_venv}'", (repo / ".venv/bin/activate").read_text())
+            self.assertIn(f"setenv VIRTUAL_ENV '{consumer_venv}'", (repo / ".venv/bin/activate.csh").read_text())
+            self.assertIn(f"set -gx VIRTUAL_ENV '{consumer_venv}'", (repo / ".venv/bin/activate.fish").read_text())
+            self.assertIn(f"let virtual_env = '{consumer_venv}'", (repo / ".venv/bin/activate.nu").read_text())
+            self.assertIn(f"base = '{consumer_venv}'", (repo / ".venv/bin/activate_this.py").read_text())
+            self.assertTrue(
+                (repo / ".venv/bin/pytest").read_text().startswith(f"#!{repo.resolve() / '.venv/bin/python3'}\n")
+            )
+            # Hardlinked cache files must remain untouched on their original inodes.
+            self.assertIn(stale, (cached / "bin/activate").read_text())
+            self.assertNotEqual(
+                (repo / ".venv/bin/activate").stat().st_ino,
+                (cached / "bin/activate").stat().st_ino,
+            )
 
 
 if __name__ == "__main__":

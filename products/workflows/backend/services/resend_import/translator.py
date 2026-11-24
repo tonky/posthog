@@ -315,8 +315,7 @@ class _Builder:
         if cohort is not None and cohort.cohort_id is not None:
             inputs["cohort_id"] = {"value": cohort.cohort_id}
             members = (
-                "This import's Contacts step adds the segment's contacts to it once it finishes. If it doesn't finish, "
-                "import Contacts again."
+                "This import also added the segment's contacts to it."
                 if self.context.segment_members_imported
                 else "Import Contacts too to add the people already in the segment."
             )

@@ -1,14 +1,16 @@
 import { MOCK_DEFAULT_ORGANIZATION, MOCK_DEFAULT_TEAM } from 'lib/api.mock'
 
 import type { Meta, StoryObj } from '@storybook/react'
+import { router } from 'kea-router'
 
 import { FEATURE_FLAGS, STORYBOOK_FEATURE_FLAGS } from 'lib/constants'
+import { App } from 'scenes/App'
+import { urls } from 'scenes/urls'
 
 import { mswDecorator } from '~/mocks/browser'
 import preflightJson from '~/mocks/fixtures/_preflight.json'
 
 import { SettingSectionId } from '../types'
-import { SETTINGS_STORY_TEST_OPTIONS, SettingsStoryApp } from './SettingsStoryApp'
 import { withTodayRailNav } from './withTodayRailNav'
 
 interface StoryProps {
@@ -23,7 +25,6 @@ const meta: Meta<(props: StoryProps) => JSX.Element> = {
         viewMode: 'story',
         mockDate: '2023-05-25',
         featureFlags: STORYBOOK_FEATURE_FLAGS,
-        testOptions: SETTINGS_STORY_TEST_OPTIONS,
     },
     decorators: [
         mswDecorator({
@@ -157,7 +158,14 @@ const meta: Meta<(props: StoryProps) => JSX.Element> = {
             },
         }),
     ],
-    render: ({ sectionId }: StoryProps) => <SettingsStoryApp sectionId={sectionId} />,
+    render: ({ sectionId }: StoryProps) => {
+        // Navigate synchronously before <App /> mounts so it renders the settings scene directly,
+        // never the project homepage. A useEffect push fires after the first paint, so the snapshot
+        // can race and capture the homepage frame instead.
+        router.actions.push(urls.settings(sectionId))
+
+        return <App />
+    },
 }
 export default meta
 
