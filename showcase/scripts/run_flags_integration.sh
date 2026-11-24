@@ -110,8 +110,16 @@ if [ "$serve" -eq 1 ]; then
     exit
 fi
 
+if [ -f showcase/scripts/snapshot_root.sh ]; then
+    # shellcheck source=snapshot_root.sh
+    source showcase/scripts/snapshot_root.sh
+fi
 # shellcheck source=test_databases.sh
 source showcase/scripts/test_databases.sh
+if [ -f showcase/scripts/template_lock.sh ]; then
+    # shellcheck source=template_lock.sh
+    source showcase/scripts/template_lock.sh
+fi
 worker="$(test_worker_name "${ENACT_COMPONENT:-flags_integration}" "${ENACT_JOB:-test}" 1)"
 db="test_posthog_${worker}"
 # The name comes as an argument: the templates' bootstrap, in with_templates' subshell, sets

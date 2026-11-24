@@ -276,6 +276,50 @@ sys.exit(0)
             self.assertTrue(lock_files[0].is_file())
             self.assertEqual(lock_files[0].stat().st_ino, ino_before, "pruning must not unlink the lock inode")
 
+    def test_enact_uv_work_dir_isolates_work_venv_and_shares_cache(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            repo = self._init_repo(root)
+            uv_cache = root / "uv-cache"
+            private_work = root / "proof-123" / "uv-work"
+            bin_dir = root / "bin"
+            bin_dir.mkdir()
+            self._make_fake_uv(bin_dir)
+
+            # Cold run with ENACT_UV_WORK_DIR allocates work venv inside private_work
+            # while publishing venv-v2-* into shared uv_cache.
+            res = self._run_setup_backend(
+                repo,
+                uv_cache,
+                bin_dir,
+                extra_env={"ENACT_UV_WORK_DIR": str(private_work)},
+            )
+            self.assertEqual(res.returncode, 0, res.stderr + res.stdout)
+            venv_target = (repo / ".venv").resolve()
+            self.assertTrue(
+                venv_target.is_relative_to(private_work.resolve()),
+                f"expected .venv target under {private_work}, got {venv_target}",
+            )
+            self.assertFalse(
+                (uv_cache / "work").exists(),
+                "shared uv_cache/work must not be used when ENACT_UV_WORK_DIR is set",
+            )
+            published = list(uv_cache.glob("venv-v2-*"))
+            self.assertEqual(len(published), 1, "venv-v2-* must still be published to shared UV_CACHE_DIR")
+
+            # Warm run clones from shared venv-v2-* into a fresh dir under private_work.
+            (repo / ".venv").unlink()
+            res2 = self._run_setup_backend(
+                repo,
+                uv_cache,
+                bin_dir,
+                extra_env={"ENACT_UV_WORK_DIR": str(private_work)},
+            )
+            self.assertEqual(res2.returncode, 0, res2.stderr + res2.stdout)
+            venv_target2 = (repo / ".venv").resolve()
+            self.assertTrue(venv_target2.is_relative_to(private_work.resolve()))
+            self.assertNotEqual(venv_target2, venv_target)
+
 
 if __name__ == "__main__":
     unittest.main()

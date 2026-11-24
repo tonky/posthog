@@ -75,8 +75,16 @@ fi
 # The gate's one test, given as enact's target: the whole gate.
 case "${1:-}" in "$gate_test" | */"$gate_test") shift ;; esac
 
+if [ -f showcase/scripts/snapshot_root.sh ]; then
+    # shellcheck source=snapshot_root.sh
+    source showcase/scripts/snapshot_root.sh
+fi
 # shellcheck source=test_databases.sh
 source showcase/scripts/test_databases.sh
+if [ -f showcase/scripts/template_lock.sh ]; then
+    # shellcheck source=template_lock.sh
+    source showcase/scripts/template_lock.sh
+fi
 # shellcheck source=rust_ci_env.sh
 source showcase/scripts/rust_ci_env.sh
 

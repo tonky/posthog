@@ -59,8 +59,16 @@ if [ "$ignored" -eq 1 ] && [ "$#" -eq 0 ]; then
     for row in "${ignored_tests[@]}"; do set -- "$@" "${row%% *}"; done
 fi
 cd "$root"
+if [ -f showcase/scripts/snapshot_root.sh ]; then
+    # shellcheck source=snapshot_root.sh
+    source showcase/scripts/snapshot_root.sh
+fi
 # shellcheck source=test_databases.sh
 source showcase/scripts/test_databases.sh
+if [ -f showcase/scripts/template_lock.sh ]; then
+    # shellcheck source=template_lock.sh
+    source showcase/scripts/template_lock.sh
+fi
 
 pg_url="postgres://${PGUSER}:${PGPASSWORD:-posthog}@${PGHOST}:${PGPORT}"
 persons="$pg_url/posthog_persons"

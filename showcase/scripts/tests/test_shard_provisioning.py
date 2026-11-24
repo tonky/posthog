@@ -85,7 +85,7 @@ class ShardProvisioningTest(unittest.TestCase):
         self.repo = Path(tmp.name).resolve()
         scripts = self.repo / "showcase/scripts"
         scripts.mkdir(parents=True)
-        for name in ("run_sharded_pytest.sh", "product_pytest.py", "exclusive.sh", "setup.sh"):
+        for name in ("run_sharded_pytest.sh", "run_sharded_pytest.py", "product_pytest.py", "exclusive.sh", "setup.sh"):
             shutil.copy2(SCRIPTS / name, scripts / name)
         (scripts / "backend_runtime.py").write_text(RUNTIME_STUB)
         self.write("bin/uv", UV_STUB)

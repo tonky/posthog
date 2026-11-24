@@ -938,7 +938,7 @@ class ChV2DanglingMvAndKeeperFixTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as work:
             repo, snap, bin_dir, logs_dir, calls = Path(work) / "repo", Path(work) / "snapshots", Path(work) / "bin", Path(work) / "logs", Path(work) / "calls.log"
             _seed_repo(repo)
-            for fname in ("live_migrate_cache.py", "live_posthog.sh"):
+            for fname in ("live_migrate_cache.py", "live_posthog.sh", "live_posthog.py"):
                 (repo / "showcase/scripts" / fname).write_text((SCRIPTS / fname).read_text(encoding="utf-8"), encoding="utf-8")
             (snap / "ch-v1" / ("f" * 64)).mkdir(parents=True)
             bin_dir.mkdir()

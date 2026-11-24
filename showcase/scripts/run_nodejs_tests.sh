@@ -285,8 +285,16 @@ JEST_REPORTER
     exit "$status"
 fi
 
+if [ -f showcase/scripts/snapshot_root.sh ]; then
+    # shellcheck source=snapshot_root.sh
+    source showcase/scripts/snapshot_root.sh
+fi
 # shellcheck source=test_databases.sh
 source showcase/scripts/test_databases.sh
+if [ -f showcase/scripts/template_lock.sh ]; then
+    # shellcheck source=template_lock.sh
+    source showcase/scripts/template_lock.sh
+fi
 
 shard="shard${shard_index}"
 [ "$suite" = jest ] || shard="rust_e2e"

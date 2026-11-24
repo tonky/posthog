@@ -25,12 +25,14 @@ case "${1:-frontend}" in
             VENV_KEY="$({ printf '%s\n' "$PY_BIN"; sha256sum uv.lock pyproject.toml 2>/dev/null || shasum -a 256 uv.lock pyproject.toml; } | { sha256sum 2>/dev/null || shasum -a 256; } | cut -c1-16)"
             VENV_CACHE="${UV_CACHE_DIR}/venv-v2-${VENV_KEY}"
             CACHE_VENV_WRITE=1
-            mkdir -p "$UV_CACHE_DIR/work"
+            UV_WORK_BASE="${ENACT_UV_WORK_DIR:-$UV_CACHE_DIR/work}"
+            mkdir -p "$UV_WORK_BASE"
             rm -rf "$UV_CACHE_DIR"/venv-[0-9a-f]* 2>/dev/null || true
             prune_venv_cache
             # On managed workers (`ENACT_HOST_CACHE`), lease-aware `cache-gc.sh` + entrypoint
-            # own `uv/work/venv.*` cleanup; never blind-sweep active leased venvs on startup.
-            if [ -z "${ENACT_HOST_CACHE:-}" ]; then
+            # own `uv/work/venv.*` cleanup; when `ENACT_UV_WORK_DIR` is set, the caller owns
+            # its private scratch dir. Never blind-sweep active leased venvs on startup.
+            if [ -z "${ENACT_HOST_CACHE:-}" ] && [ -z "${ENACT_UV_WORK_DIR:-}" ]; then
                 find "$UV_CACHE_DIR/work" -mindepth 1 -maxdepth 1 -mmin +120 -type d \
                     -exec sh -c 'for d do [ -f "$d/.gha-job-lease" ] || rm -rf "$d"; done' _ {} + 2>/dev/null || true
             fi
@@ -87,7 +89,7 @@ sys.exit(rc)
         RESTORED=0
         CLONED_CACHE_INO=""
         if [ -n "$VENV_CACHE" ] && [ ! -e .venv ]; then
-            WORK_VENV="$(mktemp -d "$UV_CACHE_DIR/work/venv.XXXXXX")"
+            WORK_VENV="$(mktemp -d "$UV_WORK_BASE/venv.XXXXXX")"
             CLONE_OK=0
             if run_under_venv_lock bash -c '
                 set -euo pipefail
@@ -151,7 +153,7 @@ if bin_dir.is_dir():
         fi
         if [ "$RESTORED" -eq 0 ]; then
             if [ -n "$VENV_CACHE" ] && [ ! -e .venv ]; then
-                WORK_VENV="$(mktemp -d "$UV_CACHE_DIR/work/venv.XXXXXX")"
+                WORK_VENV="$(mktemp -d "$UV_WORK_BASE/venv.XXXXXX")"
                 # Create the venv BEFORE writing `.gha-job-lease`: uv refuses to initialize
                 # `.venv` over a non-empty directory that lacks a Python executable (exit 2).
                 uv venv --python "$PY_BIN" "$WORK_VENV"

@@ -25,8 +25,16 @@ for target in "$@"; do
     targets+=("${target#"$root"/}")
 done
 cd "$root"
+if [ -f showcase/scripts/snapshot_root.sh ]; then
+    # shellcheck source=snapshot_root.sh
+    source showcase/scripts/snapshot_root.sh
+fi
 # shellcheck source=test_databases.sh
 source showcase/scripts/test_databases.sh
+if [ -f showcase/scripts/template_lock.sh ]; then
+    # shellcheck source=template_lock.sh
+    source showcase/scripts/template_lock.sh
+fi
 # shellcheck source=live_posthog.sh
 source showcase/scripts/live_posthog.sh
 

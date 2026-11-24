@@ -24,7 +24,20 @@
 #       stack ran (rust_footprint.py --built-from)
 # Every process started stops when the job's shell exits; on failure their logs' tails print.
 
-live_free_port() { python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])'; }
+_LIVE_POSTHOG_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_LIVE_POSTHOG_PY="$_LIVE_POSTHOG_DIR/live_posthog.py"
+
+# Align live-v1 and ch-v1 with test_databases.sh's v3 root when sourced after it
+# or standalone (explicit ENACT_TEMPLATE_SNAPSHOT_DIR -> writable ENACT_HOST_CACHE/repo -> ~/.cache).
+if [ -z "${SNAPSHOT_ROOT:-}" ]; then
+    if [ -z "${ENACT_TEMPLATE_SNAPSHOT_DIR:-}" ] && [ -f "$_LIVE_POSTHOG_DIR/snapshot_root.sh" ]; then
+        # shellcheck source=snapshot_root.sh
+        source "$_LIVE_POSTHOG_DIR/snapshot_root.sh"
+    fi
+    SNAPSHOT_ROOT="${ENACT_TEMPLATE_SNAPSHOT_DIR:-${HOME}/.cache/enact/snapshots}"
+fi
+
+live_free_port() { python3 "$_LIVE_POSTHOG_PY" free-port; }
 
 live_pids=()
 live_stop() {
@@ -98,183 +111,43 @@ live_py() { "${live_run[@]}" uv run --no-sync python "$@"; }
 # The topics the job's ClickHouse tables consume and its code produces, under its prefix
 # (create_test_kafka_topics.py's list, unsuffixed as TEST unset names them).
 live_topics() {
-    live_py - <<'PY'
-import os
-import sys
-
-sys.path.insert(0, "showcase/scripts")
-from confluent_kafka.admin import AdminClient, NewTopic
-
-import create_test_kafka_topics as topics
-
-prefix = os.environ["KAFKA_PREFIX"]
-admin = AdminClient({"bootstrap.servers": os.environ["KAFKA_HOSTS"]})
-existing = set(admin.list_topics(timeout=30).topics)
-wanted = sorted({prefix + t for t in set(topics.topic_names()) | topics.listed_topics()} - existing)
-if wanted:
-    for future in admin.create_topics([NewTopic(t, num_partitions=1, replication_factor=1) for t in wanted]).values():
-        future.result()
-print(f"created {len(wanted)} Kafka topics under {prefix}")
-PY
+    live_py "$_LIVE_POSTHOG_PY" create-topics
 }
 
 # Wait until nothing is connected to <db>; CREATE DATABASE ... TEMPLATE and DROP DATABASE fail
 # while sessions remain active.
 live_wait_db_free() { # <db>
-    local db=$1 deadline=$((SECONDS + ${ENACT_TEMPLATE_FREE_TIMEOUT:-60})) sessions
-    while :; do
-        sessions=$(pg -d postgres -c "SELECT count(*) FROM pg_stat_activity WHERE datname = '$db'") || return 1
-        [ "${sessions:-0}" = "0" ] && return 0
-        [ "$SECONDS" -lt "$deadline" ] || { echo "$db still has $sessions sessions" >&2; return 1; }
-        sleep 1
-    done
+    python3 "$_LIVE_POSTHOG_PY" wait-db-free --db "$1"
 }
 
 live_pg_template_ready() { # <template_db> <format_comment>
-    [ "$(pg -d postgres -c "SELECT count(*) FROM pg_database WHERE datname = '$1' AND shobj_description(oid, 'pg_database') = '$2'")" = "1" ] \
-        && [ "$(pg -d "$1" -c "SELECT to_regclass('public.posthog_organization') IS NOT NULL")" = t ]
+    python3 "$_LIVE_POSTHOG_PY" pg-template-ready --template-db "$1" --format-comment "$2"
 }
 
 live_migrate_pg() {
-    local pg_major template_key key tpl fmt gen_dir base_dir apps tmp_dir tmp_dump tmp_applied migrated=0
-    pg_major=$(pg -d postgres -c 'SHOW server_version_num' | awk '{print int($1 / 10000)}')
+    local template_key
     template_key=$(current_template_key) || return 1
-    key=$(python3 showcase/scripts/live_migrate_cache.py pg-key --repo . --template-key "$template_key" --pg-major "$pg_major") || return 1
-    tpl="posthog_live_template_${key:0:12}"
-    fmt="enact-live-pg-v1:${key}"
-
-    mkdir -p "$SNAPSHOT_ROOT/live-v1"
-    (
-        flock 7 || exit 1
-        if live_pg_template_ready "$tpl" "$fmt"; then
-            live_wait_db_free "$tpl" || exit 1
-            pg -d postgres -c "DROP DATABASE IF EXISTS $live_db WITH (FORCE);" >/dev/null || exit 1
-            pg -d postgres -c "CREATE DATABASE $live_db TEMPLATE $tpl;" >/dev/null || exit 1
-            echo "live-pg cluster hit: $tpl" >&2
-            exit 0
-        fi
-        if gen_dir=$(python3 showcase/scripts/live_migrate_cache.py pg-verify --snapshot-root "$SNAPSHOT_ROOT" --key "$key" --pg-major "$pg_major" 2>/dev/null); then
-            live_wait_db_free "$tpl" || exit 1
-            pg -d postgres -c "DROP DATABASE IF EXISTS $tpl WITH (FORCE);" >/dev/null || exit 1
-            pg -d postgres -c "CREATE DATABASE $tpl;" >/dev/null || exit 1
-            if pg_restore -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" --no-owner --no-privileges -d "$tpl" "$gen_dir/live-postgres.dump" >/dev/null; then
-                pg -d postgres -c "COMMENT ON DATABASE $tpl IS '$fmt';" >/dev/null || exit 1
-                live_wait_db_free "$tpl" || exit 1
-                pg -d postgres -c "DROP DATABASE IF EXISTS $live_db WITH (FORCE);" >/dev/null || exit 1
-                pg -d postgres -c "CREATE DATABASE $live_db TEMPLATE $tpl;" >/dev/null || exit 1
-                echo "live-pg snapshot hit: $gen_dir" >&2
-                exit 0
-            fi
-            pg -d postgres -c "DROP DATABASE IF EXISTS $tpl WITH (FORCE);" >/dev/null || true
-        fi
-        base_dir=$(python3 showcase/scripts/live_migrate_cache.py pg-base --snapshot-root "$SNAPSHOT_ROOT" --repo . --template-key "$template_key" --pg-major "$pg_major" 2>/dev/null || true)
-        if [ -n "$base_dir" ]; then
-            pg -d postgres -c "DROP DATABASE IF EXISTS $live_db WITH (FORCE);" >/dev/null || exit 1
-            pg -d postgres -c "CREATE DATABASE $live_db;" >/dev/null || exit 1
-            if pg_restore -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" --no-owner --no-privileges -d "$live_db" "$base_dir/live-postgres.dump" >/dev/null \
-                && live_py manage.py migrate --noinput; then
-                migrated=1
-                echo "live-pg incremental top-up succeeded from $base_dir" >&2
-            else
-                echo "live-pg incremental top-up failed from $base_dir; falling back to template clone" >&2
-                with_templates fresh_django_clone "$live_db" || exit 1
-            fi
-        fi
-        if [ "$migrated" -eq 0 ]; then
-            apps=$(python3 showcase/scripts/live_migrate_cache.py routed-apps --repo .) || exit 1
-            [ -z "$apps" ] || pg -d "$live_db" -c "DELETE FROM django_migrations WHERE app IN ($apps);" >/dev/null || exit 1
-            live_py manage.py migrate --noinput || exit 1
-        fi
-        live_py manage.py migrate --check --noinput >/dev/null || exit 1
-        tmp_dir=$(mktemp -d)
-        tmp_dump="$tmp_dir/live-postgres.dump"
-        tmp_applied="$tmp_dir/applied.tsv"
-        trap 'rm -rf "$tmp_dir"' EXIT
-        pg_dump -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -Fc -f "$tmp_dump" "$live_db" || exit 1
-        pg -d "$live_db" -F $'\t' -c "SELECT app, name FROM django_migrations ORDER BY app, name" >"$tmp_applied" || exit 1
-        local published_dir
-        published_dir=$(python3 showcase/scripts/live_migrate_cache.py pg-publish \
-            --snapshot-root "$SNAPSHOT_ROOT" --repo . --key "$key" --pg-major "$pg_major" \
-            --template-key "$template_key" --dump-file "$tmp_dump" --applied-file "$tmp_applied") || exit 1
-        echo "live-pg published snapshot: $published_dir" >&2
-        live_wait_db_free "$live_db" || exit 1
-        live_wait_db_free "$tpl" || exit 1
-        pg -d postgres -c "DROP DATABASE IF EXISTS $tpl WITH (FORCE);" >/dev/null || exit 1
-        pg -d postgres -c "CREATE DATABASE $tpl TEMPLATE $live_db;" >/dev/null || exit 1
-        pg -d postgres -c "COMMENT ON DATABASE $tpl IS '$fmt';" >/dev/null || exit 1
-    # Distinct from pg-publish's .publish.lock so holding fd 7 never self-deadlocks child python.
-    ) 7>"$SNAPSHOT_ROOT/live-v1/${key}.migrate.lock"
+    "${live_run[@]}" python3 "$_LIVE_POSTHOG_PY" migrate-pg \
+        --repo . \
+        --snapshot-root "$SNAPSHOT_ROOT" \
+        --live-db "$live_db" \
+        --template-key "$template_key"
 }
 
 live_clean_ch_keeper() {
-    if [ -n "${ENVE_SERVICE_CLICKHOUSE_PORT_KEEPER:-}" ] && command -v clickhouse >/dev/null 2>&1; then
-        clickhouse keeper-client --port "$ENVE_SERVICE_CLICKHOUSE_PORT_KEEPER" \
-            -q "rmr /clickhouse/prod/tables/noshard/${live_ch_db}" >/dev/null 2>&1 || true
-    fi
+    python3 "$_LIVE_POSTHOG_PY" clean-ch-keeper --ch-db "$live_ch_db"
 }
 
 live_migrate_ch() {
-    local ch_version ch_http_url ch_key ch_restore_log="${live_logs:-.}/ch-restore.log" mode=""
-    mkdir -p "${ch_restore_log%/*}"
-    ch_version=$("${live_ch[@]}" -q "SELECT version()" | tr -d '[:space:]')
-    ch_http_url="http://${CLICKHOUSE_HOST:-127.0.0.1}:${CLICKHOUSE_HTTP_PORT:?the env ClickHouse HTTP port}"
-    ch_key=$(python3 showcase/scripts/live_migrate_cache.py ch-key --repo . --ch-version "$ch_version") || return 1
-
-    if ! mode=$(python3 showcase/scripts/live_migrate_cache.py ch-restore \
-        --snapshot-root "$SNAPSHOT_ROOT" --repo . --key "$ch_key" --ch-version "$ch_version" \
-        --http-url "$ch_http_url" --ch-db "$live_ch_db" --kafka-prefix "${live_worker}_" \
-        --kafka-broker "${KAFKA_HOSTS:?the env Kafka bootstrap}" \
-        --user "${CLICKHOUSE_USER:-default}" --password "${CLICKHOUSE_PASSWORD:-}" 2>"$ch_restore_log"); then
-        mode=""
-        if [ -d "$SNAPSHOT_ROOT/ch-v1" ] && [ -n "$(ls -A "$SNAPSHOT_ROOT/ch-v1" 2>/dev/null)" ]; then
-            echo "live-ch restore miss/failed (see $ch_restore_log)" >&2
-        fi
-    fi
-
-    if [ "$mode" = "exact" ]; then
-        if live_py manage.py migrate_clickhouse --check >/dev/null 2>&1; then
-            echo "live-ch snapshot hit: $ch_key" >&2
-            return 0
-        fi
-        echo "live-ch snapshot failed migrate_clickhouse --check; rebuilding cold" >&2
-        mode=""
-    fi
-
-    mkdir -p "$SNAPSHOT_ROOT/ch-v1"
-    (
-        flock 8 || exit 1
-        if [ "$mode" != "base" ] && python3 showcase/scripts/live_migrate_cache.py ch-restore \
-            --snapshot-root "$SNAPSHOT_ROOT" --repo . --key "$ch_key" --ch-version "$ch_version" \
-            --http-url "$ch_http_url" --ch-db "$live_ch_db" --kafka-prefix "${live_worker}_" \
-            --kafka-broker "${KAFKA_HOSTS:?the env Kafka bootstrap}" \
-            --user "${CLICKHOUSE_USER:-default}" --password "${CLICKHOUSE_PASSWORD:-}" --exact-only >/dev/null 2>>"$ch_restore_log"; then
-            if live_py manage.py migrate_clickhouse --check >/dev/null 2>&1; then
-                echo "live-ch snapshot hit after lock: $ch_key" >&2
-                exit 0
-            fi
-        fi
-        if [ "$mode" = "base" ]; then
-            echo "live-ch incremental top-up from subset base" >&2
-            if ! live_py manage.py migrate_clickhouse; then
-                echo "live-ch incremental top-up failed; rebuilding cold" >&2
-                "${live_ch[@]}" -q "DROP DATABASE IF EXISTS ${live_ch_db} SYNC" >/dev/null || exit 1
-                live_clean_ch_keeper
-                "${live_ch[@]}" -q "SYSTEM FLUSH LOGS" >/dev/null || exit 1
-                live_py manage.py migrate_clickhouse || exit 1
-            fi
-        else
-            "${live_ch[@]}" -q "DROP DATABASE IF EXISTS ${live_ch_db} SYNC" >/dev/null || exit 1
-            live_clean_ch_keeper
-            "${live_ch[@]}" -q "SYSTEM FLUSH LOGS" >/dev/null || exit 1
-            live_py manage.py migrate_clickhouse || exit 1
-        fi
-        live_py manage.py migrate_clickhouse --check >/dev/null || exit 1
-        python3 showcase/scripts/live_migrate_cache.py ch-capture \
-            --snapshot-root "$SNAPSHOT_ROOT" --repo . --key "$ch_key" --ch-version "$ch_version" \
-            --http-url "$ch_http_url" --ch-db "$live_ch_db" --kafka-prefix "${live_worker}_" \
-            --kafka-broker "${KAFKA_HOSTS:?the env Kafka bootstrap}" \
-            --user "${CLICKHOUSE_USER:-default}" --password "${CLICKHOUSE_PASSWORD:-}" >/dev/null
-    ) 8>"$SNAPSHOT_ROOT/ch-v1/${ch_key}.migrate.lock"
+    local ch_cmd_json
+    ch_cmd_json="$(python3 -c 'import json, sys; print(json.dumps(sys.argv[1:]))' "${live_ch[@]}")"
+    "${live_run[@]}" python3 "$_LIVE_POSTHOG_PY" migrate-ch \
+        --repo . \
+        --snapshot-root "$SNAPSHOT_ROOT" \
+        --ch-cmd-json "$ch_cmd_json" \
+        --ch-db "$live_ch_db" \
+        --live-worker "$live_worker" \
+        --logs-dir "${live_logs:-.}"
 }
 
 # "Prime posthog from cached schema" and the migrations: the template, like upstream's schema
@@ -374,28 +247,10 @@ live_rust_footprint() { # <dir>
     mkdir -p "$ENACT_FOOTPRINT_DIR"
     cp "$1"/*.stats "$ENACT_FOOTPRINT_DIR"/ 2>/dev/null || true
     if [ -n "${live_prebuilt_footprint:-}" ] && [ -s "$live_prebuilt_footprint" ]; then
-        python3 - "$live_prebuilt_footprint" "$ENACT_FOOTPRINT_DIR" "${maps[@]}" <<'PY'
-import json
-import os
-import sys
-
-built_doc = json.loads(open(sys.argv[1], encoding="utf-8").read())
-built_shared = built_doc.get("shared") or {}
-built_files = set(built_shared.get("files") or ())
-built_recs = set(built_shared.get("recorders") or ("rust_footprint.py/3",))
-out_dir = sys.argv[2]
-for map_path in sys.argv[3:]:
-    doc = json.loads(open(map_path, encoding="utf-8").read())
-    shared = doc.setdefault("shared", {})
-    shared["files"] = sorted(set(shared.get("files") or ()) | built_files)
-    shared["recorders"] = sorted(set(shared.get("recorders") or ()) | built_recs)
-    for fp in (doc.get("targets") or {}).values():
-        if isinstance(fp, dict):
-            fp["recorders"] = sorted(set(fp.get("recorders") or ()) | built_recs)
-    dst = os.path.join(out_dir, os.path.basename(map_path))
-    with open(dst, "w", encoding="utf-8") as out:
-        json.dump(doc, out, separators=(",", ":"))
-PY
+        python3 "$_LIVE_POSTHOG_PY" merge-prebuilt-rust-footprint \
+            --built "$live_prebuilt_footprint" \
+            --out-dir "$ENACT_FOOTPRINT_DIR" \
+            "${maps[@]}"
         echo "live_footprint: merged pre-built Rust inputs -> $ENACT_FOOTPRINT_DIR" >&2
         return 0
     fi
@@ -410,20 +265,10 @@ PY
     echo "live_footprint: the build inputs of ${#live_rust_roots[@]} Rust binaries -> $ENACT_FOOTPRINT_DIR" >&2
 }
 
-# Waits until <url> answers (curl) or <port> accepts, failing when <pid> exits first.
+# Waits until <url> answers or <port> accepts, failing when <pid> exits first.
 live_wait_ready() { # <name> <pid> <port> <url|-> [tries]
-    local _
-    for _ in $(seq 1 "${5:-60}"); do
-        kill -0 "$2" 2>/dev/null || { echo "$1 exited unexpectedly" >&2; return 1; }
-        if [ "$4" != "-" ]; then
-            curl -s -o /dev/null "$4" && return 0
-        elif (exec 3<>"/dev/tcp/127.0.0.1/$3") 2>/dev/null; then
-            return 0
-        fi
-        sleep 2
-    done
-    echo "$1 is not ready after $((${5:-60} * 2)) s" >&2
-    return 1
+    python3 "$_LIVE_POSTHOG_PY" wait-ready \
+        --name "$1" --pid "$2" --port "$3" --url "$4" --tries "${5:-60}"
 }
 
 # Starts <command...> in the background, logging to <name>.log, and waits for it on <port>

@@ -45,8 +45,16 @@ for spec in ${raw_args[@]+"${raw_args[@]}"}; do
     specs+=("${spec#"$root"/}")
 done
 cd "$root"
+if [ -f showcase/scripts/snapshot_root.sh ]; then
+    # shellcheck source=snapshot_root.sh
+    source showcase/scripts/snapshot_root.sh
+fi
 # shellcheck source=test_databases.sh
 source showcase/scripts/test_databases.sh
+if [ -f showcase/scripts/template_lock.sh ]; then
+    # shellcheck source=template_lock.sh
+    source showcase/scripts/template_lock.sh
+fi
 # shellcheck source=live_posthog.sh
 source showcase/scripts/live_posthog.sh
 
@@ -155,20 +163,17 @@ http.createServer((req, res) => {
     req.pipe(upstream)
 }).listen(Number(process.env.PORT), "127.0.0.1")
 '
-# Upstream's 6 Playwright and 4 granian workers on 8 cores, scaled to the CPUs enact admitted
-# the job with (ENACT_WORKER_CPUS: 6 on a tonky-ci slot gives 4 and 3), at least one each.
-if [ -n "${ENACT_WORKER_CPUS:-}" ]; then
-    cpus=${ENACT_WORKER_CPUS%.*}
-    [ "${cpus:-0}" -ge 1 ] 2>/dev/null || cpus=1
-    : "${PLAYWRIGHT_WORKERS:=$(( cpus * 3 / 4 > 0 ? cpus * 3 / 4 : 1 ))}"
-    : "${GRANIAN_WORKERS:=$(( cpus / 2 > 0 ? cpus / 2 : 1 ))}"
-fi
+# Cap Playwright workers to PW=2 when effective CPUs <= 4 (bounded by
+# min(ENACT_WORKER_CPUS, live_cpus); G1 proof 229/230: PW=2 passes 37/37 under 4c/10GiB,
+# whereas PW=3 fails notebooks.spec.ts 0/3), and log reserved_cpus, live_cpus,
+# effective_cpus, and chosen PW_WORKERS / GRANIAN_WORKERS.
+eval "$(python3 "$root/showcase/scripts/live_posthog.py" e2e-workers --shell)"
 e2e_app() {
     live_start_celery
     live_start temporal-worker 0 - "${live_run[@]}" uv run --no-sync python manage.py start_temporal_worker \
         --task-queue analytics-platform-task-queue \
         --metrics-port "$temporal_metrics_port" --health-port "$temporal_health_port"
-    live_start_web "${GRANIAN_WORKERS:-4}"
+    live_start_web "${GRANIAN_WORKERS:-2}"
 }
 
 # "Run Playwright tests".
@@ -180,7 +185,7 @@ e2e_run() { # [spec...]
         PLAYWRIGHT_RESULTS_DIR="$results/run" \
         NODE_OPTIONS="${NODE_OPTIONS:+$NODE_OPTIONS }--require $root/.enact/vitest/node_env_preload.cjs" \
         pnpm exec playwright test --config "$root/showcase/playwright.enact.config.ts" "$@" \
-        ${reporters[@]+"${reporters[@]}"} --workers="${PLAYWRIGHT_WORKERS:-6}" --update-snapshots) || rc=$?
+        ${reporters[@]+"${reporters[@]}"} --workers="${PW_WORKERS:-2}" --update-snapshots) || rc=$?
     if [ "$rc" -ne 0 ]; then
         echo "e2e_run: FAILED ($rc) specs: $*" >&2
     fi

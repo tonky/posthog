@@ -85,6 +85,7 @@ class ChildRecorderProvenanceTest(unittest.TestCase):
 
 FILES = [
     "showcase/scripts/live_posthog.sh",
+    "showcase/scripts/live_posthog.py",
     "showcase/scripts/run_e2e_tests.sh",
     "showcase/scripts/build_e2e.sh",
     "showcase/scripts/run_mcp_integration.sh",

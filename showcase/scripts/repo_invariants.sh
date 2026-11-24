@@ -9,8 +9,16 @@ reuse=()
 # run, so the runner's ENACT_SERVICES_ACTIVE flag says nothing about them.
 export PGHOST="${PGHOST:-127.0.0.2}" PGUSER="${PGUSER:-posthog}" PGPASSWORD="${PGPASSWORD:-posthog}"
 if [ -n "${PGPORT:-}" ] && pg_isready -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -q; then
+    if [ -f "$(dirname "${BASH_SOURCE[0]}")/snapshot_root.sh" ]; then
+        # shellcheck source=snapshot_root.sh
+        source "$(dirname "${BASH_SOURCE[0]}")/snapshot_root.sh"
+    fi
     # shellcheck source=test_databases.sh
     source "$(dirname "${BASH_SOURCE[0]}")/test_databases.sh"
+    if [ -f "$(dirname "${BASH_SOURCE[0]}")/template_lock.sh" ]; then
+        # shellcheck source=template_lock.sh
+        source "$(dirname "${BASH_SOURCE[0]}")/template_lock.sh"
+    fi
     # The digits pick the worker's Redis database, past the shards' 1..8.
     prepare_worker_databases "audit9"
     reuse=(--reuse-db)

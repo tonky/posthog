@@ -326,7 +326,7 @@ pipeline: schema.#Pipeline & {
 		"pytest_runner": _harness & {
 			name: "pytest_runner", title: "pytest runner", technology: "python"
 			depends_on: ["py-root", "pytest_plugins", "test_env", "geoip"]
-			watch_paths: ["showcase/scripts/run_sharded_pytest.sh", "showcase/scripts/product_pytest.py"]
+			watch_paths: ["showcase/scripts/run_sharded_pytest.sh", "showcase/scripts/run_sharded_pytest.py", "showcase/scripts/product_pytest.py"]
 		}
 		"test_env": _harness & {
 			name: "test_env", title: "Shared test databases & services"
@@ -335,7 +335,7 @@ pipeline: schema.#Pipeline & {
 			watch_paths: [
 				"infra/clickhouse/config.xml", "infra/clickhouse/start.sh",
 				"infra/clickhouse/users.d/**", "infra/clickhouse/build_host_udfs.sh",
-				"docker/**", "showcase/scripts/test_databases.sh", "rust/persons_migrations/**",
+				"docker/**", "showcase/scripts/snapshot_root.sh", "showcase/scripts/test_databases.sh", "showcase/scripts/template_lock.sh", "rust/persons_migrations/**",
 				"showcase/scripts/template_inputs.py", "showcase/scripts/template_publications.py",
 				"showcase/scripts/create_test_kafka_topics.py", "showcase/scripts/seaweedfs_setup.sh", "showcase/.gitignore",
 			]
@@ -392,7 +392,7 @@ pipeline: schema.#Pipeline & {
 			description:     "The unittest suite of the overlay's scripts: shard provisioning, runners, templates"
 			technology:      "python"
 			root:            "."
-			depends_on:      ["test_env", "py-root", "pytest_plugins", "pytest_runner", "build_once", "plugin_transpiler", "frontend_harness", "nodejs_harness", "live_harness", "github_scripts_harness"]
+			depends_on:      ["test_env", "py-root", "pytest_plugins", "pytest_runner", "build_once", "plugin_transpiler", "frontend_harness", "nodejs_harness", "live_harness", "e2e_harness", "github_scripts_harness"]
 			workspace_scope: include: [".github/workflows/ci.yml"]
 			watch_paths: [
 				"showcase/scripts/tests/**",
@@ -1281,7 +1281,8 @@ pipeline: schema.#Pipeline & {
 			depends_on:      ["test_env", "geoip"]
 			workspace_scope: include: ["products/db_routing.yaml", "infra/clickhouse/config.xml"]
 			watch_paths: [
-				"showcase/scripts/live_posthog.sh", "showcase/scripts/live_migrate_cache.py",
+				"showcase/scripts/live_posthog.sh", "showcase/scripts/live_posthog.py",
+				"showcase/scripts/live_migrate_cache.py",
 				"showcase/scripts/live_footprint.py", "showcase/scripts/node_reads.mjs",
 				"showcase/scripts/rust_ci_env.sh", "bin/celery-queues.env",
 			]
@@ -1333,7 +1334,7 @@ pipeline: schema.#Pipeline & {
 							[
 								"proto/**", "common/plugin_transpiler/**",
 								"showcase/scripts/build_e2e.sh", "showcase/scripts/build_hogvm.sh",
-								"showcase/scripts/live_posthog.sh", "showcase/scripts/rust_ci_env.sh",
+								"showcase/scripts/live_posthog.sh", "showcase/scripts/live_posthog.py", "showcase/scripts/rust_ci_env.sh",
 								"showcase/scripts/rust_footprint.py",
 							],
 						])

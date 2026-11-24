@@ -102,6 +102,17 @@ pipeline: schema.#Pipeline & {
 				jobs:       [J.build, J.test, J.rust_ingestion_e2e]
 			}
 		}
+		// Snapshot storage contract across all three namespaces (v3, live-v1, ch-v1):
+		//   - Hosted GHA runners (`ENACT_HOST_CACHE` unset): `showcase/scripts/snapshot_root.sh`
+		//     resolves `ENACT_TEMPLATE_SNAPSHOT_DIR=$HOME/.cache/enact/snapshots`, matching the
+		//     `actions/cache` restore/verify/save paths below.
+		//   - Managed self-hosted runners (writable `$ENACT_HOST_CACHE/repo`): `snapshot_root.sh`
+		//     sets `ENACT_TEMPLATE_SNAPSHOT_DIR=$ENACT_HOST_CACHE/repo/pg-templates` outside the
+		//     keyed `test_databases.sh`, so all three namespaces persist directly on the host
+		//     volume with flock + atomic pointer renames (no `host: true`, which is checkout-
+		//     relative and capped at 64 MiB/file). Because `~/.cache/enact/snapshots` stays
+		//     untouched on self-hosted jobs, `save.command` reports `eligible=false` and skips
+		//     redundant `actions/cache/save` uploads.
 		"live-migrations": {
 			name: "Live Postgres and ClickHouse migration snapshots"
 			save: {
@@ -161,7 +172,13 @@ pipeline: schema.#Pipeline & {
 			".github/workflows/update-ai-costs.yml", ".github/workflows/update-sandbox-agent-version.yml",
 		]
 		remote_cache: {
-			secrets: {bucket: "R2_BUCKET", access_key_id: "R2_ACCESS_KEY_ID", secret_access_key: "R2_SECRET_ACCESS_KEY"}
+			secrets: {
+				bucket:                 "R2_BUCKET"
+				access_key_id:          "R2_ACCESS_KEY_ID"
+				secret_access_key:      "R2_SECRET_ACCESS_KEY"
+				read_access_key_id:     "R2_READ_ACCESS_KEY_ID"
+				read_secret_access_key: "R2_READ_SECRET_ACCESS_KEY"
+			}
 			public_url: "https://cache.tonky.dev"
 			public_key: "enve-r2-1:ckHPTeWVef6mba+1AwWHjKYCsUWKPfP9IXPm5YXNoHg="
 			repo:       "tonky/posthog"

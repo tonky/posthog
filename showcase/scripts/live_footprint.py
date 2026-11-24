@@ -60,6 +60,7 @@ ROOT = os.getcwd()
 # reads, and what uv reads before Python starts.
 HARNESS = [
     "showcase/scripts/live_posthog.sh",
+    "showcase/scripts/live_posthog.py",
     "showcase/scripts/test_databases.sh",
     "showcase/scripts/build_once.sh",
     "showcase/scripts/exclusive.sh",

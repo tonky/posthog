@@ -405,7 +405,7 @@ pipeline: components: {
 					key: list.Concat([
 						_liveFlagsRust,
 						[
-							"proto/**", "showcase/scripts/live_posthog.sh",
+							"proto/**", "showcase/scripts/live_posthog.sh", "showcase/scripts/live_posthog.py",
 							"showcase/scripts/rust_ci_env.sh", "showcase/scripts/rust_footprint.py",
 						],
 					])
