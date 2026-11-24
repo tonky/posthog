@@ -177,9 +177,21 @@ e2e_app() {
 }
 
 # "Run Playwright tests".
+# Preserve failed spec artifacts outside $results/run because live_each_spec invokes
+# Playwright once per spec and Playwright cleans its outputDir at startup (board 060/092).
+e2e_run_seq=0
+e2e_preserve_failed_results() { # <seq> <src_dir> <failed_root>
+    local seq="$1" src="$2" failed_root="$3"
+    [ -d "$src" ] || return 0
+    local dest="$failed_root/spec-$seq"
+    mkdir -p "$dest"
+    cp -R "$src/." "$dest/"
+}
+
 e2e_run() { # [spec...]
     local reporters=()
     local rc=0
+    e2e_run_seq=$((e2e_run_seq + 1))
     [ -z "${ENACT_SKIPS_FILE:-}" ] || reporters=("--reporter=list,$root/showcase/scripts/node_reads.mjs")
     (cd playwright && CI=1 BASE_URL="$site" E2E_PROXY_URL="$proxy" PLAYWRIGHT_RETRIES=1 \
         PLAYWRIGHT_RESULTS_DIR="$results/run" \
@@ -187,9 +199,10 @@ e2e_run() { # [spec...]
         pnpm exec playwright test --config "$root/showcase/playwright.enact.config.ts" "$@" \
         ${reporters[@]+"${reporters[@]}"} --workers="${PW_WORKERS:-2}" --update-snapshots) || rc=$?
     if [ "$rc" -ne 0 ]; then
-        echo "e2e_run: FAILED ($rc) specs: $*" >&2
+        e2e_preserve_failed_results "$e2e_run_seq" "$results/run/test-results" "$results/failed"
+        echo "e2e_run: FAILED ($rc) specs: $* (preserved: $results/failed/spec-$e2e_run_seq)" >&2
     fi
     return "$rc"
 }
-rm -rf "$results/run" && mkdir -p "$results/run"
+rm -rf "$results/run" "$results/failed" && mkdir -p "$results/run"
 live_each_spec e2e_app e2e_run ${specs[@]+"${specs[@]}"}

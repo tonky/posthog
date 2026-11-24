@@ -1,8 +1,6 @@
 from products.warehouse_sources.sources.sdk import IncrementalField, IncrementalFieldType
 
 ENDPOINTS = (
-    "Coupons",
-    "CreditNotes",
     "CreditUnits",
     "Customers",
     "Disputes",
@@ -14,14 +12,11 @@ ENDPOINTS = (
     "Meters",
     "Orders",
     "PaymentSchedules",
-    "PaymentSources",
     "Subscriptions",
     "Transactions",
-    "Usages",
 )
 
 INCREMENTAL_ENDPOINTS = (
-    "CreditNotes",
     "Customers",
     "Einvoices",
     "Events",
@@ -30,27 +25,11 @@ INCREMENTAL_ENDPOINTS = (
     "Items",
     "Orders",
     "PaymentSchedules",
-    "PaymentSources",
     "Subscriptions",
     "Transactions",
-    "Usages",
 )
 
-# Usages are read through `/subscriptions/{id}/usages`, so their `id` is only documented as unique
-# per subscription.
-PRIMARY_KEYS: dict[str, list[str]] = {
-    "Usages": ["subscription_id", "id"],
-}
-
 INCREMENTAL_FIELDS: dict[str, list[IncrementalField]] = {
-    "CreditNotes": [
-        {
-            "label": "updated_at",
-            "type": IncrementalFieldType.DateTime,
-            "field": "updated_at",
-            "field_type": IncrementalFieldType.Integer,
-        },
-    ],
     "Customers": [
         {
             "label": "updated_at",
@@ -115,14 +94,6 @@ INCREMENTAL_FIELDS: dict[str, list[IncrementalField]] = {
             "field_type": IncrementalFieldType.Integer,
         },
     ],
-    "PaymentSources": [
-        {
-            "label": "updated_at",
-            "type": IncrementalFieldType.DateTime,
-            "field": "updated_at",
-            "field_type": IncrementalFieldType.Integer,
-        },
-    ],
     "Subscriptions": [
         {
             "label": "updated_at",
@@ -132,14 +103,6 @@ INCREMENTAL_FIELDS: dict[str, list[IncrementalField]] = {
         },
     ],
     "Transactions": [
-        {
-            "label": "updated_at",
-            "type": IncrementalFieldType.DateTime,
-            "field": "updated_at",
-            "field_type": IncrementalFieldType.Integer,
-        },
-    ],
-    "Usages": [
         {
             "label": "updated_at",
             "type": IncrementalFieldType.DateTime,

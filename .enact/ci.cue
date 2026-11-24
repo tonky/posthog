@@ -160,7 +160,12 @@ pipeline: schema.#Pipeline & {
 	ci: {
 		soft_placement:   {fallback_seconds: 15}
 		history:          {workflow: ".github/workflows/ci.yml"}
-		diagnostic_paths: [".enact/state/nodejs/*.services.log"]
+		diagnostic_paths: [
+			".enact/state/nodejs/*.services.log",
+			".enact/state/e2e/shard-*/failed/**",
+			".enact/state/e2e/shard-*/run/test-results/**",
+			"playwright/test-results/**",
+		]
 		rerun: {
 			labels:          ["rerun", "showcase"]
 			branch_prefixes: ["showcase/"]

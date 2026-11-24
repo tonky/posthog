@@ -86,16 +86,20 @@ _python_monolith_include: list.Concat([_djangoTree, [
 	".github/scripts", ".github/workflows/ci-python.yml",
 	".semgrep/rules/devex", ".semgrep/rules/security", ".stamphog", "AGENTS.md", "docker",
 	"docker-compose.base.yml", "docker-compose.dev.yml", "docker-compose.profiles.yml",
-	"frontend/public/admin-console/console.css", "frontend/public/message-preferences.css",
+	"frontend/public/admin-console", "frontend/public/message-preferences.css",
 	"frontend/src/lib/agentScopes.generated.ts",
+	"frontend/src/lib/oauthScopes.generated.ts",
+	"frontend/src/lib/scopeDocs.generated.ts",
 	"frontend/src/lib/components/AgentObjectTags/objectKinds.generated.ts",
 	"frontend/src/lib/components/DomainConnect/templates",
 	"frontend/src/products.json", "frontend/src/queries/schema.json",
+	"frontend/src/queries/schema/latest-versions.json",
 	"frontend/src/taxonomy/core-filter-definitions-by-group.json",
 	"infra", "livestream/bot",
 	"nodejs/src/ingestion/pipelines/ai/costs/providers/llm-costs.json",
 	"nodejs/src/logs/parity/fixtures/modules/internal_verify.json",
 	"tools/change-prover/issuer.yml",
+	"tools/snob_backend_test_selection_shadow.py",
 	"packages/agent/packages/agent-contracts/src/model-catalog.generated.ts",
 	"packages/agent/packages/agent-contracts/src/objectTagKinds.generated.ts",
 	"packages/agent/packages/agent/src/utils/gateway-routing-cases.json",
@@ -397,7 +401,7 @@ pipeline: schema.#Pipeline & {
 			watch_paths: [
 				"showcase/scripts/tests/**",
 				"showcase/scripts/rust_footprint.py", "showcase/scripts/run_rust_release_build.sh",
-				"showcase/scripts/no_drift.sh", "posthog/user_scripts/**",
+				"showcase/scripts/no_drift.sh", "showcase/scripts/verify_selected_pytest_ids.py", "posthog/user_scripts/**",
 				"packages/personhog-proto/pyproject.toml", "packages/owners-yaml/pyproject.toml", "tools/hogli/pyproject.toml",
 			]
 			test:             "uv run --no-sync python -m unittest {targets}"
@@ -416,8 +420,17 @@ pipeline: schema.#Pipeline & {
 			depends_on:  ["py-root", "pytest_plugins", "pytest_runner", "test_env", "build_once", "plugin_transpiler"]
 			tags:        ["backend", "django", "api"]
 			// ee/hogai/test/test_llm.py reads the settings scene's ids (SETTINGS_MAP_PATH).
-			// posthog/test/repo_invariants/test_oob_denylist_coverage.py scans nodejs/src and rust.
-			workspace_scope: {include_dependencies: false, include: list.Concat([_python_monolith_include, ["frontend/src/scenes/settings/SettingsMap.tsx", "nodejs/src", "rust"]])}
+			// posthog/test/repo_invariants/test_oob_denylist_coverage.py scans nodejs/src and rust;
+			// test_agents_md_enforcement_tags.py scans AGENTS.md and .agents/*.md (literal paths bypass workspace_scope.ignore).
+			_agentGuides: [
+				".agents/agent-automation.md",
+				".agents/architecture.md",
+				".agents/ci.md",
+				".agents/code-style.md",
+				".agents/feature-usage-tracking.md",
+				".agents/security.md",
+			]
+			workspace_scope: {include_dependencies: false, include: list.Concat([_python_monolith_include, _agentGuides, ["frontend/src/scenes/settings/SettingsMap.tsx", "nodejs/src", "rust"]])}
 			watch_paths: list.Concat([[
 				"posthog/[!d]*/**", "posthog/d[!a]*/**", "posthog/*", "ee/**", "manage.py", "common/__init__.py",
 				"common/hogql_parser/**", "common/migration_utils/**",
@@ -429,9 +442,10 @@ pipeline: schema.#Pipeline & {
 				"tools/hogli-commands/hogli_commands/{quarantine,product}/**",
 				"tools/hogli/src/hogli/{__init__,manifest}.py",
 				"products/**/*.py", ".semgrep/**",
+				"AGENTS.md",
 				"showcase/scripts/fetch_test_durations.sh",
 				"showcase/scripts/repo_invariants.sh",
-			], _baseData])
+			], _agentGuides, _baseData])
 			_pyExclude: ["products/**"]
 			max_shards: 12
 			shards:     8
@@ -442,6 +456,9 @@ pipeline: schema.#Pipeline & {
 					services:  false
 					resources: {cpus: 4.0, memory_mb: 8192}
 					tasks: [{command: "PYTEST_NUM_WORKERS=$ENACT_SHARD_WORKERS ./showcase/scripts/repo_invariants.sh"}]
+					target_scope: {
+						tests: [for f in _pytestFiles {"posthog/test/repo_invariants/**/\(f)"}]
+					}
 				}
 				migrate: {
 					name:     "Migrate"
@@ -483,7 +500,7 @@ pipeline: schema.#Pipeline & {
 					reason: "O1 pin: 1/351 (test_exception_summary) and 1/110 (test_mat_col_non_nullable_bloom_filter_3_lt) fail deterministically under rootless ClickHouse 26.9.5.2; revisit on next pin bump (usecases/posthog/LEARNINGS.md)"
 				}]
 				rules: [
-					{match: ["posthog/dags/**", "products/*/dags/**"], action: "ignore"},
+					{match: ["posthog/dags/**", "products/*/dags/**", "posthog/test/repo_invariants/**"], action: "ignore"},
 					{
 						match: list.Concat([[
 							"posthog/**/*.{py,ambr}", "ee/**/*.{py,ambr}", "common/**/*.py",
@@ -496,7 +513,7 @@ pipeline: schema.#Pipeline & {
 					{match: [".semgrep/**"], action: "ignore"},
 				]
 				tests:   [for root in ["posthog", "ee"] for f in _pytestFiles {"\(root)/**/\(f)"}]
-				exclude: ["posthog/user_scripts/**", "posthog/dags/**", "posthog/api/test/rust_integration/**"]
+				exclude: ["posthog/user_scripts/**", "posthog/dags/**", "posthog/api/test/rust_integration/**", "posthog/test/repo_invariants/**"]
 				arch_exclusions: [{
 					arch:   "x86_64"
 					tests:  ["posthog/cdp/templates/reddit/**"]

@@ -63,8 +63,6 @@ Grant **read** access to the resources you want to sync, e.g.:
 - Products
 
 Some resources (such as Payment methods) are only available on Recharge Pro or Custom plans.
-
-The Metafields table also needs the `store_info` scope.
 """,
             iconPath="/static/services/recharge.png",
             docsUrl="https://posthog.com/docs/cdp/sources/recharge",

@@ -2,7 +2,7 @@ import json
 import dataclasses
 from collections.abc import Iterator
 from datetime import UTC, datetime
-from typing import Any, NoReturn, Optional
+from typing import Any, Optional
 
 import requests
 from structlog.types import FilteringBoundLogger
@@ -119,15 +119,6 @@ def _with_zoho_error_detail(error: requests.HTTPError) -> requests.HTTPError:
 
     detail = f"{code}: {message}".rstrip(": ") if code else message
     return ZohoCRMApiError(f"{error} ({detail})", response=response)
-
-
-def _raise_with_zoho_error_detail(error: requests.HTTPError) -> NoReturn:
-    detailed = _with_zoho_error_detail(error)
-    if detailed is error:
-        # `raise error from error` makes the error its own cause, and Temporal's failure
-        # converter recurses on the cause chain until it hits RecursionError.
-        raise error
-    raise detailed from error
 
 
 class ZohoCRMAuthError(Exception):
@@ -288,7 +279,7 @@ def readable_field_names(client: ZohoCRMClient, api_version: str, module: str) -
     try:
         response = client.get(f"/crm/{api_version}/settings/fields", params={"module": module})
     except requests.HTTPError as e:
-        _raise_with_zoho_error_detail(e)
+        raise _with_zoho_error_detail(e) from e
     if response.status_code in NO_CONTENT_STATUSES:
         return []
 
@@ -320,7 +311,7 @@ def _fetch_page(
     try:
         response = client.get(f"/crm/{api_version}/{path}", params=params, headers=headers)
     except requests.HTTPError as e:
-        _raise_with_zoho_error_detail(e)
+        raise _with_zoho_error_detail(e) from e
     if response.status_code in NO_CONTENT_STATUSES:
         return [], {}
 
@@ -656,7 +647,7 @@ def list_custom_modules(client: ZohoCRMClient, api_version: str) -> list[str]:
     try:
         response = client.get(f"/crm/{api_version}/settings/modules")
     except requests.HTTPError as e:
-        _raise_with_zoho_error_detail(e)
+        raise _with_zoho_error_detail(e) from e
     if response.status_code in NO_CONTENT_STATUSES:
         return []
     body = _parse_json_body(response) or {}

@@ -2273,15 +2273,19 @@ jobs:
           docker-compose.base.yml
           docker-compose.dev.yml
           docker-compose.profiles.yml
-          frontend/public/admin-console/console.css
+          frontend/public/admin-console
           frontend/public/message-preferences.css
           frontend/src/lib/agentScopes.generated.ts
+          frontend/src/lib/oauthScopes.generated.ts
+          frontend/src/lib/scopeDocs.generated.ts
           frontend/src/lib/components/AgentObjectTags/objectKinds.generated.ts
           frontend/src/lib/components/DomainConnect/templates
           frontend/src/products.json
+          frontend/src/queries/schema/latest-versions.json
           infra
           nodejs/src/logs/parity/fixtures/modules/internal_verify.json
           tools/change-prover/issuer.yml
+          tools/snob_backend_test_selection_shadow.py
           packages/agent/packages/agent-contracts/src/model-catalog.generated.ts
           packages/agent/packages/agent-contracts/src/objectTagKinds.generated.ts
           packages/agent/packages/agent/src/utils/gateway-routing-cases.json
@@ -2293,6 +2297,12 @@ jobs:
           services/mcp/src/lib/trace-property-allowlist.generated.ts
           services/mcp/src/resources/ui-apps.generated.ts
           services/stripe-mock/tests/conftest.py
+          .agents/agent-automation.md
+          .agents/architecture.md
+          .agents/ci.md
+          .agents/code-style.md
+          .agents/feature-usage-tracking.md
+          .agents/security.md
           frontend/src/scenes/settings/SettingsMap.tsx
           nodejs/src
           rust
@@ -2375,6 +2385,7 @@ jobs:
           proto
           frontend/public/services
           frontend/jest.quarantine.ts
+          .flox/env/on-activate.sh
           tools/deploy-requirements
           .github/workflows/update-ai-costs.yml
           showcase/scripts
@@ -2824,15 +2835,19 @@ jobs:
           docker-compose.base.yml
           docker-compose.dev.yml
           docker-compose.profiles.yml
-          frontend/public/admin-console/console.css
+          frontend/public/admin-console
           frontend/public/message-preferences.css
           frontend/src/lib/agentScopes.generated.ts
+          frontend/src/lib/oauthScopes.generated.ts
+          frontend/src/lib/scopeDocs.generated.ts
           frontend/src/lib/components/AgentObjectTags/objectKinds.generated.ts
           frontend/src/lib/components/DomainConnect/templates
           frontend/src/products.json
+          frontend/src/queries/schema/latest-versions.json
           infra
           nodejs/src/logs/parity/fixtures/modules/internal_verify.json
           tools/change-prover/issuer.yml
+          tools/snob_backend_test_selection_shadow.py
           packages/agent/packages/agent-contracts/src/model-catalog.generated.ts
           packages/agent/packages/agent-contracts/src/objectTagKinds.generated.ts
           packages/agent/packages/agent/src/utils/gateway-routing-cases.json
@@ -2844,6 +2859,12 @@ jobs:
           services/mcp/src/lib/trace-property-allowlist.generated.ts
           services/mcp/src/resources/ui-apps.generated.ts
           services/stripe-mock/tests/conftest.py
+          .agents/agent-automation.md
+          .agents/architecture.md
+          .agents/ci.md
+          .agents/code-style.md
+          .agents/feature-usage-tracking.md
+          .agents/security.md
           frontend/src/scenes/settings/SettingsMap.tsx
           nodejs/src
           rust
@@ -2926,6 +2947,7 @@ jobs:
           proto
           frontend/public/services
           frontend/jest.quarantine.ts
+          .flox/env/on-activate.sh
           tools/deploy-requirements
           .github/workflows/update-ai-costs.yml
           showcase/scripts
@@ -3513,6 +3535,28 @@ jobs:
         echo "::error::Container cgroup OOM-killed a process (oom_kill=${oom}, memory.peak=${peak}, memory.max=${limit})"
         fi
         fi
+    - name: Diagnose Disk & Btrfs Qgroup on Failure
+      if: ${{ failure() }}
+      run: |-
+        df -h || true
+        df -i || true
+        btrfs qgroup show -reF / 2>/dev/null || true
+    - name: Log Cgroup Memory & PSI Telemetry
+      if: ${{ always() }}
+      run: |-
+        if [ -d /sys/fs/cgroup ]; then
+        anon=$(awk '$1 == "anon" { print $2 }' /sys/fs/cgroup/memory.stat 2>/dev/null || echo unknown)
+        kernel=$(awk '$1 == "kernel" { print $2 }' /sys/fs/cgroup/memory.stat 2>/dev/null || echo unknown)
+        peak=$(cat /sys/fs/cgroup/memory.peak 2>/dev/null || echo unknown)
+        limit=$(cat /sys/fs/cgroup/memory.max 2>/dev/null || echo unknown)
+        high=$(awk '$1 == "high" { print $2 }' /sys/fs/cgroup/memory.events 2>/dev/null || echo 0)
+        max_ev=$(awk '$1 == "max" { print $2 }' /sys/fs/cgroup/memory.events 2>/dev/null || echo 0)
+        oom=$(awk '$1 == "oom_kill" { print $2 }' /sys/fs/cgroup/memory.events 2>/dev/null || echo 0)
+        sampled=$(cat "${GHA_ANON_PEAK_FILE:-/dev/null}" 2>/dev/null || true)
+        [ -n "$sampled" ] || sampled="nonreclaim_peak_sampled=unknown"
+        psi=$(tr '\n' ' ' < /sys/fs/cgroup/memory.pressure 2>/dev/null || echo unavailable)
+        echo "cgroup telemetry: anon=${anon} kernel=${kernel} peak=${peak} max=${limit} events(high=${high:-0},max=${max_ev:-0},oom_kill=${oom:-0}) ${sampled} psi=${psi}"
+        fi
     - name: Check Package Caches for New Entries
       id: cache_delta
       if: ${{ (!cancelled() && (steps.runner_caches.outputs.host == '' && steps.python_l1_cache.outputs.cache-hit != 'true' || steps.runner_caches.outputs.host == '' && steps.node_l1_cache.outputs.cache-hit != 'true') && env.ENACT_SAVE_EVENT == 'true' && github.event_name != 'pull_request') && steps.stage_plan.outputs.stage_has_work == 'true' }}
@@ -3670,6 +3714,9 @@ jobs:
           .enact/state/summary.html
           .enact/state/runs/*/services/*.log
           .enact/state/nodejs/*.services.log
+          .enact/state/e2e/shard-*/failed/**
+          .enact/state/e2e/shard-*/run/test-results/**
+          playwright/test-results/**
         retention-days: "1"
   seed-frontend-typecheck:
     name: "Seed caches: Frontend typecheck"
@@ -4134,6 +4181,28 @@ jobs:
         echo "::error::Container cgroup OOM-killed a process (oom_kill=${oom}, memory.peak=${peak}, memory.max=${limit})"
         fi
         fi
+    - name: Diagnose Disk & Btrfs Qgroup on Failure
+      if: ${{ failure() }}
+      run: |-
+        df -h || true
+        df -i || true
+        btrfs qgroup show -reF / 2>/dev/null || true
+    - name: Log Cgroup Memory & PSI Telemetry
+      if: ${{ always() }}
+      run: |-
+        if [ -d /sys/fs/cgroup ]; then
+        anon=$(awk '$1 == "anon" { print $2 }' /sys/fs/cgroup/memory.stat 2>/dev/null || echo unknown)
+        kernel=$(awk '$1 == "kernel" { print $2 }' /sys/fs/cgroup/memory.stat 2>/dev/null || echo unknown)
+        peak=$(cat /sys/fs/cgroup/memory.peak 2>/dev/null || echo unknown)
+        limit=$(cat /sys/fs/cgroup/memory.max 2>/dev/null || echo unknown)
+        high=$(awk '$1 == "high" { print $2 }' /sys/fs/cgroup/memory.events 2>/dev/null || echo 0)
+        max_ev=$(awk '$1 == "max" { print $2 }' /sys/fs/cgroup/memory.events 2>/dev/null || echo 0)
+        oom=$(awk '$1 == "oom_kill" { print $2 }' /sys/fs/cgroup/memory.events 2>/dev/null || echo 0)
+        sampled=$(cat "${GHA_ANON_PEAK_FILE:-/dev/null}" 2>/dev/null || true)
+        [ -n "$sampled" ] || sampled="nonreclaim_peak_sampled=unknown"
+        psi=$(tr '\n' ' ' < /sys/fs/cgroup/memory.pressure 2>/dev/null || echo unavailable)
+        echo "cgroup telemetry: anon=${anon} kernel=${kernel} peak=${peak} max=${limit} events(high=${high:-0},max=${max_ev:-0},oom_kill=${oom:-0}) ${sampled} psi=${psi}"
+        fi
     - name: Check Package Caches for New Entries
       id: cache_delta
       if: ${{ (!cancelled() && steps.runner_caches.outputs.host == '' && steps.node_l1_cache.outputs.cache-hit != 'true' && github.event_name == 'workflow_dispatch' && inputs.seed_caches == 'true' && github.event_name != 'pull_request') && steps.stage_plan.outputs.stage_has_work == 'true' }}
@@ -4183,6 +4252,9 @@ jobs:
           .enact/state/summary.html
           .enact/state/runs/*/services/*.log
           .enact/state/nodejs/*.services.log
+          .enact/state/e2e/shard-*/failed/**
+          .enact/state/e2e/shard-*/run/test-results/**
+          playwright/test-results/**
         retention-days: "1"
   seed-products-typecheck:
     name: "Seed caches: Products typecheck"
@@ -4388,19 +4460,23 @@ jobs:
           docker-compose.base.yml
           docker-compose.dev.yml
           docker-compose.profiles.yml
-          frontend/public/admin-console/console.css
+          frontend/public/admin-console
           frontend/public/message-preferences.css
           frontend/src/lib/agentScopes.generated.ts
+          frontend/src/lib/oauthScopes.generated.ts
+          frontend/src/lib/scopeDocs.generated.ts
           frontend/src/lib/components/AgentObjectTags/objectKinds.generated.ts
           frontend/src/lib/components/DomainConnect/templates
           frontend/src/products.json
           frontend/src/queries/schema.json
+          frontend/src/queries/schema/latest-versions.json
           frontend/src/taxonomy/core-filter-definitions-by-group.json
           infra
           livestream/bot
           nodejs/src/ingestion/pipelines/ai/costs/providers/llm-costs.json
           nodejs/src/logs/parity/fixtures/modules/internal_verify.json
           tools/change-prover/issuer.yml
+          tools/snob_backend_test_selection_shadow.py
           packages/agent/packages/agent-contracts/src/model-catalog.generated.ts
           packages/agent/packages/agent-contracts/src/objectTagKinds.generated.ts
           packages/agent/packages/agent/src/utils/gateway-routing-cases.json
@@ -4570,19 +4646,23 @@ jobs:
           docker-compose.base.yml
           docker-compose.dev.yml
           docker-compose.profiles.yml
-          frontend/public/admin-console/console.css
+          frontend/public/admin-console
           frontend/public/message-preferences.css
           frontend/src/lib/agentScopes.generated.ts
+          frontend/src/lib/oauthScopes.generated.ts
+          frontend/src/lib/scopeDocs.generated.ts
           frontend/src/lib/components/AgentObjectTags/objectKinds.generated.ts
           frontend/src/lib/components/DomainConnect/templates
           frontend/src/products.json
           frontend/src/queries/schema.json
+          frontend/src/queries/schema/latest-versions.json
           frontend/src/taxonomy/core-filter-definitions-by-group.json
           infra
           livestream/bot
           nodejs/src/ingestion/pipelines/ai/costs/providers/llm-costs.json
           nodejs/src/logs/parity/fixtures/modules/internal_verify.json
           tools/change-prover/issuer.yml
+          tools/snob_backend_test_selection_shadow.py
           packages/agent/packages/agent-contracts/src/model-catalog.generated.ts
           packages/agent/packages/agent-contracts/src/objectTagKinds.generated.ts
           packages/agent/packages/agent/src/utils/gateway-routing-cases.json
@@ -4711,6 +4791,28 @@ jobs:
         echo "::error::Container cgroup OOM-killed a process (oom_kill=${oom}, memory.peak=${peak}, memory.max=${limit})"
         fi
         fi
+    - name: Diagnose Disk & Btrfs Qgroup on Failure
+      if: ${{ failure() }}
+      run: |-
+        df -h || true
+        df -i || true
+        btrfs qgroup show -reF / 2>/dev/null || true
+    - name: Log Cgroup Memory & PSI Telemetry
+      if: ${{ always() }}
+      run: |-
+        if [ -d /sys/fs/cgroup ]; then
+        anon=$(awk '$1 == "anon" { print $2 }' /sys/fs/cgroup/memory.stat 2>/dev/null || echo unknown)
+        kernel=$(awk '$1 == "kernel" { print $2 }' /sys/fs/cgroup/memory.stat 2>/dev/null || echo unknown)
+        peak=$(cat /sys/fs/cgroup/memory.peak 2>/dev/null || echo unknown)
+        limit=$(cat /sys/fs/cgroup/memory.max 2>/dev/null || echo unknown)
+        high=$(awk '$1 == "high" { print $2 }' /sys/fs/cgroup/memory.events 2>/dev/null || echo 0)
+        max_ev=$(awk '$1 == "max" { print $2 }' /sys/fs/cgroup/memory.events 2>/dev/null || echo 0)
+        oom=$(awk '$1 == "oom_kill" { print $2 }' /sys/fs/cgroup/memory.events 2>/dev/null || echo 0)
+        sampled=$(cat "${GHA_ANON_PEAK_FILE:-/dev/null}" 2>/dev/null || true)
+        [ -n "$sampled" ] || sampled="nonreclaim_peak_sampled=unknown"
+        psi=$(tr '\n' ' ' < /sys/fs/cgroup/memory.pressure 2>/dev/null || echo unavailable)
+        echo "cgroup telemetry: anon=${anon} kernel=${kernel} peak=${peak} max=${limit} events(high=${high:-0},max=${max_ev:-0},oom_kill=${oom:-0}) ${sampled} psi=${psi}"
+        fi
     - name: Check Package Caches for New Entries
       id: cache_delta
       if: ${{ (!cancelled() && steps.runner_caches.outputs.host == '' && steps.python_l1_cache.outputs.cache-hit != 'true' && github.event_name == 'workflow_dispatch' && inputs.seed_caches == 'true' && github.event_name != 'pull_request') && steps.stage_plan.outputs.stage_has_work == 'true' }}
@@ -4759,6 +4861,9 @@ jobs:
           .enact/state/summary.html
           .enact/state/runs/*/services/*.log
           .enact/state/nodejs/*.services.log
+          .enact/state/e2e/shard-*/failed/**
+          .enact/state/e2e/shard-*/run/test-results/**
+          playwright/test-results/**
         retention-days: "1"
   summary:
     name: Consolidate Reach Map & Telemetry
@@ -5464,15 +5569,19 @@ jobs:
           docker-compose.base.yml
           docker-compose.dev.yml
           docker-compose.profiles.yml
-          frontend/public/admin-console/console.css
+          frontend/public/admin-console
           frontend/public/message-preferences.css
           frontend/src/lib/agentScopes.generated.ts
+          frontend/src/lib/oauthScopes.generated.ts
+          frontend/src/lib/scopeDocs.generated.ts
           frontend/src/lib/components/AgentObjectTags/objectKinds.generated.ts
           frontend/src/lib/components/DomainConnect/templates
           frontend/src/products.json
+          frontend/src/queries/schema/latest-versions.json
           infra
           nodejs/src/logs/parity/fixtures/modules/internal_verify.json
           tools/change-prover/issuer.yml
+          tools/snob_backend_test_selection_shadow.py
           packages/agent/packages/agent-contracts/src/model-catalog.generated.ts
           packages/agent/packages/agent-contracts/src/objectTagKinds.generated.ts
           packages/agent/packages/agent/src/utils/gateway-routing-cases.json
@@ -5484,6 +5593,12 @@ jobs:
           services/mcp/src/lib/trace-property-allowlist.generated.ts
           services/mcp/src/resources/ui-apps.generated.ts
           services/stripe-mock/tests/conftest.py
+          .agents/agent-automation.md
+          .agents/architecture.md
+          .agents/ci.md
+          .agents/code-style.md
+          .agents/feature-usage-tracking.md
+          .agents/security.md
           frontend/src/scenes/settings/SettingsMap.tsx
           nodejs/src
           rust
@@ -5672,7 +5787,6 @@ jobs:
           tools/dagster_test_selection.py
           tools/openapi-codegen/package.json
           tools/query-performance-ai/query_performance_ai/sandboxed_autoresearch_agent/pi_plugin/package.json
-          tools/snob_backend_test_selection_shadow.py
           tools/test_selection_verdict.py
           tools/test_dagster_test_selection.py
           tools/test_snob_backend_test_selection_shadow.py
@@ -5705,6 +5819,7 @@ jobs:
           services/mcp/tests
           frontend/src/queries
           frontend/jest.quarantine.ts
+          .flox/env/on-activate.sh
           tools/deploy-requirements
           .github/workflows/update-ai-costs.yml
           services/oauth-proxy
@@ -6100,15 +6215,19 @@ jobs:
           docker-compose.base.yml
           docker-compose.dev.yml
           docker-compose.profiles.yml
-          frontend/public/admin-console/console.css
+          frontend/public/admin-console
           frontend/public/message-preferences.css
           frontend/src/lib/agentScopes.generated.ts
+          frontend/src/lib/oauthScopes.generated.ts
+          frontend/src/lib/scopeDocs.generated.ts
           frontend/src/lib/components/AgentObjectTags/objectKinds.generated.ts
           frontend/src/lib/components/DomainConnect/templates
           frontend/src/products.json
+          frontend/src/queries/schema/latest-versions.json
           infra
           nodejs/src/logs/parity/fixtures/modules/internal_verify.json
           tools/change-prover/issuer.yml
+          tools/snob_backend_test_selection_shadow.py
           packages/agent/packages/agent-contracts/src/model-catalog.generated.ts
           packages/agent/packages/agent-contracts/src/objectTagKinds.generated.ts
           packages/agent/packages/agent/src/utils/gateway-routing-cases.json
@@ -6120,6 +6239,12 @@ jobs:
           services/mcp/src/lib/trace-property-allowlist.generated.ts
           services/mcp/src/resources/ui-apps.generated.ts
           services/stripe-mock/tests/conftest.py
+          .agents/agent-automation.md
+          .agents/architecture.md
+          .agents/ci.md
+          .agents/code-style.md
+          .agents/feature-usage-tracking.md
+          .agents/security.md
           frontend/src/scenes/settings/SettingsMap.tsx
           nodejs/src
           rust
@@ -6308,7 +6433,6 @@ jobs:
           tools/dagster_test_selection.py
           tools/openapi-codegen/package.json
           tools/query-performance-ai/query_performance_ai/sandboxed_autoresearch_agent/pi_plugin/package.json
-          tools/snob_backend_test_selection_shadow.py
           tools/test_selection_verdict.py
           tools/test_dagster_test_selection.py
           tools/test_snob_backend_test_selection_shadow.py
@@ -6341,6 +6465,7 @@ jobs:
           services/mcp/tests
           frontend/src/queries
           frontend/jest.quarantine.ts
+          .flox/env/on-activate.sh
           tools/deploy-requirements
           .github/workflows/update-ai-costs.yml
           services/oauth-proxy
@@ -6956,15 +7081,19 @@ jobs:
           docker-compose.base.yml
           docker-compose.dev.yml
           docker-compose.profiles.yml
-          frontend/public/admin-console/console.css
+          frontend/public/admin-console
           frontend/public/message-preferences.css
           frontend/src/lib/agentScopes.generated.ts
+          frontend/src/lib/oauthScopes.generated.ts
+          frontend/src/lib/scopeDocs.generated.ts
           frontend/src/lib/components/AgentObjectTags/objectKinds.generated.ts
           frontend/src/lib/components/DomainConnect/templates
           frontend/src/products.json
+          frontend/src/queries/schema/latest-versions.json
           infra
           nodejs/src/logs/parity/fixtures/modules/internal_verify.json
           tools/change-prover/issuer.yml
+          tools/snob_backend_test_selection_shadow.py
           packages/agent/packages/agent-contracts/src/model-catalog.generated.ts
           packages/agent/packages/agent-contracts/src/objectTagKinds.generated.ts
           packages/agent/packages/agent/src/utils/gateway-routing-cases.json
@@ -6976,6 +7105,12 @@ jobs:
           services/mcp/src/lib/trace-property-allowlist.generated.ts
           services/mcp/src/resources/ui-apps.generated.ts
           services/stripe-mock/tests/conftest.py
+          .agents/agent-automation.md
+          .agents/architecture.md
+          .agents/ci.md
+          .agents/code-style.md
+          .agents/feature-usage-tracking.md
+          .agents/security.md
           frontend/src/scenes/settings/SettingsMap.tsx
           nodejs/src
           rust
@@ -7164,7 +7299,6 @@ jobs:
           tools/dagster_test_selection.py
           tools/openapi-codegen/package.json
           tools/query-performance-ai/query_performance_ai/sandboxed_autoresearch_agent/pi_plugin/package.json
-          tools/snob_backend_test_selection_shadow.py
           tools/test_selection_verdict.py
           tools/test_dagster_test_selection.py
           tools/test_snob_backend_test_selection_shadow.py
@@ -7197,6 +7331,7 @@ jobs:
           services/mcp/tests
           frontend/src/queries
           frontend/jest.quarantine.ts
+          .flox/env/on-activate.sh
           tools/deploy-requirements
           .github/workflows/update-ai-costs.yml
           services/oauth-proxy
@@ -7592,15 +7727,19 @@ jobs:
           docker-compose.base.yml
           docker-compose.dev.yml
           docker-compose.profiles.yml
-          frontend/public/admin-console/console.css
+          frontend/public/admin-console
           frontend/public/message-preferences.css
           frontend/src/lib/agentScopes.generated.ts
+          frontend/src/lib/oauthScopes.generated.ts
+          frontend/src/lib/scopeDocs.generated.ts
           frontend/src/lib/components/AgentObjectTags/objectKinds.generated.ts
           frontend/src/lib/components/DomainConnect/templates
           frontend/src/products.json
+          frontend/src/queries/schema/latest-versions.json
           infra
           nodejs/src/logs/parity/fixtures/modules/internal_verify.json
           tools/change-prover/issuer.yml
+          tools/snob_backend_test_selection_shadow.py
           packages/agent/packages/agent-contracts/src/model-catalog.generated.ts
           packages/agent/packages/agent-contracts/src/objectTagKinds.generated.ts
           packages/agent/packages/agent/src/utils/gateway-routing-cases.json
@@ -7612,6 +7751,12 @@ jobs:
           services/mcp/src/lib/trace-property-allowlist.generated.ts
           services/mcp/src/resources/ui-apps.generated.ts
           services/stripe-mock/tests/conftest.py
+          .agents/agent-automation.md
+          .agents/architecture.md
+          .agents/ci.md
+          .agents/code-style.md
+          .agents/feature-usage-tracking.md
+          .agents/security.md
           frontend/src/scenes/settings/SettingsMap.tsx
           nodejs/src
           rust
@@ -7800,7 +7945,6 @@ jobs:
           tools/dagster_test_selection.py
           tools/openapi-codegen/package.json
           tools/query-performance-ai/query_performance_ai/sandboxed_autoresearch_agent/pi_plugin/package.json
-          tools/snob_backend_test_selection_shadow.py
           tools/test_selection_verdict.py
           tools/test_dagster_test_selection.py
           tools/test_snob_backend_test_selection_shadow.py
@@ -7833,6 +7977,7 @@ jobs:
           services/mcp/tests
           frontend/src/queries
           frontend/jest.quarantine.ts
+          .flox/env/on-activate.sh
           tools/deploy-requirements
           .github/workflows/update-ai-costs.yml
           services/oauth-proxy

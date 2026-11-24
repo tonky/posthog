@@ -1,4 +1,3 @@
-from dataclasses import replace
 from typing import Any, Optional
 
 from requests import Response
@@ -20,7 +19,6 @@ from products.warehouse_sources.sources.sdk import (
     PageNumberPaginator,
     RESTAPIConfig,
     ResumableSourceManager,
-    SinglePagePaginator,
     SourceResponse,
     build_dependent_resource,
     capture_exception,
@@ -108,13 +106,7 @@ class CreemCursorPaginator(JSONResponseCursorPaginator):
 def _paginator(config: CreemEndpointConfig) -> BasePaginator:
     if config.pagination == CreemPagination.CURSOR:
         return CreemCursorPaginator()
-    if config.pagination == CreemPagination.SINGLE_PAGE:
-        return SinglePagePaginator()
     return CreemPageNumberPaginator()
-
-
-def _page_size_params(config: CreemEndpointConfig) -> dict[str, Any]:
-    return {config.page_size_param: config.page_size} if config.page_size_param else {}
 
 
 def _client_config(api_key: str, environment: str) -> ClientConfig:
@@ -142,7 +134,7 @@ def get_resource(config: CreemEndpointConfig) -> EndpointResource:
         "write_disposition": "replace",
         "endpoint": {
             "path": config.path,
-            "params": {**_page_size_params(config), **config.params},
+            "params": {config.page_size_param: config.page_size, **config.params},
             "data_selector": config.data_selector,
             "data_selector_required": True,
             "paginator": _paginator(config),
@@ -208,22 +200,16 @@ def creem_source(
 
     if config.fanout is not None:
         parent_config = CREEM_ENDPOINTS[config.fanout.parent_name]
-        # The parent and child can page differently, so each gets its own page size param.
-        fanout = replace(
-            config.fanout,
-            parent_params={**_page_size_params(parent_config), **parent_config.params, **config.fanout.parent_params},
-        )
         child = build_dependent_resource(
             endpoint_configs=CREEM_ENDPOINTS,
             child_endpoint=endpoint,
-            fanout=fanout,
+            fanout=config.fanout,
             client_config=client_config,
             path_format_values={},
             team_id=team_id,
             job_id=job_id,
             db_incremental_field_last_value=None,
-            page_size_param=None,
-            child_params_extra=_page_size_params(config) or None,
+            page_size_param="page_size",
             parent_endpoint_extra={
                 "data_selector": parent_config.data_selector,
                 "data_selector_required": True,

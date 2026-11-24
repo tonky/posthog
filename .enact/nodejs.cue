@@ -6,7 +6,8 @@ import (
 )
 
 // jest.config.shared.js names frontend/jest.quarantine.ts and .github/scripts/jest-retries.cjs.
-_nodejsCone: list.Concat([_djangoTree, ["nodejs", "rust", "proto", "frontend/public/services", "frontend/jest.quarantine.ts", ".github/scripts/jest-retries.cjs", "docker", "infra", "tools/deploy-requirements"]])
+// nodejs/tests/scenarios/cloud/host-bootstrap.sh reads .flox/env/on-activate.sh for POSTHOG_HOSTS.
+_nodejsCone: list.Concat([_djangoTree, ["nodejs", "rust", "proto", "frontend/public/services", "frontend/jest.quarantine.ts", ".github/scripts/jest-retries.cjs", ".flox/env/on-activate.sh", "docker", "infra", "tools/deploy-requirements"]])
 
 _nodejsServices: [
 	{protocol: schema.#Protocol.Sql, target: pipeline.services.postgres},
@@ -248,6 +249,7 @@ pipeline: components: {
 			"nodejs/src/schema-check/**",
 			"nodejs/tests/*.serial.test.ts",
 			"nodejs/tests/scenarios/**",
+			".flox/env/on-activate.sh",
 		]
 		target_scope: {
 			tests: [

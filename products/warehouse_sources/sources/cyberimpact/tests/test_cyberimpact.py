@@ -158,34 +158,18 @@ def _recipients(emails: list[str], total: int) -> ScriptedResponse:
 
 
 class TestMailingFanOut:
-    @pytest.mark.parametrize(
-        ("endpoint", "recipient_list"),
-        [
-            ("mailing_opens", "opened"),
-            ("mailing_clicks", "clicked"),
-            ("mailing_deliveries", "delivered"),
-            ("mailing_unsubscribes", "unsubscribed"),
-            ("mailing_hard_bounces", "hard-bounced"),
-            ("mailing_soft_bounces", "soft-bounced"),
-            ("mailing_stopped_recipients", "stopped"),
-        ],
-    )
-    def test_recipient_lists_fan_out_over_sent_mailings_and_skip_a_deleted_mailing(
-        self, endpoint: str, recipient_list: str
-    ) -> None:
+    def test_opens_fan_out_over_sent_mailings_and_skip_a_deleted_mailing(self) -> None:
         result = _driver().run(
-            endpoint,
+            "mailing_opens",
             route(
                 {
                     "/mailings/sent": [_mailings([10, 11], 3), _mailings([12], 3)],
-                    f"/mailings/10/recipients/{recipient_list}": [
+                    "/mailings/10/recipients/opened": [
                         _recipients(["a@example.com", "b@example.com"], 3),
                         _recipients(["c@example.com"], 3),
                     ],
-                    f"/mailings/11/recipients/{recipient_list}": [
-                        ScriptedResponse(status=404, json={"status_code": 404})
-                    ],
-                    f"/mailings/12/recipients/{recipient_list}": [_recipients(["a@example.com"], 1)],
+                    "/mailings/11/recipients/opened": [ScriptedResponse(status=404, json={"status_code": 404})],
+                    "/mailings/12/recipients/opened": [_recipients(["a@example.com"], 1)],
                 }
             ),
         )
