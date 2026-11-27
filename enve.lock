@@ -2,8 +2,8 @@
   "platforms": {
     "aarch64-darwin": {
       "binding": {
-        "environment_sha256": "02bfb586d2f8fb3106d0a852b8b8dd75e349b22ced4cdbdd9216e48b24480c5e",
-        "inventory_sha256": "86e3b0e2942fd04c4fed5d51cb009337209263402ba3f52d07692667b1613b7f",
+        "environment_sha256": "a05ab4bd988d2732f58d0755b128f40f54e4caf38842d708b0a021f3f6577d46",
+        "inventory_sha256": "2fcf32fe855c0cba3833f8d35c90f0d45bbb218559a146b6d33c30ba04984107",
         "profile": null,
         "version": 2
       },
@@ -2167,6 +2167,9 @@
           ]
         },
         {
+          "hash_name": "xqps58gykwh7y9vyxdlp6frzs5460abj-python3-3.14.7"
+        },
+        {
           "hash_name": "xr5dvsavhkvb7bn1ga0mal6dgd7lb6rf-mpdecimal-4.0.1",
           "nar_hash": "sha256:0qjnpwk6ij3xfzxcmxch6495lmck7dyx9jvzd44z7zbc5pdx92mn",
           "nar_size": 223736,
@@ -2421,6 +2424,40 @@
             25
           ],
           "pnpm": [
+            209,
+            114,
+            217,
+            225,
+            197,
+            54,
+            31,
+            155,
+            213,
+            194,
+            91,
+            147,
+            5,
+            24,
+            49,
+            84,
+            248,
+            120,
+            138,
+            197,
+            107,
+            53,
+            113,
+            178,
+            129,
+            116,
+            128,
+            120,
+            67,
+            139,
+            49,
+            25
+          ],
+          "python3": [
             209,
             114,
             217,
@@ -3474,34 +3511,6 @@
             },
             {
               "constraint": {
-                "attr": "python314",
-                "context": "profiles.dev",
-                "output": null,
-                "system": "aarch64-darwin",
-                "version": "3.14.7"
-              },
-              "package": {
-                "attr_path": "python314",
-                "name": "python3",
-                "origin": {
-                  "Channel": {
-                    "build": 347230482,
-                    "evaluation": 1829922,
-                    "release": "nixpkgs/nixpkgs-26.11pre1086972.7dd199b0e299/"
-                  }
-                },
-                "outputs": {
-                  "out": "/nix/store/0kcws5blwbdyxqxjd1w8hjipz61xny3k-python3-3.14.7"
-                },
-                "rev": "7dd199b0e2993e37b4775ed66b1c291699608c9f",
-                "store_paths": [
-                  "/nix/store/0kcws5blwbdyxqxjd1w8hjipz61xny3k-python3-3.14.7"
-                ],
-                "version": "3.14.7"
-              }
-            },
-            {
-              "constraint": {
                 "attr": "redis",
                 "context": "profiles.dev",
                 "output": null,
@@ -3769,7 +3778,7 @@
           }
         },
         "lockSourcePath": "enve.lock",
-        "projectSha256": "8f78e7292606c2a4f973023764057dc81b7f5182d11738159d8d0e962d2153a3"
+        "projectSha256": "ecd1bf7ac36562b9b654bbd72b2f9c6bc3c1cc6936535b2a4d7d2229dda4b30a"
       },
       "environment": {
         "AWS_ENDPOINT_URL": "http://127.0.0.1:${ENVE_SERVICE_SEAWEEDFS_PORT}",
@@ -4575,18 +4584,46 @@
           "version": "36.2"
         },
         "python3": {
-          "closure": "0kcws5blwbdyxqxjd1w8hjipz61xny3k-python3-3.14.7",
-          "outputs": [
-            "0kcws5blwbdyxqxjd1w8hjipz61xny3k-python3-3.14.7"
+          "buildIdentity": [
+            209,
+            114,
+            217,
+            225,
+            197,
+            54,
+            31,
+            155,
+            213,
+            194,
+            91,
+            147,
+            5,
+            24,
+            49,
+            84,
+            248,
+            120,
+            138,
+            197,
+            107,
+            53,
+            113,
+            178,
+            129,
+            116,
+            128,
+            120,
+            67,
+            139,
+            49,
+            25
           ],
-          "source": {
-            "attr": "python314",
-            "build": 347230482,
-            "evaluation": 1829922,
-            "kind": "channel",
-            "release": "nixpkgs/nixpkgs-26.11pre1086972.7dd199b0e299/",
-            "rev": "7dd199b0e2993e37b4775ed66b1c291699608c9f"
-          },
+          "buildInputs": [
+            "82fb09q2gbhbhpc8ykkqwkcdj6h9c7f1-coreutils-9.11",
+            "s2vi23sgwpjv4qvnyfknv7l041m8vm94-bash-interactive-5.3p15",
+            "sjzhqc66j881n9lyg3m15aqiykad4h5k-bash-interactive-5.3p15-dev"
+          ],
+          "closure": "xqps58gykwh7y9vyxdlp6frzs5460abj-python3-3.14.7",
           "version": "3.14.7"
         },
         "redis": {
@@ -4811,8 +4848,8 @@
     },
     "aarch64-linux": {
       "binding": {
-        "environment_sha256": "02bfb586d2f8fb3106d0a852b8b8dd75e349b22ced4cdbdd9216e48b24480c5e",
-        "inventory_sha256": "80067e15e125e2ac9c4ed7088064dbe87fa2b413a9fa269aef2e628d9688e8c5",
+        "environment_sha256": "a05ab4bd988d2732f58d0755b128f40f54e4caf38842d708b0a021f3f6577d46",
+        "inventory_sha256": "c32b40dcec6f4936757518da9d19586fa05a35da522cd6949a00bd83a59fecd3",
         "profile": null,
         "version": 2
       },
@@ -10734,6 +10771,9 @@
           ]
         },
         {
+          "hash_name": "sm5q5cmv58frx1mcjn9p91hsd4ppy2d2-python3-3.14.7"
+        },
+        {
           "hash_name": "spks3247fj2gcycp90wpdl88cxrkz1i4-serd-0.32.10",
           "nar_hash": "sha256:12yhmkyq7h77w5qsa20g0qf8c6vz74axbk2vfamjs1b0rngs0wch",
           "nar_size": 217664,
@@ -11776,6 +11816,40 @@
             25
           ],
           "pnpm": [
+            209,
+            114,
+            217,
+            225,
+            197,
+            54,
+            31,
+            155,
+            213,
+            194,
+            91,
+            147,
+            5,
+            24,
+            49,
+            84,
+            248,
+            120,
+            138,
+            197,
+            107,
+            53,
+            113,
+            178,
+            129,
+            116,
+            128,
+            120,
+            67,
+            139,
+            49,
+            25
+          ],
+          "python3": [
             209,
             114,
             217,
@@ -14648,35 +14722,6 @@
             },
             {
               "constraint": {
-                "attr": "python314",
-                "context": "profiles.dev",
-                "output": null,
-                "system": "aarch64-linux",
-                "version": "3.14.7"
-              },
-              "package": {
-                "attr_path": "python314",
-                "name": "python3",
-                "origin": {
-                  "Channel": {
-                    "build": 347230485,
-                    "evaluation": 1829922,
-                    "release": "nixpkgs/nixpkgs-26.11pre1086972.7dd199b0e299/"
-                  }
-                },
-                "outputs": {
-                  "debug": "/nix/store/srgw0rb4aiyycf9xw3dv3y89q627lkzy-python3-3.14.7-debug",
-                  "out": "/nix/store/81ag9nxz1flw3xjkv1vvqg8y2ipx2ins-python3-3.14.7"
-                },
-                "rev": "7dd199b0e2993e37b4775ed66b1c291699608c9f",
-                "store_paths": [
-                  "/nix/store/81ag9nxz1flw3xjkv1vvqg8y2ipx2ins-python3-3.14.7"
-                ],
-                "version": "3.14.7"
-              }
-            },
-            {
-              "constraint": {
                 "attr": "redis",
                 "context": "profiles.dev",
                 "output": null,
@@ -15132,7 +15177,7 @@
           }
         },
         "lockSourcePath": "enve.lock",
-        "projectSha256": "8f78e7292606c2a4f973023764057dc81b7f5182d11738159d8d0e962d2153a3"
+        "projectSha256": "ecd1bf7ac36562b9b654bbd72b2f9c6bc3c1cc6936535b2a4d7d2229dda4b30a"
       },
       "environment": {
         "AWS_ENDPOINT_URL": "http://127.0.0.1:${ENVE_SERVICE_SEAWEEDFS_PORT}",
@@ -16081,18 +16126,46 @@
           "version": "36.2"
         },
         "python3": {
-          "closure": "81ag9nxz1flw3xjkv1vvqg8y2ipx2ins-python3-3.14.7",
-          "outputs": [
-            "81ag9nxz1flw3xjkv1vvqg8y2ipx2ins-python3-3.14.7"
+          "buildIdentity": [
+            209,
+            114,
+            217,
+            225,
+            197,
+            54,
+            31,
+            155,
+            213,
+            194,
+            91,
+            147,
+            5,
+            24,
+            49,
+            84,
+            248,
+            120,
+            138,
+            197,
+            107,
+            53,
+            113,
+            178,
+            129,
+            116,
+            128,
+            120,
+            67,
+            139,
+            49,
+            25
           ],
-          "source": {
-            "attr": "python314",
-            "build": 347230485,
-            "evaluation": 1829922,
-            "kind": "channel",
-            "release": "nixpkgs/nixpkgs-26.11pre1086972.7dd199b0e299/",
-            "rev": "7dd199b0e2993e37b4775ed66b1c291699608c9f"
-          },
+          "buildInputs": [
+            "2ssiw3jmlpf03cdrlf4df2qwpxska7xn-bash-interactive-5.3p15-dev",
+            "dq1apsyiah48nmc4n45dpwc33k887hdn-coreutils-9.11",
+            "wgxz9zr5a70v52nkqinbarf56f1c5jsi-bash-interactive-5.3p15"
+          ],
+          "closure": "sm5q5cmv58frx1mcjn9p91hsd4ppy2d2-python3-3.14.7",
           "version": "3.14.7"
         },
         "redis": {
@@ -16324,8 +16397,8 @@
     },
     "x86_64-linux": {
       "binding": {
-        "environment_sha256": "02bfb586d2f8fb3106d0a852b8b8dd75e349b22ced4cdbdd9216e48b24480c5e",
-        "inventory_sha256": "fb99b00bb470c8844678020e7523b2749ec00f2ce7dae8bb97fc557d3a32abb7",
+        "environment_sha256": "a05ab4bd988d2732f58d0755b128f40f54e4caf38842d708b0a021f3f6577d46",
+        "inventory_sha256": "3d6f544eba5b91d1b1175484bc4892c265a70b96b1ce9a35c63bdd0b498593d7",
         "profile": null,
         "version": 2
       },
@@ -17472,6 +17545,9 @@
             "51aa02zh6by4x3h5l8lzwfci2029fbxd-oniguruma-6.9.10-lib",
             "h4wfwic161kxrr74jlzla5lsm28hgary-glibc-2.44-25"
           ]
+        },
+        {
+          "hash_name": "53gql97j755v71rakb45xcrxcc0wg9mj-python3-3.14.7"
         },
         {
           "hash_name": "53pxakn1y52i0m0fklnb8xfhas93l3fi-tcb-1.2",
@@ -23298,6 +23374,40 @@
             49,
             25
           ],
+          "python3": [
+            209,
+            114,
+            217,
+            225,
+            197,
+            54,
+            31,
+            155,
+            213,
+            194,
+            91,
+            147,
+            5,
+            24,
+            49,
+            84,
+            248,
+            120,
+            138,
+            197,
+            107,
+            53,
+            113,
+            178,
+            129,
+            116,
+            128,
+            120,
+            67,
+            139,
+            49,
+            25
+          ],
           "rust": [
             209,
             114,
@@ -26137,35 +26247,6 @@
             },
             {
               "constraint": {
-                "attr": "python314",
-                "context": "profiles.dev",
-                "output": null,
-                "system": "x86_64-linux",
-                "version": "3.14.7"
-              },
-              "package": {
-                "attr_path": "python314",
-                "name": "python3",
-                "origin": {
-                  "Channel": {
-                    "build": 347230484,
-                    "evaluation": 1829922,
-                    "release": "nixpkgs/nixpkgs-26.11pre1086972.7dd199b0e299/"
-                  }
-                },
-                "outputs": {
-                  "debug": "/nix/store/7wws7qhgbm7g979l50h4z7dwxbgbdbc9-python3-3.14.7-debug",
-                  "out": "/nix/store/lb41b0anx1f98y9y5s9mdv97gjgsq740-python3-3.14.7"
-                },
-                "rev": "7dd199b0e2993e37b4775ed66b1c291699608c9f",
-                "store_paths": [
-                  "/nix/store/lb41b0anx1f98y9y5s9mdv97gjgsq740-python3-3.14.7"
-                ],
-                "version": "3.14.7"
-              }
-            },
-            {
-              "constraint": {
                 "attr": "redis",
                 "context": "profiles.dev",
                 "output": null,
@@ -26621,7 +26702,7 @@
           }
         },
         "lockSourcePath": "enve.lock",
-        "projectSha256": "8f78e7292606c2a4f973023764057dc81b7f5182d11738159d8d0e962d2153a3"
+        "projectSha256": "ecd1bf7ac36562b9b654bbd72b2f9c6bc3c1cc6936535b2a4d7d2229dda4b30a"
       },
       "environment": {
         "AWS_ENDPOINT_URL": "http://127.0.0.1:${ENVE_SERVICE_SEAWEEDFS_PORT}",
@@ -27570,18 +27651,46 @@
           "version": "36.2"
         },
         "python3": {
-          "closure": "lb41b0anx1f98y9y5s9mdv97gjgsq740-python3-3.14.7",
-          "outputs": [
-            "lb41b0anx1f98y9y5s9mdv97gjgsq740-python3-3.14.7"
+          "buildIdentity": [
+            209,
+            114,
+            217,
+            225,
+            197,
+            54,
+            31,
+            155,
+            213,
+            194,
+            91,
+            147,
+            5,
+            24,
+            49,
+            84,
+            248,
+            120,
+            138,
+            197,
+            107,
+            53,
+            113,
+            178,
+            129,
+            116,
+            128,
+            120,
+            67,
+            139,
+            49,
+            25
           ],
-          "source": {
-            "attr": "python314",
-            "build": 347230484,
-            "evaluation": 1829922,
-            "kind": "channel",
-            "release": "nixpkgs/nixpkgs-26.11pre1086972.7dd199b0e299/",
-            "rev": "7dd199b0e2993e37b4775ed66b1c291699608c9f"
-          },
+          "buildInputs": [
+            "1mv3qz005gkbalxfghk4y3s8ayv4d2dl-bash-interactive-5.3p15",
+            "2gfxiwls9hbgwdwcy43mprchwsq36mg6-coreutils-9.11",
+            "rxgngn06ihrwh52bfi4vmm0i2ds69wsj-bash-interactive-5.3p15-dev"
+          ],
+          "closure": "53gql97j755v71rakb45xcrxcc0wg9mj-python3-3.14.7",
           "version": "3.14.7"
         },
         "redis": {

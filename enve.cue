@@ -103,6 +103,41 @@ _seaweedfs_base: {
 	command: "sh -c 'cd \"$DATA_DIR\" && export GIT_CEILING_DIRECTORIES=\"${PWD%/*}\" && trap \"kill -TERM \\$p 2>/dev/null || true; for i in 1 2 3 4; do kill -0 \\$p 2>/dev/null || exit 0; sleep 0.5; done; kill -KILL \\$p 2>/dev/null || true; wait \\$p 2>/dev/null || true; exit 0\" TERM INT; weed server -ip=127.0.0.1 -master.raftHashicorp -s3 -s3.port=$PORT -s3.port.grpc=$PORT_S3_GRPC -s3.port.iceberg=0 -s3.port.lance=0 -master.port=$PORT_MASTER -master.port.grpc=$PORT_MASTER_GRPC -volume.port=$PORT_VOLUME -volume.port.grpc=$PORT_VOLUME_GRPC -filer.port=$PORT_FILER -filer.port.grpc=$PORT_FILER_GRPC -dir=\"$DATA_DIR\" -volume.max=1000 -master.volumePreallocate=false & p=$!; wait $p'"
 }
 
+// Pinned python-build-standalone CPython 3.14.7 (PGO + full LTO + BOLT + tail-call + mimalloc).
+// Replaces nixpkgs python3 (--with-lto only) for ~25% faster pure-Python execution on x86_64
+// (keeps test_markdown_safety.py ReDoS tests well under their untouched 1.0s timeout).
+// Kept unpatched on Linux: patchelf 0.15.2 corrupts BOLT-rewritten x86_64 ELF headers, and
+// install_only_stripped already links only manylinux glibc with RPATH=$ORIGIN/../lib.
+_python: schema.#ArchiveBuildSpec & {
+	pname:   "python3"
+	version: "3.14.7"
+	src: {
+		"aarch64-darwin": "https://github.com/astral-sh/python-build-standalone/releases/download/20260929/cpython-3.14.7%2B20260929-aarch64-apple-darwin-install_only_stripped.tar.gz"
+		"aarch64-linux":  "https://github.com/astral-sh/python-build-standalone/releases/download/20260929/cpython-3.14.7%2B20260929-aarch64-unknown-linux-gnu-install_only_stripped.tar.gz"
+		"x86_64-linux":   "https://github.com/astral-sh/python-build-standalone/releases/download/20260929/cpython-3.14.7%2B20260929-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz"
+	}
+	sha256: {
+		"aarch64-darwin": "44b4716f4e63bc85e1c07ea2aca730d13a0ec3557d06526d84a13b1d111cf4f9"
+		"aarch64-linux":  "9b8bd45d06fc3fcdc56f2713a62535fe1c019816461ae87c170dd56184dd3f4d"
+		"x86_64-linux":   "da5357f47b1d9c8d4c439004d463d893ef688a44c27438a62b47073d26d1377e"
+	}
+	buildInputs: [
+		{pname: "coreutils"},
+	]
+	installPhase: """
+		set -eu
+		if [ -d "$src/bin" ]; then
+			srcdir="$src"
+		else
+			srcdir="$src/python"
+		fi
+		mkdir -p "$out"
+		cp -a "$srcdir"/. "$out/"
+		"$out/bin/python3" --version
+		"$out/bin/python3" -c "import ssl, sqlite3, ctypes, zlib"
+		"""
+}
+
 // PostHog Polyglot Monorepo — Zero-Docker Developer Environment & Microservice Topology
 profiles: dev: schema.#Profile & {
 	name:        "posthog-platform-dev"
@@ -111,7 +146,7 @@ profiles: dev: schema.#Profile & {
 	// Upstream's pins: python 3.14.7, node 26.13.1, pnpm 11.28.5, postgres 15, go 1.26, ClickHouse 26.9.5.2,
 	// redis 8.10, ruff 0.16, git 2.48+.
 	tools: [
-		{pname: "python3", version: "3.14.7"},
+		_python,
 		// PostHog pyproject.toml requires uv >= 0.13.4 (locked nixpkgs snapshot ships 0.12.22).
 		schema.#ArchiveBuildSpec & {
 			pname:   "uv"

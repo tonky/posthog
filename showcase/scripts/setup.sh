@@ -112,6 +112,11 @@ with open(sys.argv[1], "a+") as f:
 sys.exit(rc)
 ' "$lock_file" "$@"
         }
+        # python-build-standalone records CC=clang in _sysconfigdata; point Linux sdist builds
+        # (e.g. pywatchman on cold uv caches) at enve's gcc/g++.
+        if [ "$(uname -s)" = Linux ] && [ -z "${CC:-}" ] && command -v gcc >/dev/null 2>&1; then
+            export CC=gcc CXX=g++ LDSHARED="gcc -shared" LDCXXSHARED="g++ -shared"
+        fi
         RESTORED=0
         CLONED_CACHE_INO=""
         if [ -n "$VENV_CACHE" ] && [ ! -e .venv ]; then

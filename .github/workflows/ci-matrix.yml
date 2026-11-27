@@ -3,6 +3,15 @@ name: posthog-platform matrix
 on:
   workflow_call:
     inputs:
+      control_checkout_sha:
+        type: string
+        required: false
+      control_pin_required:
+        type: string
+        required: false
+      control_pr_head_sha:
+        type: string
+        required: false
       force_warm_suites:
         type: string
         required: false
@@ -12,6 +21,12 @@ on:
       matrix:
         type: string
         required: true
+      pin_reach_age_sha256:
+        type: string
+        required: false
+      pin_reach_map_sha256:
+        type: string
+        required: false
       seed_caches:
         type: string
         required: false
@@ -78,6 +93,31 @@ jobs:
         set -euo pipefail
         url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY"
         mirror="$ENACT_GIT_MIRROR"
+        target_sha="$GITHUB_SHA"
+        scored_control=0
+        if [ "${GITHUB_EVENT_NAME:-}" = "workflow_dispatch" ] && [ "${ENACT_CONTROL_PIN_REQUIRED:-}" = "true" ]; then
+            scored_control=1
+        fi
+        if [ -n "${ENACT_CONTROL_CHECKOUT_SHA:-}" ]; then
+            if [ "$scored_control" -ne 1 ]; then
+                echo "::error::control_checkout_sha override is refused outside scored-control workflow_dispatch (control_pin_required=true)" >&2
+                exit 1
+            fi
+            case "$ENACT_CONTROL_CHECKOUT_SHA" in
+                *[!0-9a-fA-F]*)
+                    echo "::error::ENACT_CONTROL_CHECKOUT_SHA must be 40-char hex, got '$ENACT_CONTROL_CHECKOUT_SHA'" >&2
+                    exit 1
+                    ;;
+            esac
+            if [ "${#ENACT_CONTROL_CHECKOUT_SHA}" -ne 40 ]; then
+                echo "::error::ENACT_CONTROL_CHECKOUT_SHA must be 40-char hex, got '$ENACT_CONTROL_CHECKOUT_SHA'" >&2
+                exit 1
+            fi
+            target_sha="$ENACT_CONTROL_CHECKOUT_SHA"
+        elif [ "$scored_control" -eq 1 ]; then
+            echo "::error::scored-control dispatch requires non-empty control_checkout_sha" >&2
+            exit 1
+        fi
         export GIT_CONFIG_COUNT=2
         export GIT_CONFIG_KEY_0=safe.directory
         export GIT_CONFIG_VALUE_0="$GITHUB_WORKSPACE"
@@ -107,21 +147,21 @@ jobs:
             ref_current=""
             case "${GITHUB_REF:-}" in
                 refs/heads/*|refs/pull/*|refs/tags/*) ref_current=$(git -C "$mirror" rev-parse --verify -q "$GITHUB_REF^{commit}" 2>/dev/null || true) ;;
-                *) ref_current="$GITHUB_SHA" ;;
+                *) ref_current="$target_sha" ;;
             esac
             base_missing=0
             if [ -n "$base_ref" ] && ! git -C "$mirror" rev-parse --verify -q "refs/heads/$base_ref^{commit}" >/dev/null 2>&1; then
                 base_missing=1
             fi
-            if [ -z "$(find "$mirror/HEAD" -mmin -1 2>/dev/null || true)" ] || [ "$ref_current" != "$GITHUB_SHA" ] || [ "$base_missing" = 1 ] || ! git -C "$mirror" cat-file -e "$GITHUB_SHA^{commit}" 2>/dev/null; then
+            if [ -z "$(find "$mirror/HEAD" -mmin -1 2>/dev/null || true)" ] || [ "$ref_current" != "$target_sha" ] || [ "$base_missing" = 1 ] || ! git -C "$mirror" cat-file -e "$target_sha^{commit}" 2>/dev/null; then
                 if [ "${#refs[@]}" -gt 0 ]; then
                     git -C "$mirror" -c "http.extraheader=$header" fetch -q "${fetch_args[@]}" "$url" "${refs[@]}" \
-                        || git -C "$mirror" -c "http.extraheader=$header" fetch -q "${fetch_args[@]}" "$url" "$GITHUB_SHA"
+                        || git -C "$mirror" -c "http.extraheader=$header" fetch -q "${fetch_args[@]}" "$url" "$target_sha"
                 else
-                    git -C "$mirror" -c "http.extraheader=$header" fetch -q "${fetch_args[@]}" "$url" "$GITHUB_SHA"
+                    git -C "$mirror" -c "http.extraheader=$header" fetch -q "${fetch_args[@]}" "$url" "$target_sha"
                 fi
-                if ! git -C "$mirror" cat-file -e "$GITHUB_SHA^{commit}" 2>/dev/null; then
-                    git -C "$mirror" -c "http.extraheader=$header" fetch -q "${fetch_args[@]}" "$url" "$GITHUB_SHA"
+                if ! git -C "$mirror" cat-file -e "$target_sha^{commit}" 2>/dev/null; then
+                    git -C "$mirror" -c "http.extraheader=$header" fetch -q "${fetch_args[@]}" "$url" "$target_sha"
                 fi
             fi
             touch "$mirror" "$mirror/HEAD" 2>/dev/null || true
@@ -158,6 +198,7 @@ jobs:
                 [ -n "$entry" ] && raw_cone+=("$entry")
             done <<<"$ENACT_SPARSE_CONE"
             cone=()
+            to_check=()
             if [ "${#raw_cone[@]}" -gt 0 ]; then
                 for entry in "${raw_cone[@]}"; do
                     case "$entry" in
@@ -165,28 +206,51 @@ jobs:
                             cone+=("$entry")
                             ;;
                         *)
-                            kind=$(git cat-file -t "$GITHUB_SHA:$entry" 2>/dev/null || true)
-                            if [ "$kind" = "blob" ]; then
-                                case "$entry" in
-                                    */*) cone+=("${entry%/*}/.enact-direct-files") ;;
-                                esac
-                            else
-                                cone+=("$entry")
-                            fi
+                            to_check+=("$entry")
                             ;;
                     esac
                 done
+            fi
+            if [ "${#to_check[@]}" -gt 0 ]; then
+                idx=0
+                while IFS= read -r kind; do
+                    entry="${to_check[$idx]}"
+                    idx=$((idx + 1))
+                    if [ "$kind" = "blob" ]; then
+                        case "$entry" in
+                            */*) cone+=("${entry%/*}/.enact-direct-files") ;;
+                        esac
+                    else
+                        cone+=("$entry")
+                    fi
+                done < <(
+                    for entry in "${to_check[@]}"; do
+                        printf '%s:%s\n' "${target_sha:-$GITHUB_SHA}" "$entry"
+                    done | git cat-file --batch-check='%(objecttype)'
+                )
             fi
             if [ "${#cone[@]}" -gt 0 ]; then
                 git sparse-checkout set --cone "${cone[@]}"
             fi
         fi
-        case "${GITHUB_REF:-}" in
-            refs/heads/*) git checkout -q --force -B "${GITHUB_REF#refs/heads/}" "$GITHUB_SHA" ;;
-            *) git checkout -q --force --detach "$GITHUB_SHA" ;;
-        esac
-        git log -1 --format='Checked out %H through the host mirror'
+        if [ -n "${ENACT_CONTROL_CHECKOUT_SHA:-}" ]; then
+            git checkout -q --force --detach "$target_sha"
+        else
+            case "${GITHUB_REF:-}" in
+                refs/heads/*) git checkout -q --force -B "${GITHUB_REF#refs/heads/}" "$target_sha" ;;
+                *) git checkout -q --force --detach "$target_sha" ;;
+            esac
+        fi
+        checked_commit=$(git rev-parse HEAD)
+        checked_tree=$(git rev-parse "HEAD^{tree}")
+        if [ "$checked_commit" != "$target_sha" ]; then
+            echo "::error::host checkout commit mismatch: expected $target_sha, got $checked_commit" >&2
+            exit 1
+        fi
+        echo "Checked out $checked_commit (tree $checked_tree) through the host mirror"
       env:
+        ENACT_CONTROL_CHECKOUT_SHA: ${{ inputs.control_checkout_sha }}
+        ENACT_CONTROL_PIN_REQUIRED: ${{ inputs.control_pin_required }}
         ENACT_GIT_TOKEN: ${{ github.token }}
         ENACT_SPARSE_CONE: ${{ matrix.sparse_checkout }}
     - name: Checkout Repository (sparse)
@@ -195,6 +259,31 @@ jobs:
       run: |
         set -euo pipefail
         url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY"
+        target_sha="$GITHUB_SHA"
+        scored_control=0
+        if [ "${GITHUB_EVENT_NAME:-}" = "workflow_dispatch" ] && [ "${ENACT_CONTROL_PIN_REQUIRED:-}" = "true" ]; then
+            scored_control=1
+        fi
+        if [ -n "${ENACT_CONTROL_CHECKOUT_SHA:-}" ]; then
+            if [ "$scored_control" -ne 1 ]; then
+                echo "::error::control_checkout_sha override is refused outside scored-control workflow_dispatch (control_pin_required=true)" >&2
+                exit 1
+            fi
+            case "$ENACT_CONTROL_CHECKOUT_SHA" in
+                *[!0-9a-fA-F]*)
+                    echo "::error::ENACT_CONTROL_CHECKOUT_SHA must be 40-char hex, got '$ENACT_CONTROL_CHECKOUT_SHA'" >&2
+                    exit 1
+                    ;;
+            esac
+            if [ "${#ENACT_CONTROL_CHECKOUT_SHA}" -ne 40 ]; then
+                echo "::error::ENACT_CONTROL_CHECKOUT_SHA must be 40-char hex, got '$ENACT_CONTROL_CHECKOUT_SHA'" >&2
+                exit 1
+            fi
+            target_sha="$ENACT_CONTROL_CHECKOUT_SHA"
+        elif [ "$scored_control" -eq 1 ]; then
+            echo "::error::scored-control dispatch requires non-empty control_checkout_sha" >&2
+            exit 1
+        fi
         export GIT_CONFIG_COUNT=1
         export GIT_CONFIG_KEY_0=safe.directory
         export GIT_CONFIG_VALUE_0="$GITHUB_WORKSPACE"
@@ -243,8 +332,12 @@ jobs:
         if [ "$narrow_cone" = 1 ]; then
             fetch_args+=(--filter=blob:none)
         fi
-        git fetch -q "${fetch_args[@]}" origin "$GITHUB_SHA" 2>/dev/null \
-            || git fetch -q "${fetch_args[@]}" origin "$GITHUB_REF"
+        if [ -n "${ENACT_CONTROL_CHECKOUT_SHA:-}" ]; then
+            git fetch -q "${fetch_args[@]}" origin "$target_sha"
+        else
+            git fetch -q "${fetch_args[@]}" origin "$target_sha" 2>/dev/null \
+                || git fetch -q "${fetch_args[@]}" origin "$GITHUB_REF"
+        fi
         if [ "${#cone[@]}" -gt 0 ]; then
             normalized=()
             for entry in "${cone[@]}"; do
@@ -253,7 +346,7 @@ jobs:
                         normalized+=("$entry")
                         ;;
                     *)
-                        kind=$(git cat-file -t "$GITHUB_SHA:$entry" 2>/dev/null || true)
+                        kind=$(git cat-file -t "$target_sha:$entry" 2>/dev/null || true)
                         if [ "$kind" = "blob" ]; then
                             case "$entry" in
                                 */*) normalized+=("${entry%/*}/.enact-direct-files") ;;
@@ -268,12 +361,24 @@ jobs:
                 git sparse-checkout set --cone "${normalized[@]}"
             fi
         fi
-        case "$GITHUB_REF" in
-            refs/heads/*) git checkout -q --force -B "${GITHUB_REF#refs/heads/}" "$GITHUB_SHA" ;;
-            *) git checkout -q --force --detach "$GITHUB_SHA" ;;
-        esac
-        git log -1 --format='Checked out %H (shallow sparse)'
+        if [ -n "${ENACT_CONTROL_CHECKOUT_SHA:-}" ]; then
+            git checkout -q --force --detach "$target_sha"
+        else
+            case "$GITHUB_REF" in
+                refs/heads/*) git checkout -q --force -B "${GITHUB_REF#refs/heads/}" "$target_sha" ;;
+                *) git checkout -q --force --detach "$target_sha" ;;
+            esac
+        fi
+        checked_commit=$(git rev-parse HEAD)
+        checked_tree=$(git rev-parse "HEAD^{tree}")
+        if [ "$checked_commit" != "$target_sha" ]; then
+            echo "::error::shallow sparse checkout commit mismatch: expected $target_sha, got $checked_commit" >&2
+            exit 1
+        fi
+        echo "Checked out $checked_commit (tree $checked_tree) (shallow sparse)"
       env:
+        ENACT_CONTROL_CHECKOUT_SHA: ${{ inputs.control_checkout_sha }}
+        ENACT_CONTROL_PIN_REQUIRED: ${{ inputs.control_pin_required }}
         ENACT_FETCH_DEPTH: "1"
         ENACT_GIT_TOKEN: ${{ github.token }}
         ENACT_SPARSE_CONE: ${{ matrix.sparse_checkout }}
@@ -284,6 +389,7 @@ jobs:
         fetch-depth: "1"
         fetch-tags: "false"
         lfs: "false"
+        ref: ${{ (github.event_name == 'workflow_dispatch' && inputs.control_pin_required == 'true') && inputs.control_checkout_sha || '' }}
         show-progress: "false"
         submodules: "false"
     - name: Install committed enact & enve builds
@@ -910,11 +1016,77 @@ jobs:
         if [ -n "${GITHUB_HEAD_SHA:-}" ] && [ -z "$(git rev-list -n1 --no-walk --ignore-missing --missing=allow-any "$GITHUB_HEAD_SHA" -- 2>/dev/null)" ]; then
           git fetch --no-tags --depth=1 --filter=blob:none origin "$GITHUB_HEAD_SHA" 2>/dev/null
         fi
+        if [ -n "${ENACT_CONTROL_CHECKOUT_SHA:-}" ]; then
+          actual_head=$(git rev-parse HEAD)
+          actual_tree=$(git rev-parse "HEAD^{tree}")
+          if [ "$actual_head" != "$ENACT_CONTROL_CHECKOUT_SHA" ]; then
+            echo "::error::worker checkout mismatch: expected $ENACT_CONTROL_CHECKOUT_SHA, got $actual_head" >&2
+            exit 1
+          fi
+          echo "Worker checkout verified: commit=$actual_head tree=$actual_tree"
+        fi
         if [ "$ENACT_HANDOFF_READY" = true ] && [ -f "$RUNNER_TEMP/enact-reach/map.bin" ] && [ -f "$RUNNER_TEMP/enact-reach/map.age.json" ]; then
+          if command -v sha256sum >/dev/null 2>&1; then
+            map_sha=$(sha256sum "$RUNNER_TEMP/enact-reach/map.bin" | awk '{print $1}')
+            age_sha=$(sha256sum "$RUNNER_TEMP/enact-reach/map.age.json" | awk '{print $1}')
+          else
+            map_sha=$(shasum -a 256 "$RUNNER_TEMP/enact-reach/map.bin" | awk '{print $1}')
+            age_sha=$(shasum -a 256 "$RUNNER_TEMP/enact-reach/map.age.json" | awk '{print $1}')
+          fi
+          echo "Handed reach map SHA-256: $map_sha age SHA-256: $age_sha"
+          if [ "${ENACT_CONTROL_PIN_REQUIRED:-}" = true ]; then
+            if [ -n "${ENACT_PIN_REACH_MAP_SHA256:-}" ]; then
+              expected_sha=$(printf '%s' "${ENACT_PIN_REACH_MAP_SHA256#sha256:}" | tr 'A-F' 'a-f')
+              if [ "$map_sha" != "$expected_sha" ]; then
+                echo "::error::handed reach map SHA-256 mismatch in worker: expected $expected_sha, got $map_sha" >&2
+                exit 1
+              fi
+            fi
+            if [ -n "${ENACT_PIN_REACH_AGE_SHA256:-}" ]; then
+              expected_age=$(printf '%s' "${ENACT_PIN_REACH_AGE_SHA256#sha256:}" | tr 'A-F' 'a-f')
+              if [ "$age_sha" != "$expected_age" ]; then
+                echo "::error::handed reach age SHA-256 mismatch in worker: expected $expected_age, got $age_sha" >&2
+                exit 1
+              fi
+            fi
+            ctrl_pr_head="${ENACT_CONTROL_PR_HEAD_SHA:-}"
+            case "$ctrl_pr_head" in
+              ""|*[!0-9a-fA-F]*)
+                echo "::error::control worker requires 40-char hex ENACT_CONTROL_PR_HEAD_SHA from detect, got '$ctrl_pr_head'" >&2
+                exit 1
+                ;;
+            esac
+            if [ "${#ctrl_pr_head}" -ne 40 ]; then
+              echo "::error::control worker requires 40-char hex ENACT_CONTROL_PR_HEAD_SHA from detect, got '$ctrl_pr_head'" >&2
+              exit 1
+            fi
+            worker_parent2=$(git cat-file -p HEAD | awk '$1=="parent"{n++; if(n==2) print $2}')
+            if [ -n "$worker_parent2" ] && [ "$worker_parent2" != "$ctrl_pr_head" ]; then
+              echo "::error::worker merge 2nd parent '$worker_parent2' does not match detect PR head '$ctrl_pr_head'" >&2
+              exit 1
+            fi
+            if ! git cat-file -e "${ctrl_pr_head}^{commit}" 2>/dev/null; then
+              git fetch --no-tags --depth=1 origin "$ctrl_pr_head"
+            fi
+            if ! git cat-file -e "${ctrl_pr_head}^{commit}" 2>/dev/null; then
+              echo "::error::worker missing PR head commit '$ctrl_pr_head' locally after fetch" >&2
+              exit 1
+            fi
+            echo "ENACT_PR_HEAD_SHA=$ctrl_pr_head" >> "$GITHUB_ENV"
+            echo "GITHUB_HEAD_SHA=$ctrl_pr_head" >> "$GITHUB_ENV"
+          fi
           echo "ENACT_REACH_FILE=$RUNNER_TEMP/enact-reach/map.bin" >> "$GITHUB_ENV"
+        elif [ "${ENACT_CONTROL_PIN_REQUIRED:-}" = true ]; then
+          echo "::error::control run worker missing handed-off reach map" >&2
+          exit 1
         fi
       env:
+        ENACT_CONTROL_CHECKOUT_SHA: ${{ inputs.control_checkout_sha }}
+        ENACT_CONTROL_PIN_REQUIRED: ${{ inputs.control_pin_required }}
+        ENACT_CONTROL_PR_HEAD_SHA: ${{ inputs.control_pr_head_sha }}
         ENACT_HANDOFF_READY: ${{ steps.reach-native.outputs.ready == 'true' || steps.reach-verified.outputs.ready == 'true' || (env.ENACT_HOST_CACHE == '' && steps.reach-download.outcome == 'success') }}
+        ENACT_PIN_REACH_AGE_SHA256: ${{ inputs.pin_reach_age_sha256 }}
+        ENACT_PIN_REACH_MAP_SHA256: ${{ inputs.pin_reach_map_sha256 }}
         GITHUB_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
     - name: Fetch the Revisions Selection Ages By
       if: ${{ (matrix.selects_in_job) && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
@@ -977,7 +1149,7 @@ jobs:
         ENACT_MAX_PARALLEL: ${{ matrix.max_parallel }}
         ENACT_PREEMPTION_NOTICE_SEC: ${{ matrix.preemption_notice_sec }}
         ENACT_R2_BUCKET: ${{ secrets.R2_BUCKET || env.R2_BUCKET }}
-        ENACT_RECORD: ${{ (github.event_name == 'workflow_dispatch' && inputs.warm_reach == 'true' && github.ref_name == github.event.repository.default_branch) && 'every' || (github.event_name == 'push' && github.ref_name == github.event.repository.default_branch || github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref != github.event.repository.default_branch) && 'auto' || 'off' }}
+        ENACT_RECORD: ${{ (github.event_name == 'workflow_dispatch' && inputs.warm_reach == 'true' && inputs.control_pin_required != 'true' && github.ref_name == github.event.repository.default_branch) && 'every' || (github.event_name == 'push' && github.ref_name == github.event.repository.default_branch || github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref != github.event.repository.default_branch) && 'auto' || 'off' }}
         ENACT_RUNNER_ALLOCATION: ${{ matrix.env.ENACT_RUNNER_ALLOCATION }}
         ENACT_RUNNER_TIER: ${{ matrix.runner_tier }}
         ENACT_SAME_REPO_PR: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref != github.event.repository.default_branch }}
@@ -1050,7 +1222,7 @@ jobs:
           playwright/test-results/**
         retention-days: "1"
     - name: Upload Recorded Footprints
-      if: ${{ (success() && (github.event_name == 'push' && github.ref_name == github.event.repository.default_branch || github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref != github.event.repository.default_branch || github.event_name == 'workflow_dispatch' && inputs.warm_reach == 'true' && github.ref_name == github.event.repository.default_branch)) && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
+      if: ${{ (success() && (github.event_name == 'push' && github.ref_name == github.event.repository.default_branch || github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref != github.event.repository.default_branch || github.event_name == 'workflow_dispatch' && inputs.warm_reach == 'true' && inputs.control_pin_required != 'true' && github.ref_name == github.event.repository.default_branch)) && !steps.skip.outputs.hit && steps.outputs-host-recover.outputs.cache-hit != 'true' }}
       continue-on-error: true
       uses: actions/upload-artifact@v7
       with:

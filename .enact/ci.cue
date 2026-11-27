@@ -193,17 +193,11 @@ pipeline: schema.#Pipeline & {
 		budget: {enforce: true, untraced_tests: 10, wall_minutes: 30}
 		workers: {
 			github: {
-				// Standard public capacity; X64 + ARM64 public images share the 20-VM quota_group.
+				// Standard x86_64 public capacity (20-VM quota_group). Public spill uses x64 only;
+				// self-hosted keeps mac1 ARM64 + ibp8/l7 x64 (avoids noisy ubuntu-24.04-arm VMs).
 				preset: "github-public", labels: ["ubuntu-24.04"], quota_group: "github-public"
 				tier: "on_demand", available: 20, cost_per_min: 0
 				// Calibrated from measured ~80s cold preparation on ubuntu-24.04.
-				setup_overhead_sec: 80
-				throughput:         0.75
-				timeout_minutes:    120
-			}
-			github_arm: {
-				preset: "github-public", labels: ["ubuntu-24.04-arm"], arch: "aarch64", quota_group: "github-public"
-				tier: "on_demand", available: 20, cost_per_min: 0
 				setup_overhead_sec: 80
 				throughput:         0.75
 				timeout_minutes:    120

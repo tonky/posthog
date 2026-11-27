@@ -108,7 +108,9 @@ class E2EWorkerCapTest(unittest.TestCase):
         run_e2e = (SCRIPTS / "run_e2e_tests.sh").read_text(encoding="utf-8")
         self.assertIn("live_posthog.py", run_e2e)
         self.assertIn("e2e-workers --shell", run_e2e)
-        self.assertIn('--workers="${PW_WORKERS:-2}"', run_e2e)
+        self.assertIn('--workers="$workers"', run_e2e)
+        self.assertIn('e2e_run_batch "${PW_WORKERS:-2}"', run_e2e)
+        self.assertIn('e2e_run_batch 1 "${serial_specs[@]}"', run_e2e)
 
         # Per Opus 230: e2e:test must stay pinned to hosted ubuntu-24.04 (`worker: "github"`).
         components = (OVERLAY / ".enact/components.cue").read_text(encoding="utf-8")
@@ -116,6 +118,43 @@ class E2EWorkerCapTest(unittest.TestCase):
         self.assertIsNotNone(m, "could not locate e2e:test block in components.cue")
         assert m is not None
         self.assertIn('worker:           "github"', m.group(1))
+
+    def test_notebooks_spec_isolated_to_one_worker_on_four_cpus(self) -> None:
+        run_e2e = (SCRIPTS / "run_e2e_tests.sh").read_text(encoding="utf-8")
+        m = re.search(r"(e2e_run\(\) \{.*?\n\})", run_e2e, re.DOTALL)
+        self.assertIsNotNone(m, "could not locate e2e_run() in run_e2e_tests.sh")
+        assert m is not None
+        fn_src = m.group(1)
+
+        def run_case(eff_cpus: int, pw_workers: int, specs: list[str]) -> list[str]:
+            script = (
+                "set -euo pipefail\n"
+                "e2e_run_batch() { printf 'BATCH:%s\\n' \"$*\"; }\n"
+                f"{fn_src}\n"
+                f"PW_EFFECTIVE_CPUS={eff_cpus} PW_WORKERS={pw_workers} e2e_run \"$@\"\n"
+            )
+            res = subprocess.run(
+                ["bash", "-c", script, "_", *specs],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            return [line for line in res.stdout.splitlines() if line.startswith("BATCH:")]
+
+        nb = "playwright/e2e/product-analytics/notebooks.spec.ts"
+        other = "playwright/e2e/product-analytics/insights.spec.ts"
+        self.assertEqual(
+            run_case(4, 2, [other, nb]),
+            [f"BATCH:2 {other}", f"BATCH:1 {nb}"],
+        )
+        self.assertEqual(
+            run_case(4, 2, [nb]),
+            [f"BATCH:1 {nb}"],
+        )
+        self.assertEqual(
+            run_case(8, 6, [other, nb]),
+            [f"BATCH:6 {other} {nb}"],
+        )
 
 
 class LivePosthogLockAndReadinessTest(unittest.TestCase):

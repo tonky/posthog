@@ -728,24 +728,51 @@ pipeline: schema.#Pipeline & {
 				"services/mcp/schema/tool-definitions-all.json",
 				"services/mcp/src/templates/sections/**",
 				"services/mcp/schema/exec-command-reference.md",
+				"bin/build-desktop-api-client.sh",
+				"products/desktop/packages/api-client/endpoint-allowlist.json",
+				"products/desktop/packages/api-client/scripts/update-openapi-client.ts",
+				"products/desktop/packages/api-client/src/generated.ts",
 				"showcase/scripts/no_drift.sh",
 			]
-			schema_check: {
-				command: "cd ../.. && showcase/scripts/exclusive.sh geoip bin/download-mmdb && ./bin/hogli build:openapi && pnpm --filter=@posthog/mcp run scaffold-yaml -- --sync-all"
-				expect_no_drift: [
-					"frontend/src/generated/**",
-					"frontend/src/lib/agentScopes.generated.ts",
-					"products/*/frontend/generated/**",
-					"services/mcp/src/generated/**",
-					"services/mcp/src/api/generated.ts",
-					"services/mcp/src/tools/generated/**",
-					"services/mcp/schema/tool-definitions.json",
-					"services/mcp/schema/tool-definitions-v2.json",
-					"services/mcp/schema/generated-tool-definitions.json",
-					"services/mcp/schema/tool-definitions-all.json",
-					"services/mcp/schema/exec-command-reference.md",
-					"products/*/mcp/tools.yaml",
-					"services/mcp/definitions/**/*.yaml",
+			jobs: schema_check: {
+				name: "Schema Check"
+				tasks: [
+					{
+						// `bin/build-desktop-api-client.sh` runs `pnpm exec typed-openapi` inside
+						// `products/desktop/packages/api-client`, which is excluded from root
+						// `pnpm-workspace.yaml` and has its own lockfile. With `GITHUB_ACTIONS=true`
+						// it exits 1 when the nested workspace is not installed.
+						name:    "Install desktop API client generator"
+						dir:     "."
+						timeout: "10m"
+						once: {
+							key:     "desktop-api-client-node-modules"
+							inputs:  ["products/desktop/package.json", "products/desktop/pnpm-lock.yaml", "products/desktop/pnpm-workspace.yaml", "products/desktop/packages/api-client/package.json"]
+							outputs: ["products/desktop/node_modules", "products/desktop/packages/api-client/node_modules"]
+						}
+						command: "if ! (cd products/desktop/packages/api-client && pnpm exec typed-openapi --version >/dev/null 2>&1); then showcase/scripts/exclusive.sh desktop-api-client pnpm --dir products/desktop --filter @posthog/api-client... install --frozen-lockfile --ignore-scripts --prefer-offline; fi"
+					},
+					{
+						name:    "Check OpenAPI schema and generated types"
+						dir:     "."
+						command: "showcase/scripts/exclusive.sh geoip bin/download-mmdb && ./bin/hogli build:openapi && pnpm --filter=@posthog/mcp run scaffold-yaml -- --sync-all"
+						expect_no_drift: [
+							"frontend/src/generated/**",
+							"frontend/src/lib/agentScopes.generated.ts",
+							"products/*/frontend/generated/**",
+							"products/desktop/packages/api-client/src/generated.ts",
+							"services/mcp/src/generated/**",
+							"services/mcp/src/api/generated.ts",
+							"services/mcp/src/tools/generated/**",
+							"services/mcp/schema/tool-definitions.json",
+							"services/mcp/schema/tool-definitions-v2.json",
+							"services/mcp/schema/generated-tool-definitions.json",
+							"services/mcp/schema/tool-definitions-all.json",
+							"services/mcp/schema/exec-command-reference.md",
+							"products/*/mcp/tools.yaml",
+							"services/mcp/definitions/**/*.yaml",
+						]
+					},
 				]
 			}
 			resources: {cpus: 1.0, memory_mb: 2400}
@@ -1445,7 +1472,7 @@ pipeline: schema.#Pipeline & {
 			test: {
 				dir:          "."
 				isolate_home: true
-				command:      "mkdir -p \"$HOME/.hogli/bin\" \"$HOME/.local/bin\" && printf '#!/bin/sh\\necho 0.18.1\\n' >\"$HOME/.hogli/bin/mutagen\" && printf '#!/bin/sh\\nexit 0\\n' >\"$HOME/.local/bin/ssh\" && chmod +x \"$HOME/.hogli/bin/mutagen\" \"$HOME/.local/bin/ssh\" && PATH=\"$PATH:$HOME/.local/bin\" uv run --no-sync pytest {targets}"
+				command:      "mkdir -p \"$HOME/.hogli/bin\" \"$HOME/.local/bin\" && printf '#!/bin/sh\\necho 0.18.1\\n' >\"$HOME/.hogli/bin/mutagen\" && printf '#!/bin/sh\\nexit 0\\n' >\"$HOME/.local/bin/ssh\" && chmod +x \"$HOME/.hogli/bin/mutagen\" \"$HOME/.local/bin/ssh\" && PATH=\"$PATH:$HOME/.local/bin\" uv run --no-sync pytest -v {targets}"
 			}
 			recorder:         "trace"
 			record_resources: _recordPy

@@ -188,8 +188,10 @@ e2e_preserve_failed_results() { # <seq> <src_dir> <failed_root>
     cp -R "$src/." "$dest/"
 }
 
-e2e_run() { # [spec...]
-    local reporters=()
+e2e_run_batch() { # <workers> [spec...]
+    local workers="$1"
+    shift
+    local reporters=("--reporter=list")
     local rc=0
     e2e_run_seq=$((e2e_run_seq + 1))
     [ -z "${ENACT_SKIPS_FILE:-}" ] || reporters=("--reporter=list,$root/showcase/scripts/node_reads.mjs")
@@ -197,12 +199,41 @@ e2e_run() { # [spec...]
         PLAYWRIGHT_RESULTS_DIR="$results/run" \
         NODE_OPTIONS="${NODE_OPTIONS:+$NODE_OPTIONS }--require $root/.enact/vitest/node_env_preload.cjs" \
         pnpm exec playwright test --config "$root/showcase/playwright.enact.config.ts" "$@" \
-        ${reporters[@]+"${reporters[@]}"} --workers="${PW_WORKERS:-2}" --update-snapshots) || rc=$?
+        ${reporters[@]+"${reporters[@]}"} --workers="$workers" --update-snapshots) || rc=$?
     if [ "$rc" -ne 0 ]; then
         e2e_preserve_failed_results "$e2e_run_seq" "$results/run/test-results" "$results/failed"
         echo "e2e_run: FAILED ($rc) specs: $* (preserved: $results/failed/spec-$e2e_run_seq)" >&2
     fi
     return "$rc"
+}
+
+e2e_run() { # [spec...]
+    # On <= 4 effective CPUs (e.g. hosted ubuntu-24.04 4-vCPU VMs), notebooks.spec.ts loads
+    # ~965 static JS/CSS chunks on "New notebook" click under a hard 10s editor-visible
+    # assertion. Two concurrent Playwright workers push chunk-fetch + mount to ~9.7s+
+    # (cliff edge), whereas --workers=1 isolates the burst and mounts in ~3.7s.
+    if [ "${PW_EFFECTIVE_CPUS:-4}" -le 4 ] && [ "${PW_WORKERS:-2}" -gt 1 ] && [ "$#" -gt 0 ]; then
+        local serial_specs=() parallel_specs=() spec rc=0
+        for spec in "$@"; do
+            case "$spec" in
+                playwright/e2e/product-analytics/notebooks.spec.ts|*/playwright/e2e/product-analytics/notebooks.spec.ts)
+                    serial_specs+=("$spec")
+                    ;;
+                *)
+                    parallel_specs+=("$spec")
+                    ;;
+            esac
+        done
+        if [ "${#serial_specs[@]}" -gt 0 ]; then
+            echo "e2e_run: isolating ${#serial_specs[@]} chunk-heavy spec(s) with --workers=1 (effective_cpus=${PW_EFFECTIVE_CPUS:-4}): ${serial_specs[*]}" >&2
+            if [ "${#parallel_specs[@]}" -gt 0 ]; then
+                e2e_run_batch "${PW_WORKERS:-2}" "${parallel_specs[@]}" || rc=$?
+            fi
+            e2e_run_batch 1 "${serial_specs[@]}" || rc=$?
+            return "$rc"
+        fi
+    fi
+    e2e_run_batch "${PW_WORKERS:-2}" "$@"
 }
 rm -rf "$results/run" "$results/failed" && mkdir -p "$results/run"
 live_each_spec e2e_app e2e_run ${specs[@]+"${specs[@]}"}
