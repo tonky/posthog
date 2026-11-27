@@ -31,7 +31,16 @@ test.describe('Insights list', () => {
 
         await test.step('search for the insight and navigate to it', async () => {
             await insight.goToList()
+            const searchResponse = page.waitForResponse(
+                (response) =>
+                    /\/api\/(?:projects|environments)\/\d+\/insights\/?\?/.test(response.url()) &&
+                    response.url().includes(`search=${encodeURIComponent(insightName)}`) &&
+                    response.request().method() === 'GET' &&
+                    response.ok(),
+                { timeout: 10_000 }
+            )
             await page.getByPlaceholder('Search').fill(insightName)
+            await searchResponse
 
             // Wait for the table to settle with exactly one row containing our insight.
             // This avoids a race where the search API response arrives mid-click,

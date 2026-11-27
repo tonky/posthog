@@ -32,6 +32,15 @@ MACOS_CHDB_EXCLUDED: tuple[str, ...] = (
     "products/web_analytics/dags/tests/test_web_preaggregated_asset_checks.py",
 )
 
+# Exact per-case quarantine matching `base:test` `target_scope.not_run` in `.enact/components.cue`.
+# Keeps the other 37 passing node IDs in `test_markdown_safety.py` active while leaving its 1.0s ReDoS timeout untouched.
+CORE_CASE_DESELECTS: tuple[tuple[str, str], ...] = (
+    (
+        "posthog/helpers/test_markdown_safety.py",
+        "posthog/helpers/test_markdown_safety.py::TestStripExternalLinks::test_non_posthog_urls_defanged_9_leading_bracket_run",
+    ),
+)
+
 SIGNALS_PRELOAD_SNIPPET = (
     'import sys, pytest; '
     'P=type("P",(),{"pytest_collection":lambda self: '
@@ -480,6 +489,21 @@ def _maybe_generate_shard_rsa_keys(root: Path, env: dict[str, str]) -> None:
         env.setdefault("SANDBOX_JWT_PRIVATE_KEY", key)
 
 
+def _args_may_collect(args: Sequence[str], file_path: str) -> bool:
+    """Return True if pytest operands may collect `file_path` (directly, via an ancestor dir, or whole-suite)."""
+    operands = [a for a in args if not a.startswith("-")]
+    if not operands:
+        return True
+    target = Path(file_path)
+    for op in operands:
+        base = op.split("::", 1)[0].rstrip("/")
+        if not base or base == "." or base == file_path:
+            return True
+        if not base.endswith(".py") and (target == Path(base) or Path(base) in target.parents):
+            return True
+    return False
+
+
 def build_pytest_command(
     run: PlannedRun,
     *,
@@ -491,7 +515,12 @@ def build_pytest_command(
     base = [python_exe, "showcase/scripts/backend_runtime.py", "exec", "uv", "run", "--no-sync"]
     tail = [*plugins, *left_out, "-o", "pythonhashseed=0", *reuse_db_arg, *run.args]
     if run.directory == ".":
-        return [*base, "python", "-m", "pytest", *tail]
+        deselects = [
+            f"--deselect={node_id}"
+            for file_path, node_id in CORE_CASE_DESELECTS
+            if _args_may_collect(run.args, file_path)
+        ]
+        return [*base, "python", "-m", "pytest", *deselects, *tail]
     if run.group == "signals":
         return [*base, "--directory", run.directory, "python", "-c", SIGNALS_PRELOAD_SNIPPET, *tail]
     return [*base, "--directory", run.directory, "pytest", *tail]

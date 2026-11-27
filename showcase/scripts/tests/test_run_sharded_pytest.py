@@ -233,6 +233,40 @@ class ShardExecutionAndExitCodesTest(unittest.TestCase):
             self.assertEqual(env["CLICKHOUSE_DATABASE"], "posthog_test_base_test_3")
             self.assertEqual(env["PYTEST_XDIST_WORKER"], "base_test_3")
 
+    def test_core_case_deselect_only_when_markdown_safety_targeted(self) -> None:
+        node_id = (
+            "--deselect=posthog/helpers/test_markdown_safety.py::"
+            "TestStripExternalLinks::test_non_posthog_urls_defanged_9_leading_bracket_run"
+        )
+        targeted = rsp.build_pytest_command(
+            rsp.PlannedRun("core", ".", ["posthog/helpers/test_markdown_safety.py"]),
+            plugins=[],
+            left_out=[],
+            reuse_db_arg=[],
+        )
+        self.assertIn(node_id, targeted)
+        other = rsp.build_pytest_command(
+            rsp.PlannedRun("core", ".", ["posthog/api/test/test_user.py"]),
+            plugins=[],
+            left_out=[],
+            reuse_db_arg=[],
+        )
+        self.assertNotIn(node_id, other)
+        mixed_dir_and_file = rsp.build_pytest_command(
+            rsp.PlannedRun("core", ".", ["posthog/helpers", "ee/clickhouse/test/test_error.py"]),
+            plugins=[],
+            left_out=[],
+            reuse_db_arg=[],
+        )
+        self.assertIn(node_id, mixed_dir_and_file)
+        whole_suite = rsp.build_pytest_command(
+            rsp.PlannedRun("core", ".", []),
+            plugins=[],
+            left_out=[],
+            reuse_db_arg=[],
+        )
+        self.assertIn(node_id, whole_suite)
+
 
 if __name__ == "__main__":
     unittest.main()
